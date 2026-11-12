@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime Hub Cinema - Web de Streaming & Capítulos</title>
+    <meta name="theme-color" content="#0a0d14">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- Background Ambient Glow -->
+    <div class="glow-bg-top"></div>
+    <div class="glow-bg-bottom"></div>
+
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i class="fa-solid fa-play"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="brand-title">ANIME HUB</span>
+                    <span class="brand-tag">CINEMA STREAMING</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="streaming">
+                    <i class="fa-solid fa-play"></i>
+                    <span>Mi Streaming Web</span>
+                </button>
+                <button class="nav-item" data-tab="catalog">
+                    <i class="fa-solid fa-compass"></i>
+                    <span>Catálogo Online</span>
+                </button>
+                <button class="nav-item" data-tab="downloads">
+                    <i class="fa-solid fa-cloud-arrow-down"></i>
+                    <span>Descargas</span>
+                </button>
+                <button class="nav-item" data-tab="sync">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                    <span>Sincronizador</span>
+                </button>
+            </nav>
+
+            <div class="hdd-status-card" id="hdd-status-box">
+                <div class="hdd-icon">
+                    <i class="fa-solid fa-hard-drive"></i>
+                </div>
+                <div class="hdd-info">
+                    <span class="hdd-label">Disco Externo HDD</span>
+                    <span class="hdd-state" id="hdd-state-text">Conectado (E:\)</span>
+                </div>
+                <div class="hdd-indicator online" id="hdd-indicator"></div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-wrapper">
+            <!-- ==================== TAB 0: MI STREAMING WEB (LOCAL HDD) ==================== -->
+            <section id="tab-streaming" class="tab-pane active">
+                <!-- Search & Filters Header -->
+                <div class="streaming-header-row">
+                    <div class="streaming-search-wrapper">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="local-search-input" placeholder="Buscar en mi colección (ej. DxD, Shinmai, Reviewers, Frieren...)" autocomplete="off">
+                        <button type="button" id="local-clear-btn" class="clear-btn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="streaming-actions-group">
+                        <button id="btn-refresh-library" class="refresh-pill-btn" title="Escanear y sincronizar biblioteca en tiempo real">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                            <span>Sincronizar</span>
+                        </button>
+                        <div class="streaming-sort-wrapper">
+                            <label for="local-sort-select"><i class="fa-solid fa-arrow-down-short-wide"></i> Ordenar:</label>
+                            <select id="local-sort-select" class="custom-select">
+                                <option value="name_asc">Nombre (A - Z)</option>
+                                <option value="eps_desc">Más Episodios</option>
+                                <option value="rating_desc">Mejor Calificación</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Filter Pills -->
+                <div class="category-pills-bar">
+                    <button class="cat-pill active" data-cat="all">
+                        <i class="fa-solid fa-layer-group"></i> Todos (<span id="cat-count-all">0</span>)
+                    </button>
+                    <button class="cat-pill pill-heavy" data-cat="heavy_ecchi">
+                        <i class="fa-solid fa-fire"></i> Heavy Ecchi BD (<span id="cat-count-heavy">0</span>)
+                    </button>
+                    <button class="cat-pill pill-erotico" data-cat="erotico">
+                        <i class="fa-solid fa-ban"></i> Erótico Sin Censura (<span id="cat-count-erotico">0</span>)
+                    </button>
+                    <button class="cat-pill pill-festa" data-cat="animefesta">
+                        <i class="fa-solid fa-heart"></i> Miniseries Adultas (<span id="cat-count-festa">0</span>)
+                    </button>
+                    <button class="cat-pill pill-hentai" data-cat="hentai">
+                        <i class="fa-solid fa-fire-flame-curved"></i> Hentai (<span id="cat-count-hentai">0</span>)
+                    </button>
+                    <button class="cat-pill pill-general" data-cat="general">
+                        <i class="fa-solid fa-tv"></i> Colección General (<span id="cat-count-general">0</span>)
+                    </button>
+                </div>
+
+                <!-- Featured Hero Banner (Local Anime) -->
+                <div id="local-hero-banner" class="local-hero-banner" style="display: none;">
+                    <div class="local-hero-backdrop" id="local-hero-bg"></div>
+                    <div class="local-hero-content">
+                        <div class="local-hero-tags">
+                            <span class="hero-badge badge-glow" id="local-hero-cat">HEAVY ECCHI BD</span>
+                            <span class="hero-quality-badge"><i class="fa-solid fa-shield-halved"></i> SIN CENSURA</span>
+                        </div>
+                        <h1 id="local-hero-title" class="local-hero-title">High School DxD</h1>
+                        <p id="local-hero-plot" class="local-hero-plot">Cargando sinopsis...</p>
+                        <div class="local-hero-actions">
+                            <button id="local-hero-play-btn" class="btn-action btn-glow">
+                                <i class="fa-solid fa-play"></i>
+                                <span>Ver Serie & Capítulos</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shelf: Continuar Viendo -->
+                <div id="continue-watching-section" class="streaming-section" style="display: none;">
+                    <div class="section-header-row">
+                        <h2 class="section-title"><i class="fa-solid fa-clock-rotate-left" style="color: var(--accent-cyan);"></i> Continuar Viendo</h2>
+                    </div>
+                    <div id="continue-watching-grid" class="continue-watching-grid"></div>
+                </div>
+
+                <!-- Grid Principal de Series Locales -->
+                <div class="streaming-section">
+                    <div class="section-header-row">
+                        <h2 class="section-title" id="series-grid-heading">
+                            <i class="fa-solid fa-film" style="color: var(--primary);"></i> Biblioteca de Series (<span id="visible-series-count">0</span>)
+                        </h2>
+                    </div>
+                    <div id="local-series-grid" class="series-grid">
+                        <div class="skeleton-card"></div>
+                        <div class="skeleton-card"></div>
+                        <div class="skeleton-card"></div>
+                        <div class="skeleton-card"></div>
+                        <div class="skeleton-card"></div>
+                        <div class="skeleton-card"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 1: CATÁLOGO ONLINE & EXTERNO ==================== -->
+            <section id="tab-catalog" class="tab-pane">
+                <div class="catalog-search-bar">
+                    <div class="search-input-wrapper">
+                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                        <input type="text" id="catalog-search-input" placeholder="Buscar anime en línea (ej. Mushoku Tensei, Bleach, Frieren...)" autocomplete="off">
+                        <button type="button" id="catalog-clear-btn" class="clear-btn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+
+                <div id="search-results-section" style="display: none; margin-bottom: 2rem;">
+                    <h2 class="section-title"><i class="fa-solid fa-magnifying-glass"></i> Resultados de Búsqueda Online</h2>
+                    <div id="search-results-grid" class="anime-grid"></div>
+                </div>
+
+                <div class="catalog-section">
+                    <div class="section-header-row">
+                        <h2 class="section-title"><i class="fa-solid fa-fire" style="color:#ff477e;"></i> En Tendencia Online</h2>
+                    </div>
+                    <div id="carousel-trending" class="horizontal-carousel"></div>
+                </div>
+
+                <div class="catalog-section">
+                    <div class="section-header-row">
+                        <h2 class="section-title"><i class="fa-solid fa-tower-broadcast" style="color:#38ef7d;"></i> En Emisión Esta Temporada</h2>
+                    </div>
+                    <div id="carousel-releasing" class="horizontal-carousel"></div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 2: CENTRO DE DESCARGAS ==================== -->
+            <section id="tab-downloads" class="tab-pane">
+                <div class="section-header">
+                    <h1 class="page-title">Centro de Descargas</h1>
+                    <p class="page-subtitle">Descarga temporadas completas organizadas automáticamente en 1080p en tu disco duro.</p>
+                </div>
+
+                <div class="card search-card">
+                    <form id="download-form" class="search-form">
+                        <div class="search-input-wrapper">
+                            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                            <input type="text" id="anime-name" placeholder="Nombre del anime a descargar (ej. Overlord, Chainsaw Man...)" required autocomplete="off">
+                            <button type="button" id="clear-input-btn" class="clear-btn" title="Limpiar"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <button type="submit" class="btn-action btn-glow">
+                            <i class="fa-solid fa-circle-down"></i>
+                            <span>Descargar</span>
+                        </button>
+                    </form>
+                </div>
+
+                <div id="download-monitor" class="card monitor-card" style="display: none;">
+                    <div class="monitor-top">
+                        <div class="monitor-status">
+                            <span class="pulse-dot"></span>
+                            <span id="status-message" class="monitor-title">Inactivo</span>
+                        </div>
+                        <div class="monitor-metrics">
+                            <span id="status-speed" class="badge badge-speed"><i class="fa-solid fa-gauge-high"></i> -- MB/s</span>
+                            <button id="cancel-btn" class="btn-cancel" title="Cancelar"><i class="fa-solid fa-stop"></i> Cancelar</button>
+                        </div>
+                    </div>
+                    <div class="progress-track">
+                        <div id="progress-bar-fill" class="progress-fill" style="width: 0%;"></div>
+                    </div>
+                    <div class="monitor-bottom">
+                        <span class="status-detail" id="status-detail">Motor de descarga activo</span>
+                        <span class="status-pct" id="status-percent">0%</span>
+                    </div>
+                </div>
+
+                <div id="queue-container" class="card queue-card" style="display: none;">
+                    <div class="card-header">
+                        <h2 class="card-title"><i class="fa-solid fa-layer-group"></i> Cola de Descargas</h2>
+                        <span id="queue-count" class="badge badge-count">0</span>
+                    </div>
+                    <ul id="queue-list" class="queue-list"></ul>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 3: SINCRONIZADOR ==================== -->
+            <section id="tab-sync" class="tab-pane">
+                <div class="section-header">
+                    <h1 class="page-title">Sincronizador de Cronología</h1>
+                    <p class="page-subtitle">Actualiza la cronología y metadatos de tus animes desde AniList y MyAnimeList.</p>
+                </div>
+                <div class="card sync-card">
+                    <form id="sync-form" class="sync-form">
+                        <div class="search-input-wrapper">
+                            <i class="fa-solid fa-network-wired search-icon"></i>
+                            <input type="text" id="sync-anime-name" placeholder="Nombre de la franquicia a sincronizar..." required>
+                        </div>
+                        <button type="submit" class="btn-action">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                            <span>Sincronizar</span>
+                        </button>
+                    </form>
+                    <div id="sync-result" class="sync-result-box" style="display: none;"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ==================== PÁGINA DEDICADA DE LA SERIE (MODAL / FULL-PAGE VIEW) ==================== -->
+    <div id="series-page-modal" class="modal-backdrop series-page-backdrop" style="display: none;">
+        <div class="series-page-container">
+            <!-- Botón Volver / Cerrar -->
+            <button class="series-back-btn" onclick="closeSeriesPage()">
+                <i class="fa-solid fa-arrow-left"></i> Volver a la Biblioteca
+            </button>
+
+            <!-- Cinematic Hero Header -->
+            <div class="series-hero-header">
+                <div id="series-backdrop-img" class="series-backdrop-img"></div>
+                <div class="series-backdrop-overlay"></div>
+                
+                <div class="series-hero-inner">
+                    <div class="series-poster-box">
+                        <img id="series-cover-img" src="" alt="Poster" class="series-cover-img" onerror="this.src='/static/icon-512.png'">
+                        <span id="series-badge-uncut" class="badge-overlay-uncut"><i class="fa-solid fa-shield-halved"></i> SIN CENSURA</span>
+                    </div>
+                    <div class="series-info-box">
+                        <div class="series-tags-row" id="series-tags-row"></div>
+                        <h1 id="series-title" class="series-title">Cargando Serie...</h1>
+                        <h3 id="series-orig-title" class="series-orig-title"></h3>
+
+                        <div class="series-metrics-row">
+                            <span class="series-metric" id="series-rating"><i class="fa-solid fa-star" style="color:#ffd166;"></i> --</span>
+                            <span class="series-metric" id="series-year"><i class="fa-regular fa-calendar"></i> --</span>
+                            <span class="series-metric" id="series-studio"><i class="fa-solid fa-building"></i> --</span>
+                            <span class="series-metric-badge" id="series-quality">1080p Blu-ray Master</span>
+                        </div>
+
+                        <p id="series-plot" class="series-plot">Cargando sinopsis oficial...</p>
+
+                        <div class="series-cta-row">
+                            <button id="series-primary-play-btn" class="btn-action btn-glow btn-lg">
+                                <i class="fa-solid fa-play"></i>
+                                <span id="series-play-btn-text">Reproducir Capítulo 1</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Selector de Temporadas (Tabs Estilo Web) -->
+            <div class="series-content-body">
+                <div class="seasons-tab-header">
+                    <span class="seasons-label"><i class="fa-solid fa-layer-group"></i> TEMPORADAS & ARCOS:</span>
+                    <div id="seasons-tab-chips" class="seasons-tab-chips"></div>
+                </div>
+
+                <!-- Grid de Capítulos (Presentados como Páginas Web de Streaming) -->
+                <div class="episodes-container">
+                    <div class="episodes-section-header">
+                        <h3 class="episodes-heading">
+                            <i class="fa-solid fa-tv"></i> Capítulos Disponibles (<span id="episodes-count-text">0</span>)
+                        </h3>
+                        <span class="episodes-sub-text">Selecciona cualquier capítulo para reproducirlo directamente en alta fidelidad.</span>
+                    </div>
+
+                    <div id="local-episodes-grid" class="local-episodes-grid">
+                        <!-- Inyectado por JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== REPRODUCTOR CINEMATOGRÁFICO NATIVO HTML5 ==================== -->
+    <div id="cinema-player-modal" class="modal-backdrop cinema-modal-backdrop" style="display: none;">
+        <div class="cinema-player-box">
+            <!-- Barra Superior del Reproductor -->
+            <div class="cinema-topbar">
+                <div class="cinema-topbar-left">
+                    <button class="cinema-btn cinema-btn-back" onclick="closeCinemaPlayer()">
+                        <i class="fa-solid fa-arrow-left"></i> Volver a la Serie
+                    </button>
+                    <div class="cinema-titles">
+                        <span id="cinema-anime-title" class="cinema-title-main">Anime</span>
+                        <span id="cinema-ep-title" class="cinema-title-sub">Temporada 1 - Capítulo 01</span>
+                    </div>
+                </div>
+                <div class="cinema-topbar-right">
+                    <button class="cinema-btn cinema-btn-drawer" onclick="toggleChapterDrawer()" title="Lista de Capítulos">
+                        <i class="fa-solid fa-list-ul"></i> <span>Capítulos</span>
+                    </button>
+                    <button class="cinema-btn" onclick="toggleFullscreenPlayer()" title="Pantalla Completa (F)">
+                        <i class="fa-solid fa-expand"></i>
+                    </button>
+                    <button class="cinema-btn cinema-btn-close" onclick="closeCinemaPlayer()" title="Cerrar Reproductor (Esc)">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Área de Video Nativo con HTTP Range Streaming -->
+            <div class="cinema-viewport">
+                <video id="cinema-video" class="cinema-video-element" controls preload="metadata" playsinline>
+                    Tu navegador no soporta reproducción de video HTML5.
+                </video>
+                <div id="cinema-osd" class="cinema-osd" style="display: none;"></div>
+
+                <!-- Next Episode Countdown Overlay -->
+                <div id="cinema-next-overlay" class="cinema-next-overlay" style="display: none;">
+                    <div class="next-overlay-card">
+                        <div class="next-overlay-header">
+                            <span class="next-overlay-tag"><i class="fa-solid fa-forward-step"></i> SIGUIENTE CAPÍTULO</span>
+                            <button class="next-overlay-close-btn" onclick="cancelNextCountdown()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <h3 id="next-overlay-title" class="next-overlay-title">Capítulo 02</h3>
+                        <p class="next-overlay-timer">El siguiente capítulo comenzará en <strong id="next-timer-seconds">5</strong> segundos...</p>
+                        <div class="next-overlay-actions">
+                            <button class="btn-action btn-glow" onclick="playNextEpisodeImmediately()">
+                                <i class="fa-solid fa-play"></i> Reproducir Ahora
+                            </button>
+                            <button class="btn-cancel" onclick="cancelNextCountdown()">
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Video Playback Error Overlay -->
+                <div id="cinema-error-overlay" class="cinema-error-overlay" style="display: none;">
+                    <div class="error-overlay-card">
+                        <i class="fa-solid fa-triangle-exclamation error-icon"></i>
+                        <h3 class="error-title">No se pudo reproducir el video</h3>
+                        <p id="cinema-error-msg" class="error-desc">El formato o códec puede no ser compatible directamente con tu navegador.</p>
+                        <div class="error-actions">
+                            <button class="btn-action btn-glow" onclick="retryCinemaPlayback()">
+                                <i class="fa-solid fa-rotate-right"></i> Reintentar
+                            </button>
+                            <a id="cinema-error-direct-link" href="#" target="_blank" class="btn-cancel" style="text-decoration:none;">
+                                <i class="fa-solid fa-arrow-up-right-from-square"></i> Abrir en Reproductor Externo
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Barra Inferior de Navegación Rápida Flotante -->
+            <div class="cinema-bottombar">
+                <div class="cinema-nav-buttons">
+                    <button id="cinema-btn-prev" class="cinema-nav-btn" onclick="playPreviousEpisode()">
+                        <i class="fa-solid fa-backward-step"></i> Capítulo Anterior
+                    </button>
+                    <button id="cinema-btn-next" class="cinema-nav-btn cinema-nav-btn-primary" onclick="playNextEpisode()">
+                        Siguiente Capítulo <i class="fa-solid fa-forward-step"></i>
+                    </button>
+                </div>
+                <div class="cinema-shortcuts-hint">
+                    <span><kbd>Espacio</kbd> Pausar/Reanudar</span>
+                    <span><kbd>→</kbd> <kbd>←</kbd> ±10s</span>
+                    <span><kbd>F</kbd> Pantalla Completa</span>
+                    <span><kbd>N</kbd> Siguiente</span>
+                </div>
+            </div>
+
+            <!-- Cajón Lateral de Capítulos (Chapter Drawer) -->
+            <div id="cinema-chapter-drawer" class="cinema-drawer" style="display: none;">
+                <div class="drawer-header">
+                    <h3><i class="fa-solid fa-list-ul"></i> Lista de Capítulos</h3>
+                    <button class="drawer-close-btn" onclick="toggleChapterDrawer()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="drawer-episodes-list" class="drawer-episodes-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== MODAL DE ANIME ONLINE (CATÁLOGO / BÚSQUEDA) ==================== -->
+    <div id="online-anime-modal" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close-btn" onclick="closeOnlineAnimeModal()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="anime-detail-header">
+                <img id="online-modal-cover" class="modal-cover-img" src="" alt="Cover" onerror="this.src='/static/icon-512.png'">
+                <div class="modal-header-info">
+                    <h2 id="online-modal-title" class="modal-title">Título del Anime</h2>
+                    <h4 id="online-modal-sub" class="modal-sub-title">Título en Romaji</h4>
+                    <div class="modal-badges" id="online-modal-badges"></div>
+                    <p id="online-modal-desc" class="modal-description"></p>
+                    <div style="display: flex; gap: 0.85rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                        <button id="online-modal-download-btn" class="btn-action btn-glow">
+                            <i class="fa-solid fa-circle-down"></i>
+                            <span>Descargar en Mi Biblioteca</span>
+                        </button>
+                        <button id="online-modal-search-local-btn" class="btn-secondary">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <span>Buscar en Mi Colección</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/app.js?v=6"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+system:
+  log_level: "INFO"
+  workers: 1
+
+paths:
+  input: "C:/Users/gonza/OneDrive/Escritorio/Para_Organizar"
+  library: "E:/OTAKU/ANIME"
+  quarantine: "C:/Users/gonza/OneDrive/Escritorio/Para_Organizar/Revision_Manual"
+
+analyzer:
+  ai_provider: "gemini"
+  api_key_env_var: "ANIME_AI_API_KEY"
+  local_model: "gemma2:9b"
+  confidence_threshold: 0.0
+
+organizer:
+  folder_template: "{anime_title}/Season {season:02d}"
+  file_template: "{anime_title} - Episodio {episode:04d}{extension}"
+  allowed_extensions: [".mkv", ".mp4", ".avi", ".ass", ".srt"]

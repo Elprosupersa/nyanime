@@ -1,0 +1,151 @@
+{
+  "version": "1.0.0",
+  "generado_el": "2026-10-09T22:19:00",
+  "estado": "PREPARADO_PARA_DESCARGA (EN ESPERA DE CONFIRMACIÓN)",
+  "proveedores_activos": [
+    "FukouDaDirectScraper",
+    "TioAnimeScraper",
+    "AZAnimexScraper",
+    "JKAnimeScraper",
+    "UnionFansubScraper",
+    "HenaoJaraScraper",
+    "FukouDaScraper",
+    "AnimeJaraScraper"
+  ],
+  "lotes": [
+    {
+      "lote_id": "LOTE_1_HUECOS_CRITICOS",
+      "descripcion": "Episodios faltantes en temporadas que ya tienes iniciadas en disco",
+      "series": [
+        {
+          "nombre": "Kimetsu no Yaiba",
+          "carpeta_destino": "E:/Anime/Kimetsu no Yaiba",
+          "items": [
+            {
+              "temporada": "Temporada 1",
+              "episodios_faltantes": [2, 4, 8, 9, 10, 11, 12, 14, 15, 17, 18, 19, 21, 22, 23, 24],
+              "total_faltantes": 16,
+              "aliases": ["Kimetsu no Yaiba", "Demon Slayer"]
+            },
+            {
+              "temporada": "Mugen Ressha-hen",
+              "episodios_faltantes": [7],
+              "total_faltantes": 1,
+              "aliases": ["Kimetsu no Yaiba: Mugen Ressha-hen Arc TV", "Demon Slayer Mugen Train TV"]
+            },
+            {
+              "temporada": "Hashira Geiko-hen",
+              "episodios_faltantes": [1, 2, 4, 6, 7, 8],
+              "total_faltantes": 6,
+              "aliases": ["Kimetsu no Yaiba: Hashira Geiko-hen", "Demon Slayer Hashira Training Arc"]
+            }
+          ]
+        },
+        {
+          "nombre": "Dr. Stone",
+          "carpeta_destino": "E:/Anime/Dr. Stone",
+          "items": [
+            {
+              "temporada": "Temporada 1",
+              "episodios_faltantes": [6, 8, 14, 23],
+              "total_faltantes": 4,
+              "aliases": ["Dr. Stone", "Dr Stone"]
+            },
+            {
+              "temporada": "Ryusui",
+              "episodios_faltantes": [1],
+              "total_faltantes": 1,
+              "aliases": ["Dr. Stone: Ryusui", "Dr Stone Ryusui Special"]
+            }
+          ]
+        },
+        {
+          "nombre": "One Punch Man",
+          "carpeta_destino": "E:/Anime/One Punch Man",
+          "items": [
+            {
+              "temporada": "Temporada 1",
+              "episodios_faltantes": [1, 3, 4, 7, 8, 9],
+              "total_faltantes": 6,
+              "aliases": ["One Punch Man", "One-Punch Man"]
+            }
+          ]
+        },
+        {
+          "nombre": "Solo Leveling",
+          "carpeta_destino": "E:/Anime/Solo Leveling",
+          "items": [
+            {
+              "temporada": "Temporada 2",
+              "episodios_faltantes": [5, 8, 11],
+              "total_faltantes": 3,
+              "aliases": ["Solo Leveling Season 2", "Ore dake Level Up na Ken: Arise from the Shadow"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "lote_id": "LOTE_2_TEMPORADAS_COMPLETAS",
+      "descripcion": "Temporadas canónicas pendientes de sagas reconocidas",
+      "series": [
+        {
+          "nombre": "Zero no Tsukaima",
+          "carpeta_destino": "E:/Anime/Zero no Tsukaima",
+          "items": [
+            {
+              "temporada": "Temporada 2",
+              "nombre_arco": "Futatsuki no Kishi",
+              "episodios": 12,
+              "aliases": ["Zero no Tsukaima: Futatsuki no Kishi", "The Familiar of Zero Knight of the Twin Moons"]
+            },
+            {
+              "temporada": "Temporada 3",
+              "nombre_arco": "Princesses no Rondo",
+              "episodios": 12,
+              "aliases": ["Zero no Tsukaima: Princesses no Rondo", "The Familiar of Zero Rondo of Princesses"]
+            },
+            {
+              "temporada": "Temporada 4",
+              "nombre_arco": "Zero no Tsukaima F",
+              "episodios": 12,
+              "aliases": ["Zero no Tsukaima F", "The Familiar of Zero F"]
+            }
+          ]
+        },
+        {
+          "nombre": "Kaguya-sama wa Kokurasetai",
+          "carpeta_destino": "E:/Anime/Kaguya-sama wa Kokurasetai",
+          "items": [
+            {
+              "temporada": "Temporada 2",
+              "episodios": 12,
+              "aliases": ["Kaguya-sama wa Kokurasetai?", "Kaguya-sama Season 2"]
+            },
+            {
+              "temporada": "Temporada 3",
+              "episodios": 13,
+              "aliases": ["Kaguya-sama wa Kokurasetai: Ultra Romantic", "Kaguya-sama Season 3"]
+            },
+            {
+              "temporada": "Películas",
+              "episodios": 1,
+              "aliases": ["Kaguya-sama wa Kokurasetai: First Kiss wa Owaranai", "Kaguya-sama The Movie"]
+            }
+          ]
+        },
+        {
+          "nombre": "Bleach",
+          "carpeta_destino": "E:/Anime/Bleach",
+          "items": [
+            {
+              "temporada": "Sennen Kessen-hen - Soukoku-tan",
+              "episodios": 13,
+              "aliases": ["Bleach: Thousand-Year Blood War - The Conflict", "Bleach Sennen Kessen-hen Soukoku-tan"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

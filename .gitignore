@@ -1,0 +1,84 @@
+# ==========================================
+# NyAnime TV - Git Ignore Configuration
+# ==========================================
+
+# Prompts & AI Agent Logs (Excluidos expresamente)
+*prompt*
+*Prompt*
+ORIGINAL_REQUEST.md
+temp_search_ctx.txt
+CHECKPOINT_PROGRESO.md
+.agents/
+scratch/
+test_tbate_investigation.py
+
+# Credenciales y Variables de Entorno
+.env
+.env*.local
+*.key
+*.pem
+*.keystore
+*.jks
+
+# Binarios Grandes, APKs y Multimedia
+*.apk
+*.aab
+*.unknown_video
+*.mp4
+*.mkv
+*.avi
+*.torrent
+versiones_apk/
+torrents_manhwa/
+backend/src/api/static/*.apk
+backend/src/api/static/AnimeHub_*.apk
+backend/src/api/static/AnimeOrganizer.apk
+backend/src/api/static/NyAnime_TV.apk
+
+# Bases de Datos y Caches Locales del Sistema
+*.db
+*.sqlite
+*.sqlite3
+tracker.db
+anime_tracking.db
+hentai_queue.json
+adult_folders.txt
+transfer_hentai_curated.ps1
+catalog_h_top150.json
+collection_cache.json
+status.json
+watch_progress.json
+live_hdd_audit.json
+hdd_audit_report.json
+master_incomplete_audit.json
+scratch_queue_analysis.json
+purged_restored_metadata.json
+audit_general_anime.json
+nyaa_batch2_results.json
+.collection_updated
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+
+# Android / Gradle / Kotlin
+**/.gradle/
+**/local.properties
+**/app/debug/
+**/app/release/
+**/app/profile/
+
+# Node & Python
+**/node_modules/
+**/__pycache__/
+*.py[cod]
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

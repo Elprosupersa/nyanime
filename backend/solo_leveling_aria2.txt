@@ -1,0 +1,18 @@
+https://archive.org/download/chapter-24_20240331/Chapter%2025.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 025.pdf
+https://archive.org/download/chapter-24_20240331/Chapter%2029.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 029.pdf
+https://archive.org/download/chapter-24_20240331/Chapter%2032.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 032.pdf
+https://archive.org/download/chapter-51_20240331/Chapter%2057.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 057.pdf
+https://archive.org/download/chapter-69_202404/Chapter%2067.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 067.pdf
+https://archive.org/download/chapter-111/Chapter%20104.pdf
+  dir=E:\OTAKU\MANHWAS\General\Solo Leveling
+  out=Capitulo 104.pdf

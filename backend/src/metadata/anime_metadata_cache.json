@@ -1,0 +1,1303 @@
+{
+  "anime_189046": {
+    "_cached_at": 1787671366.7115653,
+    "status": "RELEASING",
+    "data": {
+      "id": 189046,
+      "title_romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
+      "title_english": "Re:ZERO -Starting Life in Another World- Season 4",
+      "cover_image": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx189046-yaHWtS5FII46.jpg",
+      "banner_image": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/189046-MDk2CaVuRWpb.jpg",
+      "description": "The fourth season of <i>Re:Zero kara Hajimeru Isekai Seikatsu</i>.<br><br>\n\nTo save his stricken allies, Subaru faces a deadly desert to find the Sage at Pleiades Watchtower.<br><br>\n\n(Source: Crunchyroll News)\n\n<br><br>\n<i>Note: Lucca Comics & Games pre-screened episode 1 early on November 1, 2025, prior to the Japanese television broadcast on July 8th, 2026.",
+      "genres": [
+        "Action",
+        "Adventure",
+        "Drama",
+        "Fantasy",
+        "Psychological",
+        "Romance",
+        "Thriller"
+      ],
+      "year": 2026,
+      "status": "RELEASING",
+      "total_seasons": 1,
+      "seasons": [
+        {
+          "season_number": 1,
+          "title": "Re:Zero kara Hajimeru Isekai Seikatsu 4th Season",
+          "format": "TV",
+          "total_episodes": 13,
+          "episodes": [
+            {
+              "id": "189046_s1_e1",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 1,
+              "title": "The Reason I`m Taking You with Me / Gorgeous Tiger Reloaded",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714303/screencap/69ce986703421.jpg",
+              "is_available": true,
+              "air_date": "2026-04-08",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e2",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 2,
+              "title": "Overcome Sand Time",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714304/screencap/69de2dd7e15fe.jpg",
+              "is_available": true,
+              "air_date": "2026-04-15",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e3",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 3,
+              "title": "The Keeper of the Watchtower",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714305/screencap/69e73f0ab6960.jpg",
+              "is_available": true,
+              "air_date": "2026-04-22",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e4",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 4,
+              "title": "A White Sky Asterism",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714306/screencap/69f07ae9f0ee7.jpg",
+              "is_available": true,
+              "air_date": "2026-04-29",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e5",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 5,
+              "title": "Stick Swinger",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714307/screencap/69f9b7986175c.jpg",
+              "is_available": true,
+              "air_date": "2026-05-06",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e6",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 6,
+              "title": "Julius Juukulius",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714308/screencap/6a02f54cd3ed0.jpg",
+              "is_available": true,
+              "air_date": "2026-05-13",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e7",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 7,
+              "title": "Walking out of the Convenience Store and into a Wondrous World",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714309/screencap/6a0adb4a9c87a.jpg",
+              "is_available": true,
+              "air_date": "2026-05-20",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e8",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 8,
+              "title": "Who Are You?",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714310/screencap/6a1563be309a9.jpg",
+              "is_available": true,
+              "air_date": "2026-05-27",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e9",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 9,
+              "title": "Empty Shell",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714311/screencap/6a1e9ff881e50.jpg",
+              "is_available": true,
+              "air_date": "2026-06-03",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e10",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 10,
+              "title": "Murder Is a Habit",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714312/screencap/6a27d76746609.jpg",
+              "is_available": true,
+              "air_date": "2026-06-10",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e11",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 11,
+              "title": "Re:Zero - Starting Life in Another World",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714313/screencap/6a311711a7cfd.jpg",
+              "is_available": true,
+              "air_date": "2026-06-17",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e12",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 12,
+              "title": "From Now On",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714314/screencap/6a735b7f999d0.jpg",
+              "is_available": true,
+              "air_date": "2026-08-12",
+              "sources": []
+            },
+            {
+              "id": "189046_s1_e13",
+              "anime_id": 189046,
+              "season_number": 1,
+              "episode_number": 13,
+              "title": "Stand Up",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/11714315/screencap/6a84210a7e528.jpg",
+              "is_available": true,
+              "air_date": "2026-08-19",
+              "sources": []
+            }
+          ]
+        }
+      ],
+      "real_total_episodes": 13
+    }
+  },
+  "anime_113415": {
+    "_cached_at": 1787671428.7345686,
+    "status": "FINISHED",
+    "data": {
+      "id": 113415,
+      "title_romaji": "Jujutsu Kaisen",
+      "title_english": "JUJUTSU KAISEN",
+      "cover_image": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-LHBAeoZDIsnF.jpg",
+      "banner_image": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/113415-jQBSkxWAAk83.jpg",
+      "description": "A boy fights... for \"the right death.\"<br>\n<br>\nHardship, regret, shame: the negative feelings that humans feel become Curses that lurk in our everyday lives. The Curses run rampant throughout the world, capable of leading people to terrible misfortune and even death. What's more, the Curses can only be exorcised by another Curse.<br>\n<br>\nItadori Yuji is a boy with tremendous physical strength, though he lives a completely ordinary high school life. One day, to save a friend who has been attacked by Curses, he eats the finger of the Double-Faced Specter, taking the Curse into his own soul. From then on, he shares one body with the Double-Faced Specter. Guided by the most powerful of sorcerers, Gojou Satoru, Itadori is admitted to the Tokyo Metropolitan Technical High School of Sorcery, an organization that fights the Curses... and thus begins the heroic tale of a boy who became a Curse to exorcise a Curse, a life from which he could never turn back.\n<br><br>\n(Source: Crunchyroll)<br>\n<br>\n<i>Note: The first episode received an early web premiere on September 19th, 2020. The regular TV broadcast started on October 3rd, 2020.</i>",
+      "genres": [
+        "Action",
+        "Drama",
+        "Supernatural"
+      ],
+      "year": 2020,
+      "status": "FINISHED",
+      "total_seasons": 2,
+      "seasons": [
+        {
+          "season_number": 1,
+          "title": "Jujutsu Kaisen",
+          "format": "TV",
+          "total_episodes": 24,
+          "episodes": [
+            {
+              "id": "113415_s1_e1",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 1,
+              "title": "Ryoumen Sukuna",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5f72c5c9dddf4.jpg",
+              "is_available": true,
+              "air_date": "2020-09-19",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e2",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 2,
+              "title": "For Myself",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5f7b41f65db83.jpg",
+              "is_available": true,
+              "air_date": "2020-10-10",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e3",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 3,
+              "title": "Girl of Steel",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5f86fc9224f58.jpg",
+              "is_available": true,
+              "air_date": "2020-10-17",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e4",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 4,
+              "title": "Curse Womb Must Die",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5f91fb1ddc6d6.jpg",
+              "is_available": true,
+              "air_date": "2020-10-24",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e5",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 5,
+              "title": "Curse Womb Must Die II",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5f99a5f87a1ad.jpg",
+              "is_available": true,
+              "air_date": "2020-10-31",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e6",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 6,
+              "title": "After Rain",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fa45daa51da3.jpg",
+              "is_available": true,
+              "air_date": "2020-11-07",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e7",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 7,
+              "title": "Assault",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5faa486646e8a.jpg",
+              "is_available": true,
+              "air_date": "2020-11-14",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e8",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 8,
+              "title": "Boredom",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fb3a81de91f0.jpg",
+              "is_available": true,
+              "air_date": "2020-11-21",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e9",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 9,
+              "title": "Small Fry and Reverse Retribution",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fbdb3b779977.jpg",
+              "is_available": true,
+              "air_date": "2020-11-28",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e10",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 10,
+              "title": "Idle Transfiguration",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fc8f0c0ce16b.jpg",
+              "is_available": true,
+              "air_date": "2020-12-05",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e11",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 11,
+              "title": "Narrow-minded",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fd0c61684352.jpg",
+              "is_available": true,
+              "air_date": "2020-12-12",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e12",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 12,
+              "title": "To You, Someday",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fdb47bda7979.jpg",
+              "is_available": true,
+              "air_date": "2020-12-19",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e13",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 13,
+              "title": "Tomorrow",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/5fe5e2fd95dda.jpg",
+              "is_available": true,
+              "air_date": "2020-12-26",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e14",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 14,
+              "title": "Kyoto Sister School Exchange Event: Group Battle 0",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/600181cfc3b53.jpg",
+              "is_available": true,
+              "air_date": "2021-01-16",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e15",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 15,
+              "title": "Kyoto Sister School Exchange Event: Group Battle 1",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/600ab4f8809b5.jpg",
+              "is_available": true,
+              "air_date": "2021-01-23",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e16",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 16,
+              "title": "Kyoto Sister School Exchange Event: Group Battle 2",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/60125de8aeb6d.jpg",
+              "is_available": true,
+              "air_date": "2021-01-30",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e17",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 17,
+              "title": "Kyoto Sister School Exchange Event: Group Battle 3",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/601bf60750707.jpg",
+              "is_available": true,
+              "air_date": "2021-02-06",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e18",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 18,
+              "title": "Sage",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/60255a6fbd7f5.jpg",
+              "is_available": true,
+              "air_date": "2021-02-13",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e19",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 19,
+              "title": "Black Flash",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/602f8143e408f.jpg",
+              "is_available": true,
+              "air_date": "2021-02-20",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e20",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 20,
+              "title": "Nonstandard",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/6037bd08c0ab2.jpg",
+              "is_available": true,
+              "air_date": "2021-02-27",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e21",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 21,
+              "title": "Jujutsu Koshien",
+              "thumbnail": "https://artworks.thetvdb.com/banners/series/377543/episodes/60412675dbfb9.jpg",
+              "is_available": true,
+              "air_date": "2021-03-06",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e22",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 22,
+              "title": "The Origin of Blind Obedience",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/7973204/screencap/604b4ac7c53ec.jpg",
+              "is_available": true,
+              "air_date": "2021-03-13",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e23",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 23,
+              "title": "The Origin of Blind Obedience: 2",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/7973207/screencap/60545c3c55805.jpg",
+              "is_available": true,
+              "air_date": "2021-03-20",
+              "sources": []
+            },
+            {
+              "id": "113415_s1_e24",
+              "anime_id": 113415,
+              "season_number": 1,
+              "episode_number": 24,
+              "title": "Accomplices",
+              "thumbnail": "https://artworks.thetvdb.com/banners/v4/episode/7973210/screencap/605dc33a5a109.jpg",
+              "is_available": true,
+              "air_date": "2021-03-27",
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 2,
+          "title": "Jujutsu Kaisen 2nd Season",
+          "format": "TV",
+          "total_episodes": 23,
+          "episodes": [
+            {
+              "id": "145064_s2_e1",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e2",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 2,
+              "title": "Episodio 2",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e3",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 3,
+              "title": "Episodio 3",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e4",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 4,
+              "title": "Episodio 4",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e5",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 5,
+              "title": "Episodio 5",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e6",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 6,
+              "title": "Episodio 6",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e7",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 7,
+              "title": "Episodio 7",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e8",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 8,
+              "title": "Episodio 8",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e9",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 9,
+              "title": "Episodio 9",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e10",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 10,
+              "title": "Episodio 10",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e11",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 11,
+              "title": "Episodio 11",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e12",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 12,
+              "title": "Episodio 12",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e13",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 13,
+              "title": "Episodio 13",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e14",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 14,
+              "title": "Episodio 14",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e15",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 15,
+              "title": "Episodio 15",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e16",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 16,
+              "title": "Episodio 16",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e17",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 17,
+              "title": "Episodio 17",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e18",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 18,
+              "title": "Episodio 18",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e19",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 19,
+              "title": "Episodio 19",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e20",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 20,
+              "title": "Episodio 20",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e21",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 21,
+              "title": "Episodio 21",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e22",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 22,
+              "title": "Episodio 22",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "145064_s2_e23",
+              "anime_id": 145064,
+              "season_number": 2,
+              "episode_number": 23,
+              "title": "Episodio 23",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        }
+      ],
+      "real_total_episodes": 47
+    }
+  },
+  "anime_16498": {
+    "_cached_at": 1790904977.653259,
+    "status": "FINISHED",
+    "data": {
+      "id": 16498,
+      "title_romaji": "Shingeki no Kyojin",
+      "title_english": "Attack on Titan",
+      "cover_image": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-buvcRTBx4NSm.jpg",
+      "banner_image": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFCOcDmneX.jpg",
+      "description": "Several hundred years ago, humans were nearly exterminated by titans. Titans are typically several stories tall, seem to have no intelligence, devour human beings and, worst of all, seem to do it for the pleasure rather than as a food source. A small percentage of humanity survived by walling themselves in a city protected by extremely high walls, even taller than the biggest of titans.<br><br>\r\nFlash forward to the present and the city has not seen a titan in over 100 years. Teenage boy Eren and his foster sister Mikasa witness something horrific as the city walls are destroyed by a colossal titan that appears out of thin air. As the smaller titans flood the city, the two kids watch in horror as their mother is eaten alive. Eren vows that he will murder every single titan and take revenge for all of mankind.<br><br>\r\n(Source: MangaHelpers)",
+      "genres": [
+        "Action",
+        "Drama",
+        "Fantasy",
+        "Mystery"
+      ],
+      "year": 2013,
+      "status": "FINISHED",
+      "total_seasons": 6,
+      "seasons": [
+        {
+          "season_number": 1,
+          "title": "Shingeki no Kyojin",
+          "format": "TV",
+          "total_episodes": 25,
+          "episodes": [
+            {
+              "id": "16498_s1_e1",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 1,
+              "title": "To You, 2000 Years in the Future: The Fall of Zhiganshina (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4516067.jpg",
+              "is_available": true,
+              "air_date": "2013-04-07",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e2",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 2,
+              "title": "That Day: The Fall of Zhiganshina (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520243.jpg",
+              "is_available": true,
+              "air_date": "2013-04-14",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e3",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 3,
+              "title": "A Dim Light in the Darkness of Despair: Humanity Rises Again (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520244.jpg",
+              "is_available": true,
+              "air_date": "2013-04-21",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e4",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 4,
+              "title": "Night of the Graduation Ceremony: Humanity Rises Again (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520245.jpg",
+              "is_available": true,
+              "air_date": "2013-04-28",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e5",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 5,
+              "title": "First Battle: Battle of Trost (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520246.jpg",
+              "is_available": true,
+              "air_date": "2013-05-05",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e6",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 6,
+              "title": "The World the Girl Saw: Battle for Trost (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520247.jpg",
+              "is_available": true,
+              "air_date": "2013-05-12",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e7",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 7,
+              "title": "The Small Blade: The Battle for Trost (3)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520248.jpg",
+              "is_available": true,
+              "air_date": "2013-05-19",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e8",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 8,
+              "title": "Hearing the Heartbeat: The Battle for Trost (4)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520249.jpg",
+              "is_available": true,
+              "air_date": "2013-05-26",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e9",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 9,
+              "title": "Where the Left Arm Went: The Battle for Trost (5)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520250.jpg",
+              "is_available": true,
+              "air_date": "2013-06-02",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e10",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 10,
+              "title": "Response: The Battle for Trost (6)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520251.jpg",
+              "is_available": true,
+              "air_date": "2013-06-09",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e11",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 11,
+              "title": "Icon: The Battle for Trost (7)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520252.jpg",
+              "is_available": true,
+              "air_date": "2013-06-16",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e12",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 12,
+              "title": "Wound: The Battle for Trost (8)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4520253.jpg",
+              "is_available": true,
+              "air_date": "2013-06-23",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e13",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 13,
+              "title": "Primal Desires: The Battle for Trost (9)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546795.jpg",
+              "is_available": true,
+              "air_date": "2013-06-30",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e14",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 14,
+              "title": "Still Can`t See: Night Before the Counteroffensive (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546797.jpg",
+              "is_available": true,
+              "air_date": "2013-07-14",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e15",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 15,
+              "title": "Special Ops Squad: Night Before the Counteroffensive (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546798.jpg",
+              "is_available": true,
+              "air_date": "2013-07-21",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e16",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 16,
+              "title": "What Should Be Done: Night Before the Counteroffensive (3)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546799.jpg",
+              "is_available": true,
+              "air_date": "2013-07-28",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e17",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 17,
+              "title": "Female Titan: 57th Expedition Beyond the Walls (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546800.jpg",
+              "is_available": true,
+              "air_date": "2013-08-04",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e18",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 18,
+              "title": "Forest of Giant Trees: 57th Expedition Beyond the Walls (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546801.jpg",
+              "is_available": true,
+              "air_date": "2013-08-11",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e19",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 19,
+              "title": "Bite: 57th Expedition Beyond the Walls (3)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546802.jpg",
+              "is_available": true,
+              "air_date": "2013-08-18",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e20",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 20,
+              "title": "Erwin Smith: 57th Expedition Beyond the Walls (4)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546803.jpg",
+              "is_available": true,
+              "air_date": "2013-08-25",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e21",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 21,
+              "title": "Crushing Blow: 57th Expedition Beyond the Walls (5)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546804.jpg",
+              "is_available": true,
+              "air_date": "2013-09-01",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e22",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 22,
+              "title": "The Defeated: 57th Expedition Beyond the Walls (6)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546805.jpg",
+              "is_available": true,
+              "air_date": "2013-09-08",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e23",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 23,
+              "title": "Smile: Raid on Stohess District (1)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546806.jpg",
+              "is_available": true,
+              "air_date": "2013-09-15",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e24",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 24,
+              "title": "Mercy: Raid on Stohess District (2)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4546807.jpg",
+              "is_available": true,
+              "air_date": "2013-09-22",
+              "sources": []
+            },
+            {
+              "id": "16498_s1_e25",
+              "anime_id": 16498,
+              "season_number": 1,
+              "episode_number": 25,
+              "title": "The Wall: Raid on Stohess District (3)",
+              "thumbnail": "https://artworks.thetvdb.com/banners/episodes/267440/4638113.jpg",
+              "is_available": true,
+              "air_date": "2013-09-28",
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 2,
+          "title": "Shingeki no Kyojin Zenpen: Guren no Yumiya",
+          "format": "MOVIE",
+          "total_episodes": 1,
+          "episodes": [
+            {
+              "id": "20691_s2_e1",
+              "anime_id": 20691,
+              "season_number": 2,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 3,
+          "title": "Shingeki no Kyojin Kouhen: Jiyuu no Tsubasa",
+          "format": "MOVIE",
+          "total_episodes": 1,
+          "episodes": [
+            {
+              "id": "20692_s3_e1",
+              "anime_id": 20692,
+              "season_number": 3,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 4,
+          "title": "Shingeki no Kyojin Season 2",
+          "format": "TV",
+          "total_episodes": 12,
+          "episodes": [
+            {
+              "id": "20958_s4_e1",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e2",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 2,
+              "title": "Episodio 2",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e3",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 3,
+              "title": "Episodio 3",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e4",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 4,
+              "title": "Episodio 4",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e5",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 5,
+              "title": "Episodio 5",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e6",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 6,
+              "title": "Episodio 6",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e7",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 7,
+              "title": "Episodio 7",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e8",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 8,
+              "title": "Episodio 8",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e9",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 9,
+              "title": "Episodio 9",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e10",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 10,
+              "title": "Episodio 10",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e11",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 11,
+              "title": "Episodio 11",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "20958_s4_e12",
+              "anime_id": 20958,
+              "season_number": 4,
+              "episode_number": 12,
+              "title": "Episodio 12",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 5,
+          "title": "Shingeki no Kyojin OVA",
+          "format": "OVA",
+          "total_episodes": 3,
+          "episodes": [
+            {
+              "id": "18397_s5_e1",
+              "anime_id": 18397,
+              "season_number": 5,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "18397_s5_e2",
+              "anime_id": 18397,
+              "season_number": 5,
+              "episode_number": 2,
+              "title": "Episodio 2",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "18397_s5_e3",
+              "anime_id": 18397,
+              "season_number": 5,
+              "episode_number": 3,
+              "title": "Episodio 3",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        },
+        {
+          "season_number": 6,
+          "title": "Shingeki no Kyojin: LOST GIRLS",
+          "format": "OVA",
+          "total_episodes": 3,
+          "episodes": [
+            {
+              "id": "99634_s6_e1",
+              "anime_id": 99634,
+              "season_number": 6,
+              "episode_number": 1,
+              "title": "Episodio 1",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "99634_s6_e2",
+              "anime_id": 99634,
+              "season_number": 6,
+              "episode_number": 2,
+              "title": "Episodio 2",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            },
+            {
+              "id": "99634_s6_e3",
+              "anime_id": 99634,
+              "season_number": 6,
+              "episode_number": 3,
+              "title": "Episodio 3",
+              "thumbnail": null,
+              "is_available": true,
+              "air_date": null,
+              "sources": []
+            }
+          ]
+        }
+      ],
+      "real_total_episodes": 45
+    }
+  }
+}

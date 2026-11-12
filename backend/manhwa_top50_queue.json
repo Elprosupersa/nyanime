@@ -1,0 +1,2303 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "catalog_version": "1.0.0",
+  "generated_at": "2026-10-13T16:00:00Z",
+  "total_series": 53,
+  "language_priority": [
+    "es-la",
+    "es"
+  ],
+  "download_root": "E:\\Manga",
+  "series": [
+    {
+      "id": "solo-leveling",
+      "mangadex_id": "32d76d19-8a05-4db0-9fc2-e0b0648fe9d0",
+      "title_display": "Solo Leveling",
+      "title_official_en": "Solo Leveling",
+      "title_official_es": "Solo yo subo de nivel",
+      "title_romanized": "Na Honjaman Level-Up",
+      "title_native": "나 혼자만 레벨업",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "System",
+        "Hunters",
+        "Adventure"
+      ],
+      "author": "Chugong",
+      "artist": "DUBU (REDICE STUDIO)",
+      "status": "completed",
+      "search_query": "Solo Leveling",
+      "alt_queries": [
+        "Na Honjaman Level-Up",
+        "Solo yo subo de nivel",
+        "I Alone Level Up",
+        "나 혼자만 레벨업"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 1
+    },
+    {
+      "id": "omniscient-reader",
+      "mangadex_id": "9a414441-bbad-43f1-a3a7-dc262ca790a3",
+      "title_display": "Omniscient Reader's Viewpoint",
+      "title_official_en": "Omniscient Reader's Viewpoint",
+      "title_official_es": "Punto de Vista del Lector Omnisciente",
+      "title_romanized": "Jeonjijeok Dokja Sijeom",
+      "title_native": "전지적 독자 시점",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Apocalyptic",
+        "System",
+        "Psychological"
+      ],
+      "author": "sing N song",
+      "artist": "Sleepy-C (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "Omniscient Reader's Viewpoint",
+      "alt_queries": [
+        "Omniscient Reader",
+        "Jeonjijeok Dokja Sijeom",
+        "Lector Omnisciente",
+        "전지적 독자 시점"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 2
+    },
+    {
+      "id": "the-beginning-after-the-end",
+      "mangadex_id": "4ada20eb-085a-491a-8c49-477ab42014d7",
+      "title_display": "The Beginning After The End",
+      "title_official_en": "The Beginning After The End",
+      "title_official_es": "El comienzo después del fin",
+      "title_romanized": "The Beginning After The End",
+      "title_native": "디 비기닝 애프터 디 엔드",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Reincarnation",
+        "Magic",
+        "Adventure",
+        "Action"
+      ],
+      "author": "TurtleMe",
+      "artist": "Fuyuki23",
+      "status": "ongoing",
+      "search_query": "The Beginning After The End",
+      "alt_queries": [
+        "TBATE",
+        "El comienzo después del fin"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 3
+    },
+    {
+      "id": "tower-of-god",
+      "mangadex_id": "c0ee660b-f9f2-45c3-8068-5123ff53f84a",
+      "title_display": "Tower of God",
+      "title_official_en": "Tower of God",
+      "title_official_es": "Torre de Dios",
+      "title_romanized": "Sin-ui Tap",
+      "title_native": "신의 탑",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Mystery",
+        "Superpowers",
+        "Adventure"
+      ],
+      "author": "SIU",
+      "artist": "SIU",
+      "status": "ongoing",
+      "search_query": "Tower of God",
+      "alt_queries": [
+        "Sin-ui Tap",
+        "Torre de Dios",
+        "신의 탑"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 4
+    },
+    {
+      "id": "lookism",
+      "mangadex_id": "596191eb-69ee-4401-983e-cc07e277fa17",
+      "title_display": "Lookism",
+      "title_official_en": "Lookism",
+      "title_official_es": "Apariencias",
+      "title_romanized": "Oemojisangjuui",
+      "title_native": "외모지상주의",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "suggestive",
+      "demographic": "seinen",
+      "genres": [
+        "Action",
+        "Drama",
+        "School Life",
+        "Martial Arts",
+        "Gangs"
+      ],
+      "author": "Park Tae-Jun",
+      "artist": "Park Tae-Jun",
+      "status": "ongoing",
+      "search_query": "Lookism",
+      "alt_queries": [
+        "Oemojisangjuui",
+        "Apariencias",
+        "외모지상주의"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 5
+    },
+    {
+      "id": "nano-machine",
+      "mangadex_id": "6e4805a6-75ab-462d-883c-4ddedb8e4df6",
+      "title_display": "Nano Machine",
+      "title_official_en": "Nano Machine",
+      "title_official_es": "Nano Máquina",
+      "title_romanized": "Nanomashin",
+      "title_native": "나노마신",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Murim",
+        "Sci-Fi",
+        "Cultivation",
+        "Martial Arts"
+      ],
+      "author": "Hanjung Wolya",
+      "artist": "GGBG (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "Nano Machine",
+      "alt_queries": [
+        "Nanomashin",
+        "Nano Máquina",
+        "나노마신"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 6
+    },
+    {
+      "id": "sss-class-suicide-hunter",
+      "mangadex_id": "4a973243-952e-44d7-a50f-883b4b7c9cc2",
+      "title_display": "SSS-Class Suicide Hunter",
+      "title_official_en": "SSS-Class Suicide Hunter",
+      "title_official_es": "Cazador Suicida Clase SSS",
+      "title_romanized": "SSS-geup Jasalheonteo",
+      "title_native": "SSS급 죽어야 사는 헌터",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Time Loop",
+        "Comedy",
+        "Psychological"
+      ],
+      "author": "Shin Noah",
+      "artist": "Bill K",
+      "status": "ongoing",
+      "search_query": "SSS-Class Suicide Hunter",
+      "alt_queries": [
+        "SSS-geup Jasalheonteo",
+        "SSS-Class Revival Hunter",
+        "Cazador Suicida Clase SSS",
+        "SSS급 죽어야 사는 헌터"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 7
+    },
+    {
+      "id": "legend-of-the-northern-blade",
+      "mangadex_id": "9ed16bc9-f570-4e71-8dda-aebc098b683b",
+      "title_display": "Legend of the Northern Blade",
+      "title_official_en": "Legend of the Northern Blade",
+      "title_official_es": "Leyenda de la Hoja del Norte",
+      "title_romanized": "Bukgeomjeon-gi",
+      "title_native": "북검전기",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Murim",
+        "Martial Arts",
+        "Revenge",
+        "Historical"
+      ],
+      "author": "Woogack",
+      "artist": "Hae-Min",
+      "status": "ongoing",
+      "search_query": "Legend of the Northern Blade",
+      "alt_queries": [
+        "Bukgeomjeon-gi",
+        "Leyenda de la Hoja del Norte",
+        "Northern Blade",
+        "북검전기"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 8
+    },
+    {
+      "id": "return-of-the-disaster-class-hero",
+      "mangadex_id": "0c3e20da-6f48-468f-bf92-755ee46e05ec",
+      "title_display": "Return of the Disaster-Class Hero",
+      "title_official_en": "Return of the Disaster-Class Hero",
+      "title_official_es": "El retorno del héroe clase desastre",
+      "title_romanized": "Jaeanggeum Yeongungnimi Gwihwanhasyeotda",
+      "title_native": "재앙급 영웅님이 귀환하셨다",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Gods",
+        "Revenge",
+        "Superpowers"
+      ],
+      "author": "SAN.G",
+      "artist": "REDICE STUDIO",
+      "status": "ongoing",
+      "search_query": "Return of the Disaster-Class Hero",
+      "alt_queries": [
+        "Jaeanggeum Yeongungnimi Gwihwanhasyeotda",
+        "El retorno del héroe clase desastre",
+        "재앙급 영웅님이 귀환하셨다"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 9
+    },
+    {
+      "id": "wind-breaker",
+      "mangadex_id": "9eb78304-0436-484d-9a79-a925b45e2731",
+      "title_display": "Wind Breaker",
+      "title_official_en": "Wind Breaker",
+      "title_official_es": "Windbreaker",
+      "title_romanized": "Wind Breaker",
+      "title_native": "윈드브레이커",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Sports",
+        "Drama",
+        "Romance",
+        "School Life",
+        "Comedy"
+      ],
+      "author": "Jo Yongseok",
+      "artist": "Jo Yongseok",
+      "status": "ongoing",
+      "search_query": "Wind Breaker",
+      "alt_queries": [
+        "Windbreaker",
+        "윈드브레이커"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 10
+    },
+    {
+      "id": "the-greatest-estate-developer",
+      "mangadex_id": "d7f56ace-cd30-48b9-8b64-afeca0077fca",
+      "title_display": "The Greatest Estate Developer",
+      "title_official_en": "The Greatest Estate Developer",
+      "title_official_es": "El mejor diseñador de fincas",
+      "title_romanized": "Yeokdaegeup Yeongji Seolgyesa",
+      "title_native": "역대급 영지 설계사",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Comedy",
+        "Fantasy",
+        "Reincarnation",
+        "Kingdom Building",
+        "Magic"
+      ],
+      "author": "Lee Hyunmin",
+      "artist": "Kim Hyunsoo",
+      "status": "ongoing",
+      "search_query": "The Greatest Estate Developer",
+      "alt_queries": [
+        "Yeokdaegeup Yeongji Seolgyesa",
+        "The World's Best Engineer",
+        "El mejor diseñador de fincas",
+        "역대급 영지 설계사"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 11
+    },
+    {
+      "id": "the-boxer",
+      "mangadex_id": "40efa78d-d27a-4364-92ac-6d7af69a851b",
+      "title_display": "The Boxer",
+      "title_official_en": "The Boxer",
+      "title_official_es": "El Boxeador",
+      "title_romanized": "Deo Bokseo",
+      "title_native": "더 복서",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "seinen",
+      "genres": [
+        "Sports",
+        "Psychological",
+        "Drama",
+        "Action",
+        "Martial Arts"
+      ],
+      "author": "JH",
+      "artist": "JH",
+      "status": "completed",
+      "search_query": "The Boxer",
+      "alt_queries": [
+        "Deo Bokseo",
+        "El Boxeador",
+        "더 복서"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 12
+    },
+    {
+      "id": "return-of-the-mount-hua-sect",
+      "mangadex_id": "f0f62b75-5989-4f32-9b59-ab56abe35fc1",
+      "title_display": "Return of the Blossoming Blade",
+      "title_official_en": "Return of the Mount Hua Sect",
+      "title_official_es": "Retorno de la Secta Monte Hua",
+      "title_romanized": "Hwasangwi-hwan",
+      "title_native": "화산귀환",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Murim",
+        "Martial Arts",
+        "Reincarnation",
+        "Comedy",
+        "Action"
+      ],
+      "author": "Biga",
+      "artist": "LICO",
+      "status": "ongoing",
+      "search_query": "Return of the Mount Hua Sect",
+      "alt_queries": [
+        "Return of the Blossoming Blade",
+        "Hwasangwi-hwan",
+        "화산귀환",
+        "Monte Hua"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 13
+    },
+    {
+      "id": "trash-of-the-counts-family",
+      "mangadex_id": "1dc3ebf9-c86c-431c-bcca-5e35ac124f28",
+      "title_display": "Trash of the Count's Family",
+      "title_official_en": "Trash of the Count's Family",
+      "title_official_es": "Basura de la familia del Conde",
+      "title_romanized": "Baekjakga-ui Mangnani-ga Doeeotda",
+      "title_native": "백작가의 망나니가 되었다",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Isekai",
+        "Strategy",
+        "Comedy",
+        "Magic"
+      ],
+      "author": "Yoo Ryeo Han",
+      "artist": "PAN4",
+      "status": "ongoing",
+      "search_query": "Trash of the Count's Family",
+      "alt_queries": [
+        "Lout of Count's Family",
+        "Baekjakga-ui Mangnani-ga Doeeotda",
+        "Basura del Conde",
+        "백작가의 망나니가 되었다"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 14
+    },
+    {
+      "id": "doom-breaker",
+      "mangadex_id": "773c2211-750b-4fff-bd64-c914986e4637",
+      "title_display": "Doom Breaker",
+      "title_official_en": "Doom Breaker",
+      "title_official_es": "Reencarnación del Dios de la Batalla",
+      "title_romanized": "Tu-sin Gwihwangi",
+      "title_native": "투신귀환기",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Time Regression",
+        "Romance",
+        "Adventure"
+      ],
+      "author": "Blue-Deep",
+      "artist": "Blue-Deep",
+      "status": "ongoing",
+      "search_query": "Doom Breaker",
+      "alt_queries": [
+        "Reincarnation of the Suicidal Battle God",
+        "Tu-sin Gwihwangi",
+        "투신귀환기"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 15
+    },
+    {
+      "id": "eleceed",
+      "mangadex_id": "7e544761-7d3d-4fce-8137-719814d7d138",
+      "title_display": "Eleceed",
+      "title_official_en": "Eleceed",
+      "title_official_es": "Eleceed",
+      "title_romanized": "Eleceed",
+      "title_native": "일렉시드",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Superpowers",
+        "Comedy",
+        "School Life"
+      ],
+      "author": "Son Jae-Ho",
+      "artist": "ZHENA",
+      "status": "ongoing",
+      "search_query": "Eleceed",
+      "alt_queries": [
+        "일렉시드",
+        "Eleceed Cats"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 16
+    },
+    {
+      "id": "viral-hit",
+      "mangadex_id": "d2df017b-c003-4de6-9625-4f1fba7aef97",
+      "title_display": "Viral Hit",
+      "title_official_en": "How to Fight",
+      "title_official_es": "Cómo Pelear (Viral Hit)",
+      "title_romanized": "Ssaumdokhak",
+      "title_native": "싸움독학",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "suggestive",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Martial Arts",
+        "Comedy",
+        "School Life",
+        "Streaming"
+      ],
+      "author": "Park Tae-Jun",
+      "artist": "Kim Junghyun",
+      "status": "completed",
+      "search_query": "How to Fight",
+      "alt_queries": [
+        "Viral Hit",
+        "Ssaumdokhak",
+        "Cómo Pelear",
+        "싸움독학"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 17
+    },
+    {
+      "id": "mercenary-enrollment",
+      "mangadex_id": "9ecd208c-c592-4462-9f57-4d7d4a9f956f",
+      "title_display": "Mercenary Enrollment",
+      "title_official_en": "Mercenary Enrollment",
+      "title_official_es": "Inscripción Mercenaria",
+      "title_romanized": "Iphak Yongbyeong",
+      "title_native": "입학용병",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Military",
+        "School Life",
+        "Family",
+        "Martial Arts"
+      ],
+      "author": "YC",
+      "artist": "Rakhyun",
+      "status": "ongoing",
+      "search_query": "Mercenary Enrollment",
+      "alt_queries": [
+        "Teenage Mercenary",
+        "Iphak Yongbyeong",
+        "Inscripción Mercenaria",
+        "입학용병"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 18
+    },
+    {
+      "id": "leveling-with-the-gods",
+      "mangadex_id": "4a43c227-b201-4fb7-b796-924c51797d50",
+      "title_display": "Leveling With the Gods",
+      "title_official_en": "Leveling With the Gods",
+      "title_official_es": "Subiendo de nivel con los Dioses",
+      "title_romanized": "Sin-gwa Hamkke Rebell-eop",
+      "title_native": "신과 함께 레벨업",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Mythology",
+        "Regression",
+        "Tower"
+      ],
+      "author": "Black Ajin",
+      "artist": "Oh Hyun",
+      "status": "ongoing",
+      "search_query": "Leveling With the Gods",
+      "alt_queries": [
+        "Sin-gwa Hamkke Rebell-eop",
+        "Subiendo de nivel con los Dioses",
+        "신과 함께 레벨업"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 19
+    },
+    {
+      "id": "reaper-of-the-drifting-moon",
+      "mangadex_id": "32156657-0ea8-48a3-81fe-a29bb1f90219",
+      "title_display": "Reaper of the Drifting Moon",
+      "title_official_en": "Reaper of the Drifting Moon",
+      "title_official_es": "Segador de la Luna a la Deriva",
+      "title_romanized": "Pyoryu Wolha",
+      "title_native": "사신표월",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "seinen",
+      "genres": [
+        "Murim",
+        "Assassins",
+        "Revenge",
+        "Dark Fantasy",
+        "Martial Arts"
+      ],
+      "author": "Woo-Gak",
+      "artist": "IN-GE",
+      "status": "ongoing",
+      "search_query": "Reaper of the Drifting Moon",
+      "alt_queries": [
+        "Pyoryu Wolha",
+        "Death God of the Drifting Moon",
+        "사신표월"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 20
+    },
+    {
+      "id": "murim-login",
+      "mangadex_id": "246f2c0c-4c50-4ef4-b292-c17f0f68a17c",
+      "title_display": "Murim Login",
+      "title_official_en": "Murim Login",
+      "title_official_es": "Inicio de Sesión en Murim",
+      "title_romanized": "Murim Rogeu-in",
+      "title_native": "로그인 무림",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Murim",
+        "VR System",
+        "Comedy",
+        "Action",
+        "Cultivation"
+      ],
+      "author": "Zero-Big",
+      "artist": "Jang Chul-Byuk",
+      "status": "ongoing",
+      "search_query": "Murim Login",
+      "alt_queries": [
+        "Murim Rogeu-in",
+        "로그인 무림",
+        "Login Murim"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 21
+    },
+    {
+      "id": "overgeared",
+      "mangadex_id": "3fc308c9-4b00-4dc3-943e-1f39242bc708",
+      "title_display": "Overgeared",
+      "title_official_en": "Overgeared",
+      "title_official_es": "Overgeared",
+      "title_romanized": "Taemppal",
+      "title_native": "템빨",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "VRMMO",
+        "Fantasy",
+        "Gaming",
+        "Action",
+        "Comedy"
+      ],
+      "author": "Park Saenal",
+      "artist": "Team Argo (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "Overgeared (Team Argo)",
+      "alt_queries": [
+        "Overgeared",
+        "Taemppal",
+        "템빨"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 22
+    },
+    {
+      "id": "second-life-ranker",
+      "mangadex_id": "1ffca916-3ad7-46d2-9591-a9b39e639971",
+      "title_display": "Second Life Ranker",
+      "title_official_en": "Second Life Ranker",
+      "title_official_es": "Rango de Segunda Vida",
+      "title_romanized": "Du Beon Saneun Raengkeo",
+      "title_native": "두 번 사는 랭커",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Tower",
+        "Revenge",
+        "Magic"
+      ],
+      "author": "Sadoyeon",
+      "artist": "NongNong (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "Second Life Ranker",
+      "alt_queries": [
+        "Du Beon Saneun Raengkeo",
+        "Ranker Who Lives a Second Time",
+        "두 번 사는 랭커"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 23
+    },
+    {
+      "id": "a-returners-magic-should-be-special",
+      "mangadex_id": "6a468761-5bd6-4de0-a0cb-47cb456ac2e0",
+      "title_display": "A Returner's Magic Should Be Special",
+      "title_official_en": "A Returner's Magic Should Be Special",
+      "title_official_es": "La magia de un retornado debe ser especial",
+      "title_romanized": "Gwihwanja-ui Mabeob-eun Teukbyeolhaeya",
+      "title_native": "귀환자의 마법은 특별해야 합니다",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Magic",
+        "Time Travel",
+        "School Life",
+        "Action"
+      ],
+      "author": "Yu So-Nan",
+      "artist": "Wookjakga",
+      "status": "completed",
+      "search_query": "A Returner's Magic Should Be Special",
+      "alt_queries": [
+        "Gwihwanja-ui Mabeob-eun Teukbyeolhaeya",
+        "La magia de un retornado",
+        "귀환자의 마법은 특별해야 합니다"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 24
+    },
+    {
+      "id": "pick-me-up-infinite-gacha",
+      "mangadex_id": "58167656-a065-4b49-b499-bd73d00555d5",
+      "title_display": "Pick Me Up, Infinite Gacha",
+      "title_official_en": "Pick Me Up, Infinite Gacha",
+      "title_official_es": "Pick Me Up!",
+      "title_romanized": "Pik Mi Eop!",
+      "title_native": "픽 미 업!",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Gacha Game",
+        "Survival",
+        "Action",
+        "Strategy"
+      ],
+      "author": "Hermit",
+      "artist": "WASAK BASAK (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "Pick Me Up, Infinite Gacha",
+      "alt_queries": [
+        "Pick Me Up (Hermit)",
+        "Pik Mi Eop!",
+        "픽 미 업!"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 25
+    },
+    {
+      "id": "damn-reincarnation",
+      "mangadex_id": "6e769716-df1e-4d66-89cc-32f3b46e17dc",
+      "title_display": "Damn Reincarnation",
+      "title_official_en": "Damn Reincarnation",
+      "title_official_es": "Maldita Reencarnación",
+      "title_romanized": "Billeomeogeul Hwansaeng",
+      "title_native": "빌어먹을 환생",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Reincarnation",
+        "Magic",
+        "Adventure"
+      ],
+      "author": "Mokma",
+      "artist": "Kiki (Park Jong-Seok)",
+      "status": "ongoing",
+      "search_query": "Damn Reincarnation",
+      "alt_queries": [
+        "Billeomeogeul Hwansaeng",
+        "Maldita Reencarnación",
+        "빌어먹을 환생"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 26
+    },
+    {
+      "id": "god-of-high-school",
+      "mangadex_id": null,
+      "title_display": "The God of High School",
+      "title_official_en": "The God of High School",
+      "title_official_es": "El Dios de la Secundaria",
+      "title_romanized": "Gat Obeu Hai Seukul",
+      "title_native": "갓 오브 하이스쿨",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Martial Arts",
+        "Supernatural",
+        "Gods",
+        "Comedy"
+      ],
+      "author": "Park Yong-Je",
+      "artist": "Park Yong-Je",
+      "status": "completed",
+      "search_query": "The God of High School",
+      "alt_queries": [
+        "Gat Obeu Hai Seukul",
+        "GOH",
+        "El Dios de la Secundaria",
+        "갓 오브 하이스쿨"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 27
+    },
+    {
+      "id": "noblesse",
+      "mangadex_id": "f61952ad-63bb-4e81-a03e-9e50b9e23037",
+      "title_display": "Noblesse",
+      "title_official_en": "Noblesse",
+      "title_official_es": "Noblesse",
+      "title_romanized": "Nobeulle-seu",
+      "title_native": "노블레스",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Supernatural",
+        "Vampires",
+        "Action",
+        "School Life",
+        "Superpowers"
+      ],
+      "author": "Son Jae-Ho",
+      "artist": "Lee Kwang-Su",
+      "status": "completed",
+      "search_query": "Noblesse",
+      "alt_queries": [
+        "Nobeulle-seu",
+        "노블레스"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 28
+    },
+    {
+      "id": "sweet-home",
+      "mangadex_id": null,
+      "title_display": "Sweet Home",
+      "title_official_en": "Sweet Home",
+      "title_official_es": "Dulce Hogar",
+      "title_romanized": "Seuwiteu Hom",
+      "title_native": "스위트홈",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "seinen",
+      "genres": [
+        "Horror",
+        "Psychological",
+        "Thriller",
+        "Monsters",
+        "Survival"
+      ],
+      "author": "Carnby Kim",
+      "artist": "Hwang Young-chan",
+      "status": "completed",
+      "search_query": "Sweet Home",
+      "alt_queries": [
+        "Seuwiteu Hom",
+        "Dulce Hogar",
+        "스위트홈"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 29
+    },
+    {
+      "id": "bastard",
+      "mangadex_id": "bb169078-7289-4f95-948f-9315960e6905",
+      "title_display": "Bastard",
+      "title_official_en": "Bastard",
+      "title_official_es": "Bastardo",
+      "title_romanized": "Huryobasik",
+      "title_native": "후레자식",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "seinen",
+      "genres": [
+        "Psychological",
+        "Thriller",
+        "Crime",
+        "Drama",
+        "Mystery"
+      ],
+      "author": "Carnby Kim",
+      "artist": "Hwang Young-chan",
+      "status": "completed",
+      "search_query": "Bastard",
+      "alt_queries": [
+        "Huryobasik",
+        "Bastardo",
+        "후레자식"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 30
+    },
+    {
+      "id": "hero-killer",
+      "mangadex_id": "163306e6-1700-42a4-882f-26db124cbec2",
+      "title_display": "Hero Killer",
+      "title_official_en": "Hero Killer",
+      "title_official_es": "Asesino de Héroes",
+      "title_romanized": "Hieoro Killeo",
+      "title_native": "히어로 킬러",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Anti-Hero",
+        "Superpowers",
+        "Revenge",
+        "Dark Fantasy"
+      ],
+      "author": "Kkulbeol",
+      "artist": "Beolkkul",
+      "status": "ongoing",
+      "search_query": "Hero Killer",
+      "alt_queries": [
+        "Hieoro Killeo",
+        "Asesino de Héroes",
+        "히어로 킬러"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 31
+    },
+    {
+      "id": "superhuman-era",
+      "mangadex_id": "807a8d52-dd5f-4386-959a-08213f99d537",
+      "title_display": "Superhuman Era",
+      "title_official_en": "Superhuman Era",
+      "title_official_es": "Era Sobrehumana",
+      "title_romanized": "Cho-in Sidae",
+      "title_native": "초인시대",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Superpowers",
+        "Monsters",
+        "Sci-Fi",
+        "Drama"
+      ],
+      "author": "SUBP",
+      "artist": "SUBP",
+      "status": "ongoing",
+      "search_query": "Superhuman Era",
+      "alt_queries": [
+        "Cho-in Sidae",
+        "Era Sobrehumana",
+        "초인시대"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 32
+    },
+    {
+      "id": "latna-saga",
+      "mangadex_id": "478e6926-b8bc-465c-9694-2bae1dbaf32b",
+      "title_display": "Latna Saga: Survival of a Sword King",
+      "title_official_en": "Latna Saga: Survival of a Sword King",
+      "title_official_es": "Supervivencia de un rey de la espada en un mundo de fantasía",
+      "title_romanized": "Yigye Geomwang Saengjongi",
+      "title_native": "이계 검왕 생존기",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Isekai",
+        "Action",
+        "Comedy",
+        "Adventure"
+      ],
+      "author": "Lim Kyung-bae",
+      "artist": "Kwon Soon-kyu",
+      "status": "ongoing",
+      "search_query": "Latna Saga: Survival of a Sword King",
+      "alt_queries": [
+        "Survival Story of a Sword King in a Fantasy World",
+        "Yigye Geomwang Saengjongi",
+        "이계 검왕 생존기"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 33
+    },
+    {
+      "id": "player-who-cant-level-up",
+      "mangadex_id": "a796fb50-cdc9-4c15-a48d-bc1d733d89b2",
+      "title_display": "Player Who Can't Level Up",
+      "title_official_en": "Player Who Can't Level Up",
+      "title_official_es": "El jugador que no puede subir de nivel",
+      "title_romanized": "Rebell-eop Motaneun Peulleieo",
+      "title_native": "레벨업 못하는 플레이어",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Dungeons",
+        "Ego-weapons",
+        "Superpowers"
+      ],
+      "author": "Aengmusae",
+      "artist": "PARK Jin-Hwan",
+      "status": "ongoing",
+      "search_query": "Player Who Can't Level Up",
+      "alt_queries": [
+        "Rebell-eop Motaneun Peulleieo",
+        "El jugador que no puede subir de nivel",
+        "레벨업 못하는 플레이어"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 34
+    },
+    {
+      "id": "the-archmage-returns-after-4000-years",
+      "mangadex_id": "ff14c29a-3456-4047-828d-10c9671cac4c",
+      "title_display": "The Great Mage Returns After 4000 Years",
+      "title_official_en": "The Great Mage Returns After 4000 Years",
+      "title_official_es": "El gran mago regresa después de 4000 años",
+      "title_romanized": "4000-nyeon Mane Gwihwanhan Daemadopsa",
+      "title_native": "4000년 만에 귀환한 대마도사",
+      "type": "manhwa",
+      "category": "action_fantasy_shonen",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Fantasy",
+        "Magic",
+        "Reincarnation",
+        "Action",
+        "Demons"
+      ],
+      "author": "Barnacle",
+      "artist": "Kim Deok-yong (REDICE STUDIO)",
+      "status": "ongoing",
+      "search_query": "The Great Mage Returns After 4000 Years",
+      "alt_queries": [
+        "4000-nyeon Mane Gwihwanhan Daemadopsa",
+        "The Archmage Returns After 4000 Years",
+        "4000년 만에 귀환한 대마도사"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 35
+    },
+    {
+      "id": "silent-war",
+      "mangadex_id": "1c5f98e8-9516-468f-8b64-2bac7e257709",
+      "title_display": "Silent War",
+      "title_official_en": "My Kingdom: Silent War",
+      "title_official_es": "Guerra Silenciosa",
+      "title_romanized": "Chimmu-kui Jeonjaeng",
+      "title_native": "침묵의 전쟁",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Drama",
+        "Romance",
+        "Psychological",
+        "Harem",
+        "Erotica"
+      ],
+      "author": "Tharchog",
+      "artist": "Yラップ",
+      "status": "completed",
+      "search_query": "Silent War",
+      "alt_queries": [
+        "My Kingdom: Silent War",
+        "Chimmu-kui Jeonjaeng",
+        "침묵의 전쟁"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 36
+    },
+    {
+      "id": "secret-class",
+      "mangadex_id": "03431565-8eff-4509-a32d-858e8a66c290",
+      "title_display": "Secret Class",
+      "title_official_en": "Secret Class",
+      "title_official_es": "Clase Secreta",
+      "title_romanized": "Bimil Sueop",
+      "title_native": "비밀수업",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Romance",
+        "Drama",
+        "Harem",
+        "Secrets",
+        "Erotica"
+      ],
+      "author": "Wang Yu",
+      "artist": "Min Chan",
+      "status": "ongoing",
+      "search_query": "Secret Class",
+      "alt_queries": [
+        "Bimil Sueop",
+        "Clase Secreta",
+        "비밀수업"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 37
+    },
+    {
+      "id": "stepmother-friends",
+      "mangadex_id": "e87483f7-3099-4594-a166-d9974b205d9a",
+      "title_display": "Stepmother's Friends",
+      "title_official_en": "Stepmother's Friends",
+      "title_official_es": "Amigas de mi Madrastra",
+      "title_romanized": "Chin-eomma-ui Chingu",
+      "title_native": "친구엄마",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Drama",
+        "Romance",
+        "Harem",
+        "Taboo",
+        "Erotica"
+      ],
+      "author": "Lee Suk-yeon",
+      "artist": "Goff",
+      "status": "completed",
+      "search_query": "Stepmother Friends",
+      "alt_queries": [
+        "Stepmother's Friends",
+        "Chin-eomma-ui Chingu",
+        "Amigas de mi Madrastra",
+        "친구엄마"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 38
+    },
+    {
+      "id": "bad-thinking-diary",
+      "mangadex_id": "3ed82c63-c018-4f6a-a5ff-d5a71a08d5dc",
+      "title_display": "Bad Thinking Diary",
+      "title_official_en": "Bad Thinking Diary",
+      "title_official_es": "Diario de Malos Pensamientos",
+      "title_romanized": "Bae-deu Tting-king Daieori",
+      "title_native": "배드 띵킹 다이어리",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "erotica",
+      "demographic": "josei",
+      "genres": [
+        "Yuri",
+        "Romance",
+        "Drama",
+        "College",
+        "Girls Love"
+      ],
+      "author": "Hodog",
+      "artist": "Rangrari",
+      "status": "completed",
+      "search_query": "Bad Thinking Diary",
+      "alt_queries": [
+        "Diario de Malos Pensamientos",
+        "배드 띵킹 다이어리"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 39
+    },
+    {
+      "id": "queen-bee",
+      "mangadex_id": "090319a9-58b6-42b5-9962-26db2595ca63",
+      "title_display": "Queen Bee",
+      "title_official_en": "Queen Bee",
+      "title_official_es": "Abeja Reina",
+      "title_romanized": "Yeowangbeol",
+      "title_native": "여왕벌",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Drama",
+        "Tragedy",
+        "Psychological",
+        "Romance",
+        "Erotica"
+      ],
+      "author": "Kim Dal-Nim",
+      "artist": "Kim Dal-Nim",
+      "status": "ongoing",
+      "search_query": "Queen Bee",
+      "alt_queries": [
+        "Yeowangbeol",
+        "Abeja Reina",
+        "여왕벌"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 40
+    },
+    {
+      "id": "circles",
+      "mangadex_id": "26bbf066-6d2f-4fc3-a11e-f056f056b628",
+      "title_display": "Circles",
+      "title_official_en": "Circles (Dongari)",
+      "title_official_es": "Círculos",
+      "title_romanized": "Dong-ari",
+      "title_native": "동아리",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Comedy",
+        "Romance",
+        "College",
+        "Harem",
+        "Erotica"
+      ],
+      "author": "Kkaboo",
+      "artist": "Kkaboo",
+      "status": "ongoing",
+      "search_query": "Circles",
+      "alt_queries": [
+        "Dongari",
+        "Dong-ari",
+        "Círculos",
+        "동아리"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 41
+    },
+    {
+      "id": "boarding-diary",
+      "mangadex_id": "06e14068-6e11-42a0-91f6-558dcd4b1be7",
+      "title_display": "Boarding Diary",
+      "title_official_en": "Boarding Diary",
+      "title_official_es": "Diario de Pensión",
+      "title_romanized": "Hasukilgi",
+      "title_native": "하숙일기",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Romance",
+        "Drama",
+        "Co-habitation",
+        "Harem",
+        "Erotica"
+      ],
+      "author": "Kim Byung-gwan",
+      "artist": "Kim Byung-gwan",
+      "status": "completed",
+      "search_query": "Boarding Diary",
+      "alt_queries": [
+        "Hasukilgi",
+        "Diario de Pensión",
+        "하숙일기"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 42
+    },
+    {
+      "id": "a-perverts-daily-life",
+      "mangadex_id": "650dbb60-013a-4b77-b0d8-a546ecdce20d",
+      "title_display": "A Pervert's Daily Life",
+      "title_official_en": "A Pervert's Daily Life",
+      "title_official_es": "Vida diaria de un pervertido",
+      "title_romanized": "Byuntae-ui Ilsang",
+      "title_native": "변태의 일상",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Romance",
+        "Comedy",
+        "Office Romance",
+        "Wholesome",
+        "Erotica"
+      ],
+      "author": "Alice Crazy",
+      "artist": "Alice Crazy",
+      "status": "completed",
+      "search_query": "A Pervert's Daily Life",
+      "alt_queries": [
+        "Byuntae-ui Ilsang",
+        "Vida diaria de un pervertido",
+        "변태의 일상"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 43
+    },
+    {
+      "id": "s-flower",
+      "mangadex_id": "e388cfa2-1481-4592-8e38-d6eef93d0e05",
+      "title_display": "S-Flower",
+      "title_official_en": "S-Flower",
+      "title_official_es": "Flor S",
+      "title_romanized": "Eseu Peullauwo",
+      "title_native": "S플라워",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Drama",
+        "Romance",
+        "Psychological",
+        "Secrets",
+        "Erotica"
+      ],
+      "author": "Jin",
+      "artist": "Jin",
+      "status": "completed",
+      "search_query": "S-Flower",
+      "alt_queries": [
+        "Eseu Peullauwo",
+        "Flor S",
+        "S플라워"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 44
+    },
+    {
+      "id": "sweet-guy",
+      "mangadex_id": "a378a7f5-5aef-4a31-9ff9-2bb5f8156488",
+      "title_display": "Sweet Guy",
+      "title_official_en": "Sweet Guy",
+      "title_official_es": "Chico Dulce",
+      "title_romanized": "Malsukhan Nom",
+      "title_native": "달콤한 놈",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Supernatural",
+        "Romance",
+        "Comedy",
+        "Harem",
+        "Erotica"
+      ],
+      "author": "Park Dong-sun",
+      "artist": "Kim Min-gwang",
+      "status": "completed",
+      "search_query": "Sweet Guy",
+      "alt_queries": [
+        "Malsukhan Nom",
+        "Chico Dulce",
+        "달콤한 놈"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 45
+    },
+    {
+      "id": "what-does-the-fox-say",
+      "mangadex_id": "658662c8-bee6-442c-91c4-cb94681810b5",
+      "title_display": "What Does the Fox Say?",
+      "title_official_en": "What Does the Fox Say?",
+      "title_official_es": "¿Qué dice el zorro?",
+      "title_romanized": "Yeouneun Mworago Malhaet-na?",
+      "title_native": "여우는 뭐라고 말했나?",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "erotica",
+      "demographic": "josei",
+      "genres": [
+        "Yuri",
+        "Romance",
+        "Drama",
+        "Office Romance",
+        "Girls Love"
+      ],
+      "author": "Team Gaji",
+      "artist": "Team Gaji",
+      "status": "completed",
+      "search_query": "What Does the Fox Say?",
+      "alt_queries": [
+        "Yeouneun Mworago Malhaet-na?",
+        "WDTFS",
+        "¿Qué dice el zorro?",
+        "여우는 뭐라고 말했나?"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 46
+    },
+    {
+      "id": "touch-to-unlock",
+      "mangadex_id": "380816d4-7093-4d36-8a07-e05f3d1de9b8",
+      "title_display": "Touch to Unlock",
+      "title_official_en": "Touch to Unlock",
+      "title_official_es": "Toca para desbloquear (Touch On)",
+      "title_romanized": "Dae-myeon Yeol-rim",
+      "title_native": "터치 투 언락",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Supernatural",
+        "Romance",
+        "Drama",
+        "Secrets",
+        "Erotica"
+      ],
+      "author": "Pluto",
+      "artist": "Pluto",
+      "status": "completed",
+      "search_query": "Touch to Unlock",
+      "alt_queries": [
+        "Touch On",
+        "Dae-myeon Yeol-rim",
+        "Toca para desbloquear",
+        "터치 투 언락"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 47
+    },
+    {
+      "id": "landlord-girls",
+      "mangadex_id": null,
+      "title_display": "Landlord Sisters",
+      "title_official_en": "Landlord Sisters",
+      "title_official_es": "Hermanas Caseras",
+      "title_romanized": "Wolsae Dongsaeng",
+      "title_native": "월세 동생",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Romance",
+        "Comedy",
+        "Co-habitation",
+        "Harem",
+        "Erotica"
+      ],
+      "author": "Taro",
+      "artist": "Gojira",
+      "status": "ongoing",
+      "search_query": "Landlord Sisters",
+      "alt_queries": [
+        "Landlord Girls",
+        "Wolsae Dongsaeng",
+        "Hermanas Caseras",
+        "월세 동생"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 48
+    },
+    {
+      "id": "my-stepmom",
+      "mangadex_id": null,
+      "title_display": "My Stepmom",
+      "title_official_en": "My Stepmom",
+      "title_official_es": "Mi Madrastra",
+      "title_romanized": "Sae-eomma",
+      "title_native": "새엄마",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Drama",
+        "Romance",
+        "Taboo",
+        "Secrets",
+        "Erotica"
+      ],
+      "author": "Tto-kki",
+      "artist": "Tto-kki",
+      "status": "completed",
+      "search_query": "My Stepmom",
+      "alt_queries": [
+        "She's the Girl",
+        "Sae-eomma",
+        "Mi Madrastra",
+        "새엄마"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 49
+    },
+    {
+      "id": "perfect-half",
+      "mangadex_id": "cb847f18-4cf3-42ed-ab06-a7fcbb78d0a3",
+      "title_display": "Perfect Half",
+      "title_official_en": "Perfect Half",
+      "title_official_es": "Mitad Perfecta",
+      "title_romanized": "Wanjeonhan Ban",
+      "title_native": "완전한 반",
+      "type": "manhwa",
+      "category": "adult_romance_drama",
+      "content_rating": "pornographic",
+      "demographic": "seinen",
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Martial Arts",
+        "Romance",
+        "Erotica"
+      ],
+      "author": "Luv P",
+      "artist": "Luv P",
+      "status": "ongoing",
+      "search_query": "Perfect Half",
+      "alt_queries": [
+        "Wanjeonhan Ban",
+        "Mitad Perfecta",
+        "완전한 반"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "folder_volume_pattern": "",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 50
+    },
+    {
+      "id": "chainsaw-man",
+      "mangadex_id": "a77742b1-befd-49a4-bff5-1ad4e6b0ef7b",
+      "title_display": "Chainsaw Man",
+      "title_official_en": "Chainsaw Man",
+      "title_official_es": "El Hombre Motosierra",
+      "title_romanized": "Chainsaw Man",
+      "title_native": "チェンソーマン",
+      "type": "manga",
+      "category": "key_manga",
+      "content_rating": "suggestive",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Dark Fantasy",
+        "Supernatural",
+        "Demons",
+        "Gore"
+      ],
+      "author": "Tatsuki Fujimoto",
+      "artist": "Tatsuki Fujimoto",
+      "status": "ongoing",
+      "search_query": "Chainsaw Man",
+      "alt_queries": [
+        "チェンソーマン",
+        "El Hombre Motosierra",
+        "CSM"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": true,
+        "folder_volume_pattern": "Tomo {volume:02d}",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 51
+    },
+    {
+      "id": "sousou-no-frieren",
+      "mangadex_id": "b0b721ff-c388-4486-aa0f-c2b0bb321512",
+      "title_display": "Sousou no Frieren",
+      "title_official_en": "Frieren: Beyond Journey's End",
+      "title_official_es": "Frieren: Más allá del final del viaje",
+      "title_romanized": "Sousou no Frieren",
+      "title_native": "葬送のフリーレン",
+      "type": "manga",
+      "category": "key_manga",
+      "content_rating": "safe",
+      "demographic": "shounen",
+      "genres": [
+        "Adventure",
+        "Drama",
+        "Fantasy",
+        "Magic",
+        "Elves"
+      ],
+      "author": "Kanehito Yamada",
+      "artist": "Tsukasa Abe",
+      "status": "ongoing",
+      "search_query": "Sousou no Frieren",
+      "alt_queries": [
+        "Frieren: Beyond Journey's End",
+        "葬送のフリーレン",
+        "Frieren"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": true,
+        "folder_volume_pattern": "Tomo {volume:02d}",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 52
+    },
+    {
+      "id": "dandadan",
+      "mangadex_id": "68112dc1-2b80-4f20-beb8-2f2a8716a430",
+      "title_display": "Dandadan",
+      "title_official_en": "Dandadan",
+      "title_official_es": "Dandadan",
+      "title_romanized": "Dandadan",
+      "title_native": "ダンダダン",
+      "type": "manga",
+      "category": "key_manga",
+      "content_rating": "suggestive",
+      "demographic": "shounen",
+      "genres": [
+        "Action",
+        "Comedy",
+        "Romance",
+        "Supernatural",
+        "Sci-Fi",
+        "Aliens",
+        "Ghosts"
+      ],
+      "author": "Yukinobu Tatsu",
+      "artist": "Yukinobu Tatsu",
+      "status": "ongoing",
+      "search_query": "Dandadan",
+      "alt_queries": [
+        "ダンダダン",
+        "Dan Da Dan"
+      ],
+      "target_languages": [
+        "es-la",
+        "es"
+      ],
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": true,
+        "folder_volume_pattern": "Tomo {volume:02d}",
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      },
+      "priority_rank": 53
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for user isolation and authentication
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp || val is int || val is number;
+    }
+
+    // User Root Document (Profile & Account metadata)
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // Favorites Subcollection (Anime & Manga bookmarked items)
+      match /favorites/{favoriteId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Viewing & Reading History Subcollection
+      match /history/{historyId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Manga Reading Progress Subcollection
+      match /manga_progress/{mangaId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Anime Playback Progress Subcollection
+      match /anime_progress/{animeId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Application, Reader & Player Settings Subcollection
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Sync Metadata & Health Checkpoints
+      match /sync_metadata/{metaId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Strict security default: deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
