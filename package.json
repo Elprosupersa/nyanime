@@ -1,0 +1,15 @@
+{
+  "name": "nyanime",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "NyAnime TV - Aplicación oficial de streaming de anime y lectura de manga",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}
