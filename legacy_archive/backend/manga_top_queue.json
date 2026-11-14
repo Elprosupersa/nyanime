@@ -1,0 +1,49 @@
+{
+  "catalog_version": "1.0",
+  "total_series": 3,
+  "download_root": "E:\\OTAKU\\MANGAS\\General",
+  "series": [
+    {
+      "id": "one-punch-man",
+      "mangadex_id": "d8a959f7-648e-4c8d-8f23-f1f3f8e129f3",
+      "title_display": "One Punch Man",
+      "type": "manga",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "tokyo-ghoul",
+      "mangadex_id": "59f47645-66a9-443e-8228-788313c3ae3c",
+      "title_display": "Tokyo Ghoul",
+      "type": "manga",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "bleach",
+      "mangadex_id": "a460ab18-22c1-47eb-a08a-9ee85fe37ec8",
+      "title_display": "Bleach",
+      "type": "manga",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    }
+  ]
+}

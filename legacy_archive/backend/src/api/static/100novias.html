@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Las 100 Novias - Temporada 2 (Episodios 1-6)</title>
+    <style>
+        :root {
+            --bg-primary: #0a0b10;
+            --bg-card: #141724;
+            --accent: #f43f5e;
+            --accent-hover: #e11d48;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --border: rgba(255, 255, 255, 0.08);
+            --radius: 16px;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            padding: 16px;
+            padding-bottom: 48px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            padding: 24px 0 20px;
+        }
+        .tag {
+            display: inline-block;
+            background: rgba(244, 63, 94, 0.15);
+            color: #fb7185;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+            border: 1px solid rgba(244, 63, 94, 0.3);
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1.3;
+            margin-bottom: 6px;
+        }
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-sub);
+        }
+        .player-container {
+            margin: 16px 0 24px;
+            background: #000;
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            display: none;
+        }
+        video {
+            width: 100%;
+            display: block;
+            max-height: 360px;
+        }
+        .player-title {
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--text-sub);
+            background: #111420;
+            border-top: 1px solid var(--border);
+        }
+        .episodes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .card:active {
+            transform: scale(0.99);
+            border-color: var(--accent);
+        }
+        .card-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .ep-number {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 2px;
+        }
+        .ep-size {
+            font-size: 12px;
+            color: var(--text-sub);
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .btn {
+            border: none;
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+        .btn-stream {
+            background: rgba(255, 255, 255, 0.08);
+            color: #fff;
+        }
+        .btn-download {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-download:hover {
+            background: var(--accent-hover);
+        }
+        .footer-nav {
+            margin-top: 32px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .nav-link {
+            display: block;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <span class="tag">Descarga Directa • 1080p HD</span>
+        <h1>Las 100 Novias (Temporada 2)</h1>
+        <p class="subtitle">Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo</p>
+    </header>
+
+    <div class="player-container" id="playerWrap">
+        <video id="videoPlayer" controls playsinline></video>
+        <div class="player-title" id="playerTitle">Reproduciendo...</div>
+    </div>
+
+    <div class="episodes-list">
+        <!-- Episodio 1 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 01</div>
+                <div class="ep-size">289.7 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 01.mp4', 'Capítulo 01')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2001.mp4" download="100_Novias_T2_Cap01.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+
+        <!-- Episodio 2 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 02</div>
+                <div class="ep-size">350.6 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 02.mp4', 'Capítulo 02')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2002.mp4" download="100_Novias_T2_Cap02.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+
+        <!-- Episodio 3 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 03</div>
+                <div class="ep-size">274.1 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 03.mp4', 'Capítulo 03')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2003.mp4" download="100_Novias_T2_Cap03.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+
+        <!-- Episodio 4 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 04</div>
+                <div class="ep-size">299.8 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 04.mp4', 'Capítulo 04')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2004.mp4" download="100_Novias_T2_Cap04.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+
+        <!-- Episodio 5 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 05</div>
+                <div class="ep-size">273.7 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 05.mp4', 'Capítulo 05')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2005.mp4" download="100_Novias_T2_Cap05.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+
+        <!-- Episodio 6 -->
+        <div class="card">
+            <div class="card-info">
+                <div class="ep-number">Capítulo 06</div>
+                <div class="ep-size">351.4 MB • 1080p Full HD</div>
+            </div>
+            <div class="actions">
+                <button class="btn btn-stream" onclick="playVideo('Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo/Temporada 2/Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo - Episodio 06.mp4', 'Capítulo 06')">▶ Ver</button>
+                <a class="btn btn-download" href="/api/local/stream?file=Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo/Temporada%202/Kimi%20no%20Koto%20ga%20Dai%20Dai%20Dai%20Dai%20Daisuki%20na%20100-nin%20no%20Kanojo%20-%20Episodio%2006.mp4" download="100_Novias_T2_Cap06.mp4">⬇ Descargar</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer-nav">
+        <a class="nav-link" href="/">🏠 Ir a la Biblioteca General (AnimeHub)</a>
+        <a class="nav-link" href="/static/AnimeHub_Celular.apk" download>📱 Descargar App Android (AnimeHub.apk)</a>
+    </div>
+
+    <script>
+        function playVideo(relPath, epTitle) {
+            const wrap = document.getElementById('playerWrap');
+            const video = document.getElementById('videoPlayer');
+            const title = document.getElementById('playerTitle');
+            
+            const streamUrl = '/api/local/stream?file=' + encodeURIComponent(relPath);
+            video.src = streamUrl;
+            title.textContent = 'Reproduciendo: ' + epTitle;
+            wrap.style.display = 'block';
+            video.play();
+            wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    </script>
+</body>
+</html>

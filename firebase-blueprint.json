@@ -1,0 +1,400 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil privado de usuario autenticado con Firebase Auth en NyAnime.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "ID único de Firebase Auth del usuario.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Correo electrónico del usuario.",
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nombre público elegido por el usuario.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "avatar": {
+          "type": "string",
+          "description": "URL del avatar seleccionado.",
+          "maxLength": 500
+        },
+        "providerId": {
+          "type": "string",
+          "description": "Proveedor de autenticación (google.com o password).",
+          "maxLength": 40
+        },
+        "episodesWatched": {
+          "type": "integer",
+          "description": "Contador de episodios vistos."
+        },
+        "totalMinutes": {
+          "type": "integer",
+          "description": "Minutos totales de anime reproducidos."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Fecha de creación del perfil en servidor."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Última actualización del perfil."
+        }
+      },
+      "required": ["uid", "email", "displayName", "avatar", "providerId", "episodesWatched", "totalMinutes", "createdAt", "updatedAt"]
+    },
+    "FavoriteAnime": {
+      "title": "FavoriteAnime",
+      "description": "Anime guardado en favoritos por el usuario.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "animeId": {
+          "type": "integer"
+        },
+        "title": {
+          "type": "object",
+          "description": "Títulos romaji y english del anime."
+        },
+        "coverImage": {
+          "type": "object",
+          "description": "URLs de portada del anime."
+        },
+        "format": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "episodes": {
+          "type": "integer"
+        },
+        "genres": {
+          "type": "array",
+          "description": "Lista acotada de géneros del anime."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "animeId", "title", "coverImage", "createdAt", "updatedAt"]
+    },
+    "FavoriteManga": {
+      "title": "FavoriteManga",
+      "description": "Manga o Manhwa guardado en biblioteca por el usuario.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mangaId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "cover": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "flag": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "origLang": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "score": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "year": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "mangaId", "title", "cover", "createdAt", "updatedAt"]
+    },
+    "WatchHistoryEntry": {
+      "title": "WatchHistoryEntry",
+      "description": "Registro de último episodio reproducido de un anime.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "animeId": {
+          "type": "integer"
+        },
+        "animeTitle": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "coverImage": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "seasonNum": {
+          "type": "integer"
+        },
+        "episodeNum": {
+          "type": "integer"
+        },
+        "currentTime": {
+          "type": "number",
+          "description": "Segundo exacto guardado para reanudación."
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duración total conocida del episodio en segundos."
+        },
+        "completed": {
+          "type": "boolean",
+          "description": "True si el episodio superó el 90% de reproducción."
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "animeId", "animeTitle", "seasonNum", "episodeNum", "timestamp", "createdAt", "updatedAt"]
+    },
+    "MangaProgressEntry": {
+      "title": "MangaProgressEntry",
+      "description": "Progreso de lectura y capítulos leídos de un manga.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mangaId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "mangaTitle": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "cover": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "flag": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "origLang": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "lastChapterNum": {
+          "type": "number"
+        },
+        "lastChapterLabel": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "readChapters": {
+          "type": "array"
+        },
+        "timestamp": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "mangaId", "mangaTitle", "readChapters", "timestamp", "createdAt", "updatedAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "Preferencias del lector y recordatorios de emisión del usuario.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "scheduleReminders": {
+          "type": "array"
+        },
+        "readerBg": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "readerWidth": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "readerMode": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "scheduleReminders", "createdAt", "updatedAt"]
+    },
+    "UserSuggestion": {
+      "title": "UserSuggestion",
+      "description": "Sugerencia o reporte enviado por un usuario autenticado.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tipo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "texto": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "tipo", "texto", "createdAt"]
+    },
+    "EpisodeComment": {
+      "title": "EpisodeComment",
+      "description": "Comentario comunitario real asociado a un episodio específico.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "episodeKey": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "text": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 500
+        },
+        "isSpoiler": {
+          "type": "boolean",
+          "description": "Indica si el comentario contiene spoilers que deben difuminarse."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "episodeKey", "displayName", "avatar", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Documento raíz del perfil privado de usuario."
+    },
+    "/users/{userId}/favorites/{favoriteId}": {
+      "schema": { "$ref": "#/entities/FavoriteAnime" },
+      "description": "Colección privada de animes favoritos del usuario."
+    },
+    "/users/{userId}/manga_favorites/{mangaId}": {
+      "schema": { "$ref": "#/entities/FavoriteManga" },
+      "description": "Colección privada de mangas favoritos del usuario."
+    },
+    "/users/{userId}/history/{historyId}": {
+      "schema": { "$ref": "#/entities/WatchHistoryEntry" },
+      "description": "Historial privado de reproducción de anime."
+    },
+    "/users/{userId}/manga_progress/{mangaId}": {
+      "schema": { "$ref": "#/entities/MangaProgressEntry" },
+      "description": "Progreso privado de lectura y capítulos leídos por manga."
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/UserSettings" },
+      "description": "Preferencias del lector y recordatorios de emisión."
+    },
+    "/users/{userId}/suggestions/{suggestionId}": {
+      "schema": { "$ref": "#/entities/UserSuggestion" },
+      "description": "Sugerencias enviadas por el usuario."
+    },
+    "/episodes/{episodeKey}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/EpisodeComment" },
+      "description": "Comentarios reales en tiempo real por episodio."
+    }
+  }
+}

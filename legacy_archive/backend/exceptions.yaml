@@ -1,0 +1,75 @@
+# exceptions.yaml
+# Define reglas personalizadas para organizar animes específicos de manera distinta
+# a los templates por defecto en config.yaml.
+
+Mushoku Tensei:
+  # Alias web que los scrapers suelen usar para este anime
+  alias_web:
+    - "Mushoku Tensei Isekai Ittara Honki Dasu"
+    - "Mushoku Tensei: Isekai Ittara Honki Dasu"
+    - "Mushoku Tensei: Isekai Ittara Honki Dasu - Eris no Goblin Toubatsu"
+    - "Mushoku Tensei Isekai Ittara Honki Dasu 2nd Season"
+    - "Mushoku Tensei: Isekai Ittara Honki Dasu 2nd Season"
+    - "Mushoku Tensei II Isekai Ittara Honki Dasu"
+    - "Mushoku Tensei II"
+    - "Mushoku Tensei III Isekai Ittara Honki Dasu"
+    
+  # Mapeo de subcadenas en los nombres encontrados al nombre de la carpeta destino.
+  # El organizador priorizará estas reglas antes del fallback 'Season 0X'.
+  estructura:
+    - match: "Mushoku Tensei III"
+      folder: "Temporada 3"
+    - match: "Mushoku Tensei II: Isekai Ittara Honki Dasu Part 2"
+      folder: "Temporada 2 - Parte 2"
+    - match: "Mushoku Tensei II"
+      folder: "Temporada 2 - Parte 1"
+    - match: "Mushoku Tensei: Isekai Ittara Honki Dasu Part 2"
+      folder: "Temporada 1 - Parte 2"
+    - match: "2nd Season"
+      folder: "Temporada 1 - Parte 2"
+    - match: "OVA"
+      folder: "OVAs y Especiales"
+    - match: "ova"
+      folder: "OVAs y Especiales"
+    - match: "Eris"
+      folder: "OVAs y Especiales"
+
+    # Regla base
+    - match: "Mushoku Tensei"
+      folder: "Temporada 1 - Parte 1"
+
+High School DxD:
+  alias_web:
+    - "High School DxD"
+    - "Highschool DxD"
+    - "High School DxD New"
+    - "High School DxD BorN"
+    - "High School DxD Hero"
+    - "High School DxD HERO"
+  estructura:
+    - match: "Especial"
+      folder: "OVAs y Especiales"
+    - match: "Special"
+      folder: "OVAs y Especiales"
+    - match: "OVA"
+      folder: "OVAs y Especiales"
+    - match: "OAV"
+      folder: "OVAs y Especiales"
+    - match: "Original Video"
+      folder: "OVAs y Especiales"
+    - match: "Fushichou"
+      folder: "OVAs y Especiales"
+    - match: "High School DxD Hero"
+      folder: "Temporada 4"
+    - match: "High School DxD HERO"
+      folder: "Temporada 4"
+    - match: "High School DxD BorN"
+      folder: "Temporada 3"
+    - match: "High School DxD Born"
+      folder: "Temporada 3"
+    - match: "High School DxD New"
+      folder: "Temporada 2"
+    - match: "High School DxD NEW"
+      folder: "Temporada 2"
+    - match: "High School DxD"
+      folder: "Temporada 1"

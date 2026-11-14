@@ -2,57 +2,289 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for user isolation and authentication
-    function isAuthenticated() {
+    // Global safety net: default-deny all unspecified collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidTimestamp(val) {
-      return val is timestamp || val is int || val is number;
+    // Entity validation helpers matching firebase-blueprint.json
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'avatar', 'providerId', 'episodesWatched', 'totalMinutes', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'avatar', 'providerId', 'episodesWatched', 'totalMinutes', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.email is string && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.providerId is string && data.providerId.size() >= 1 && data.providerId.size() <= 40
+        && data.episodesWatched is int && data.episodesWatched >= 0 && data.episodesWatched <= 1000000
+        && data.totalMinutes is int && data.totalMinutes >= 0 && data.totalMinutes <= 100000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
-    // User Root Document (Profile & Account metadata)
+    function isValidFavoriteAnime(data) {
+      return data.keys().hasAll(['uid', 'animeId', 'title', 'coverImage', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'animeId', 'title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.animeId is int && data.animeId >= 0
+        && data.title is map
+        && data.coverImage is map
+        && (!('format' in data) || (data.format is string && data.format.size() <= 40))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 40))
+        && (!('episodes' in data) || (data.episodes is int && data.episodes >= 0 && data.episodes <= 100000))
+        && (!('genres' in data) || (data.genres is list && data.genres.size() <= 20))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFavoriteManga(data) {
+      return data.keys().hasAll(['uid', 'mangaId', 'title', 'cover', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'mangaId', 'title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.mangaId is string && data.mangaId.size() >= 1 && data.mangaId.size() <= 128
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 240
+        && data.cover is string && data.cover.size() <= 600
+        && (!('flag' in data) || (data.flag is string && data.flag.size() <= 40))
+        && (!('origLang' in data) || (data.origLang is string && data.origLang.size() <= 16))
+        && (!('score' in data) || (data.score is string && data.score.size() <= 16))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 40))
+        && (!('year' in data) || (data.year is string && data.year.size() <= 16))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWatchHistoryEntry(data) {
+      return data.keys().hasAll(['uid', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'timestamp', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'animeId', 'animeTitle', 'coverImage', 'seasonNum', 'episodeNum', 'currentTime', 'duration', 'completed', 'timestamp', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.animeId is int && data.animeId >= 0
+        && data.animeTitle is string && data.animeTitle.size() >= 1 && data.animeTitle.size() <= 240
+        && (!('coverImage' in data) || (data.coverImage is string && data.coverImage.size() <= 600))
+        && data.seasonNum is int && data.seasonNum >= 1 && data.seasonNum <= 200
+        && data.episodeNum is int && data.episodeNum >= 0 && data.episodeNum <= 10000
+        && (!('currentTime' in data) || (data.currentTime is number && data.currentTime >= 0 && data.currentTime <= 86400))
+        && (!('duration' in data) || (data.duration is number && data.duration >= 0 && data.duration <= 86400))
+        && (!('completed' in data) || data.completed is bool)
+        && data.timestamp is int && data.timestamp >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMangaProgressEntry(data) {
+      return data.keys().hasAll(['uid', 'mangaId', 'mangaTitle', 'readChapters', 'timestamp', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'mangaId', 'mangaTitle', 'cover', 'flag', 'origLang', 'lastChapterNum', 'lastChapterLabel', 'readChapters', 'timestamp', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.mangaId is string && data.mangaId.size() >= 1 && data.mangaId.size() <= 128
+        && data.mangaTitle is string && data.mangaTitle.size() >= 1 && data.mangaTitle.size() <= 240
+        && (!('cover' in data) || (data.cover is string && data.cover.size() <= 600))
+        && (!('flag' in data) || (data.flag is string && data.flag.size() <= 40))
+        && (!('origLang' in data) || (data.origLang is string && data.origLang.size() <= 16))
+        && (!('lastChapterNum' in data) || data.lastChapterNum is number)
+        && (!('lastChapterLabel' in data) || (data.lastChapterLabel is string && data.lastChapterLabel.size() <= 32))
+        && data.readChapters is list && data.readChapters.size() <= 3000
+        && data.timestamp is int && data.timestamp >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserSettings(data) {
+      return data.keys().hasAll(['uid', 'scheduleReminders', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.scheduleReminders is list && data.scheduleReminders.size() <= 500
+        && (!('readerBg' in data) || (data.readerBg is string && data.readerBg.size() <= 32))
+        && (!('readerWidth' in data) || (data.readerWidth is string && data.readerWidth.size() <= 32))
+        && (!('readerMode' in data) || (data.readerMode is string && data.readerMode.size() <= 32))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserSuggestion(data) {
+      return data.keys().hasAll(['uid', 'tipo', 'texto', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'tipo', 'texto', 'createdAt'])
+        && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.tipo is string && data.tipo.size() >= 1 && data.tipo.size() <= 64
+        && data.texto is string && data.texto.size() >= 1 && data.texto.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEpisodeComment(data, episodeKey) {
+      return data.keys().hasAll(['uid', 'episodeKey', 'displayName', 'avatar', 'text', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'episodeKey', 'displayName', 'avatar', 'text', 'isSpoiler', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.episodeKey is string && data.episodeKey == episodeKey
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.avatar is string && data.avatar.size() <= 500
+        && data.text is string && data.text.size() >= 2 && data.text.size() <= 500
+        && (!('isSpoiler' in data) || data.isSpoiler is bool)
+        && data.createdAt is timestamp;
+    }
+
+    // Community Episode Comments
+    match /episodes/{episodeKey}/comments/{commentId} {
+      allow get: if isValidId(episodeKey) && isValidId(commentId) && isSignedIn();
+      allow list: if isValidId(episodeKey) && isSignedIn();
+      allow create: if isValidId(episodeKey) && isValidId(commentId)
+        && isSignedIn()
+        && isValidEpisodeComment(incoming(), episodeKey)
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(episodeKey) && isValidId(commentId)
+        && isSignedIn()
+        && existing().uid == request.auth.uid;
+    }
+
+    // User Root Profile (Strictly private to the owner)
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'email', 'providerId', 'episodesWatched', 'totalMinutes', 'updatedAt'])
+        );
+      allow delete: if isValidId(userId) && isOwner(userId);
 
-      // Favorites Subcollection (Anime & Manga bookmarked items)
+      // Anime Favorites Subcollection
       match /favorites/{favoriteId} {
-        allow read, write: if isOwner(userId);
+        allow get: if isValidId(userId) && isValidId(favoriteId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(favoriteId)
+          && isOwner(userId)
+          && isValidFavoriteAnime(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(favoriteId)
+          && isOwner(userId)
+          && isValidFavoriteAnime(incoming())
+          && incoming().uid == existing().uid
+          && incoming().animeId == existing().animeId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(favoriteId) && isOwner(userId);
       }
 
-      // Viewing & Reading History Subcollection
+      // Manga Favorites Subcollection
+      match /manga_favorites/{mangaId} {
+        allow get: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(mangaId)
+          && isOwner(userId)
+          && isValidFavoriteManga(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(mangaId)
+          && isOwner(userId)
+          && isValidFavoriteManga(incoming())
+          && incoming().uid == existing().uid
+          && incoming().mangaId == existing().mangaId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
+      }
+
+      // Anime Watch History Subcollection
       match /history/{historyId} {
-        allow read, write: if isOwner(userId);
+        allow get: if isValidId(userId) && isValidId(historyId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(historyId)
+          && isOwner(userId)
+          && isValidWatchHistoryEntry(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(historyId)
+          && isOwner(userId)
+          && isValidWatchHistoryEntry(incoming())
+          && incoming().uid == existing().uid
+          && incoming().animeId == existing().animeId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['animeTitle', 'coverImage', 'seasonNum', 'episodeNum', 'currentTime', 'duration', 'completed', 'timestamp', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(historyId) && isOwner(userId);
       }
 
       // Manga Reading Progress Subcollection
       match /manga_progress/{mangaId} {
-        allow read, write: if isOwner(userId);
+        allow get: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(mangaId)
+          && isOwner(userId)
+          && isValidMangaProgressEntry(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(mangaId)
+          && isOwner(userId)
+          && isValidMangaProgressEntry(incoming())
+          && incoming().uid == existing().uid
+          && incoming().mangaId == existing().mangaId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['mangaTitle', 'cover', 'flag', 'origLang', 'lastChapterNum', 'lastChapterLabel', 'readChapters', 'timestamp', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
       }
 
-      // Anime Playback Progress Subcollection
-      match /anime_progress/{animeId} {
-        allow read, write: if isOwner(userId);
-      }
-
-      // Application, Reader & Player Settings Subcollection
+      // User Settings & Reminders Subcollection
       match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
+        allow get: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(settingId)
+          && isOwner(userId)
+          && isValidUserSettings(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(settingId)
+          && isOwner(userId)
+          && isValidUserSettings(incoming())
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
       }
 
-      // Sync Metadata & Health Checkpoints
-      match /sync_metadata/{metaId} {
-        allow read, write: if isOwner(userId);
+      // User Suggestions Subcollection
+      match /suggestions/{suggestionId} {
+        allow get: if isValidId(userId) && isValidId(suggestionId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(suggestionId)
+          && isOwner(userId)
+          && isValidUserSuggestion(incoming())
+          && incoming().createdAt == request.time;
+        allow update: if false;
+        allow delete: if isValidId(userId) && isValidId(suggestionId) && isOwner(userId);
       }
-    }
-
-    // Strict security default: deny all other collections
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

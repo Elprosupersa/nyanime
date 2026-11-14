@@ -1,0 +1,82 @@
+{
+  "catalog_version": "1.0",
+  "total_series": 5,
+  "download_root": "E:\\OTAKU\\MANHUAS",
+  "series": [
+    {
+      "id": "martial-peak",
+      "mangadex_id": "b1461071-bfbb-43e7-a5b6-a7ba5904649f",
+      "title_display": "Martial Peak",
+      "type": "manhua",
+      "category": "cultivation_action",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "tales-of-demons-and-gods",
+      "mangadex_id": "812f9696-048f-496d-9ed4-84c99345d1fb",
+      "title_display": "Tales of Demons and Gods",
+      "type": "manhua",
+      "category": "reincarnation_cultivation",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "apotheosis",
+      "mangadex_id": "cdae359d-5fa9-4d4e-b11a-69dd32b09742",
+      "title_display": "Apotheosis",
+      "type": "manhua",
+      "category": "action_cultivation",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "star-martial-god-technique",
+      "mangadex_id": "267db3f7-fd9c-4395-ac36-9ffacd772473",
+      "title_display": "Star Martial God Technique",
+      "type": "manhua",
+      "category": "martial_arts_cultivation",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    },
+    {
+      "id": "soul-land-2",
+      "mangadex_id": "523ac7ed-0b24-4598-b440-814d8bdcf540",
+      "title_display": "Soul Land II - The Peerless Tang Sect",
+      "type": "manhua",
+      "category": "fantasy_action",
+      "spanish_priority": [
+        "es-la",
+        "es"
+      ],
+      "expected_hierarchy": {
+        "volume_grouping": false,
+        "file_chapter_pattern": "Capitulo {chapter:03d}.pdf"
+      }
+    }
+  ]
+}

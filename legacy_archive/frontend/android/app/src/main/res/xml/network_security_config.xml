@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Política base: Obliga HTTPS estricto globalmente -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Excepciones controladas: Dominios legados y CDNs secundarias de streaming/scrapers que requieren HTTP -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">pack.intomanga.com</domain>
+        <domain includeSubdomains="true">cdn1.inmanga.com</domain>
+        <domain includeSubdomains="true">cdn2.inmanga.com</domain>
+        <domain includeSubdomains="true">jkanime.net</domain>
+        <domain includeSubdomains="true">animeflv.net</domain>
+        <domain includeSubdomains="true">consumet.org</domain>
+        <domain includeSubdomains="true">streamtape.com</domain>
+        <domain includeSubdomains="true">vidstreaming.io</domain>
+        <domain includeSubdomains="true">mp4upload.com</domain>
+        <domain includeSubdomains="true">storage.googleapis.com</domain>
+    </domain-config>
+</network-security-config>

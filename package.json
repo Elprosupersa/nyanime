@@ -5,11 +5,24 @@
   "type": "module",
   "description": "NyAnime TV - Aplicación oficial de streaming de anime y lectura de manga",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0 --port 3000",
+    "start": "node server.ts",
+    "test": "vitest run",
+    "lint": "tsc --noEmit && eslint firestore.rules"
   },
   "devDependencies": {
-    "vite": "^5.4.10"
+    "fake-indexeddb": "^6.2.8",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "eslint": "^10.14.0",
+    "firebase": "^13.3.0",
+    "hls.js": "^1.7.4",
+    "typescript": "^7.0.2"
   }
 }

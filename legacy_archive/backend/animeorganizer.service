@@ -1,0 +1,15 @@
+[Unit]
+Description=AnimeOrganizerAI - Daemon de organización automática
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jaimegonzalez/Documentos/Organizador_Anime
+ExecStart=/home/jaimegonzalez/Documentos/Organizador_Anime/venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=10
+# Limitar consumo de recursos para no afectar juegos o uso diario en CachyOS
+CPUWeight=40
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,97 @@
+{
+  "ANIME": {
+    "total_gb": 464.031,
+    "subfolders_gb": {
+      "Akuyaku Reijou Tensei Oji-san": 10.724,
+      "BOFURI": 5.68,
+      "Bleach": 11.041,
+      "Blue Lock": 14.116,
+      "Bocchi the Rock!": 2.063,
+      "Chainsaw Man": 3.677,
+      "Chiikawa": 3.92,
+      "Classroom of the Elite": 4.928,
+      "Dandadan": 5.2,
+      "Danmachi": 14.73,
+      "Date A Live": 8.639,
+      "Dr. Stone": 12.619,
+      "Hataraku Maou-sama": 4.25,
+      "High School DxD": 45.159,
+      "Honzuki no Gekokujou": 4.628,
+      "Isekai Nonbiri Nouka": 1.982,
+      "Isekai Ojisan": 3.995,
+      "Isekai Shokudou": 4.141,
+      "Jujutsu Kaisen": 12.981,
+      "Kage no Jitsuryokusha ni Naritakute": 6.321,
+      "Kaguya-sama wa Kokurasetai": 7.346,
+      "Kaiju No. 8": 3.561,
+      "Kimetsu no Yaiba": 12.828,
+      "Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo": 9.003,
+      "Kono Subarashii Sekai ni Shukufuku wo!": 10.867,
+      "Kuma Kuma Kuma Bear": 3.111,
+      "Mahou Shoujo ni Akogarete": 2.28,
+      "Nanatsu no Taizai": 3.813,
+      "No Game No Life": 1.636,
+      "One Punch Man": 7.537,
+      "Oshi no Ko": 5.426,
+      "Otome Game no Hametsu Flag": 3.071,
+      "Otonari no Tenshi-sama ni Itsunomanika Dame Ningen ni Sareteita Ken": 3.112,
+      "Overlord": 10.647,
+      "Para_Celular": 25.795,
+      "Shinchou Yuusha": 2.202,
+      "Shingeki no Kyojin": 19.955,
+      "Slime Taoshite 300-nen": 2.316,
+      "Solo Leveling": 7.156,
+      "Sousou no Frieren": 6.731,
+      "Spy x Family": 7.467,
+      "Sword Art Online": 13.123,
+      "Tate no Yuusha no Nariagari": 8.604,
+      "Tensei shitara Ken Deshita": 3.342,
+      "Tensei shitara Slime Datta Ken": 15.966,
+      "Tokyo Ghoul": 4.501,
+      "Tondemo Skill de Isekai Hourou Meshi": 2.346,
+      "Tsue to Tsurugi no Wistoria": 4.166,
+      "Tsuki ga Michibiku Isekai Douchuu": 6.455,
+      "Vinland Saga": 8.872,
+      "Youjo Senki": 5.056,
+      "Zero no Tsukaima": 4.987,
+      "attack on titan": 24.263,
+      "mushoku tensei": 14.666,
+      "rezero": 11.03
+    }
+  },
+  "ANIME H": {
+    "total_gb": 477.929,
+    "subfolders_gb": {
+      "01 - Erotico (Sin Censura)": 18.27,
+      "02 - Miniseries Adultas (AnimeFesta)": 1.132,
+      "03 - Heavy Ecchi (Sin Censura BD)": 90.293,
+      "04 - Hentai (Sin Censura)": 368.234
+    }
+  },
+  "MANGAS": {
+    "total_gb": 41.572,
+    "subfolders_gb": {
+      "+18 Adulto": 15.603,
+      "General": 23.863,
+      "Wistoria": 2.106
+    }
+  },
+  "MANHWAS": {
+    "total_gb": 123.469,
+    "subfolders_gb": {
+      "+18 Adulto": 30.759,
+      "General": 92.71
+    }
+  },
+  "MANHUAS": {
+    "total_gb": 30.552,
+    "subfolders_gb": {
+      ".temp_cache": 0.029,
+      "Apotheosis": 3.759,
+      "Martial Peak": 20.049,
+      "Soul Land II - The Peerless Tang Sect": 2.438,
+      "Star Martial God Technique": 1.542,
+      "Tales of Demons and Gods": 2.735
+    }
+  }
+}
