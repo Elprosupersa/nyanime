@@ -14,6 +14,11 @@ import {
   state,
   uiHooks
 } from './appState.ts';
+import {
+  isStrictMangaTitleMatch,
+  lookupMangaCatalogStrict,
+  scoreMangaTitleMatch
+} from '../utils/mangaLanguage.ts';
 
 export interface MangaUiState {
   mangasCache: any[];
@@ -278,21 +283,47 @@ export const MangaSpanishMetadata = {
     'choujin x': {
       author: 'Sui Ishida',
       desc: 'En una prefectura asolada por humanos con habilidades sobrenaturales llamados "Choujin", los inseparables amigos Tokio Kurohara y Azuma Higashi se ven forzados a inyectarse una droga que despierta sus propios poderes sobrehumanos.'
+    },
+    'the mansion': {
+      author: 'Seong-Min · Platte',
+      desc: 'La única razón por la que Jun-Bae se convirtió en chofer fue para conducir autos de lujo a sus veinte años. Ahora trabaja como conductor privado para una familia de clase alta que vive en una enorme mansión donde nada es lo que parece.'
+    },
+    'las sirvientas de la mansion': {
+      author: 'Seong-Min · Platte',
+      desc: 'La única razón por la que Jun-Bae se convirtió en chofer fue para conducir autos de lujo a sus veinte años. Ahora trabaja como conductor privado para una familia de clase alta que vive en una enorme mansión donde nada es lo que parece.'
+    },
+    'blue box': {
+      author: 'Kouji Miura',
+      desc: 'Taiki Inomata, miembro del equipo masculino de bádminton, admira en secreto a Chinatsu Kano, la estrella del equipo femenino de baloncesto que entrena cada mañana en el mismo gimnasio.'
+    },
+    'ao no hako': {
+      author: 'Kouji Miura',
+      desc: 'Taiki Inomata, miembro del equipo masculino de bádminton, admira en secreto a Chinatsu Kano, la estrella del equipo femenino de baloncesto que entrena cada mañana en el mismo gimnasio.'
+    },
+    'tales of demons and gods': {
+      author: 'Mad Snail · Jiang Ruotai',
+      desc: 'Nie Li, el espiritualista demoníaco más fuerte de su vida pasada, renace a los trece años gracias al Libro del Espíritu Demoníaco Temporal y jura proteger Ciudad Gloria antes de su destrucción.'
+    },
+    'martial peak': {
+      author: 'Momo · Pikapi',
+      desc: 'El viaje hacia la cima marcial es solitario y largo. Frente a la adversidad, Yang Kai debe sobrevivir y mantenerse inquebrantable para abrirse camino hacia el pináculo de las artes marciales.'
+    },
+    'magic emperor': {
+      author: 'Nightingale · No Two Comics',
+      desc: 'Zhuo Yifan, el legendario Emperador Demoníaco, es traicionado por su discípulo por el Libro de los Nueve Secretos y reencarna en el cuerpo de Zhuo Fan, el mayordomo de una familia en decadencia.'
+    },
+    'the devil butler': {
+      author: 'Nightingale · No Two Comics',
+      desc: 'Zhuo Yifan, el legendario Emperador Demoníaco, es traicionado por su discípulo por el Libro de los Nueve Secretos y reencarna en el cuerpo de Zhuo Fan, el mayordomo de una familia en decadencia.'
     }
   } as Record<string, { author: string; desc: string }>,
 
   enrich(manga: any) {
     if (!manga) return manga;
-    const cleanT = (manga.title || '').toLowerCase().replace(/[卍:·,\-_!?'"()\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-    const allTitles = [cleanT, ...((manga.altTitles || []).map((a: unknown) => String(a).toLowerCase().replace(/[卍:·,\-_!?'"()\[\]]/g, ' ').replace(/\s+/g, ' ').trim()))];
-    let matched: { author: string; desc: string } | null = null;
-    for (const [k, v] of Object.entries(this.series)) {
-      const cleanK = k.toLowerCase().replace(/[卍:·,\-_!?'"()\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-      if (allTitles.some(t => t === cleanK || t.includes(cleanK) || cleanK.includes(t))) {
-        matched = v;
-        break;
-      }
-    }
+    const altList = Array.isArray(manga.altTitles)
+      ? manga.altTitles.map((a: unknown) => String(a || ''))
+      : [];
+    const matched = lookupMangaCatalogStrict(this.series, String(manga.title || ''), altList);
     if (matched) {
       if (matched.author && (!manga.author || manga.author === 'Autor Oficial')) {
         manga.author = matched.author;
@@ -366,23 +397,21 @@ export const FallbackMangaProvider = {
   cleanTitle(str = ''): string {
     return (str || '')
       .toLowerCase()
-      .replace(/[卍:·,\-_!?'"()\[\]]/g, ' ')
+      .replace(/[卍:·,\-_!?¡¿'"’“”()\[\]~]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   },
 
-  resolveSlugAndTotal(mangaTitle = '', expectedCount = 0) {
+  resolveSlugAndTotal(mangaTitle = '', expectedCount = 0, altTitles: string[] = []) {
     const cleanT = this.cleanTitle(mangaTitle);
-    for (const [k, v] of Object.entries(this.knownCatalog)) {
-      const cleanK = this.cleanTitle(k);
-      if (cleanT.includes(cleanK) || cleanK.includes(cleanT)) {
-        return {
-          slug: v.slug,
-          total: Math.max(v.total, expectedCount || 0),
-          title: v.title,
-          isManhwa: v.origLang === 'ko'
-        };
-      }
+    const matched = lookupMangaCatalogStrict(this.knownCatalog, mangaTitle, altTitles);
+    if (matched) {
+      return {
+        slug: matched.slug,
+        total: Math.max(matched.total, expectedCount || 0),
+        title: matched.title,
+        isManhwa: matched.origLang === 'ko'
+      };
     }
     const genSlug = cleanT.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
     return {
@@ -482,6 +511,11 @@ export const MangaSourceManager = {
 
 export const InMangaProvider = {
   catalog: {
+    'one piece': { slug: 'One-Piece', id: 'dfc7ecb5-e9b3-4aa5-a61b-a498993cd935' },
+    'boku no hero academia': { slug: 'Boku-no-Hero-Academia', id: 'dda0c17a-83da-4ef6-8c65-4763e8fbe436' },
+    'my hero academia': { slug: 'Boku-no-Hero-Academia', id: 'dda0c17a-83da-4ef6-8c65-4763e8fbe436' },
+    'tales of demons and gods': { slug: 'Tales-of-Demons-and-Gods', id: 'c42439b0-b877-4e03-8aa0-f41d3848ea1e' },
+    'yao shen ji': { slug: 'Tales-of-Demons-and-Gods', id: 'c42439b0-b877-4e03-8aa0-f41d3848ea1e' },
     'jujutsu kaisen': { slug: 'Jujutsu-Kaisen', id: 'd88692a5-c341-47fc-8e39-da11a8fdee82' },
     'shingeki no kyojin': { slug: 'Shingeki-no-Kyojin', id: 'f5abfdce-15e5-42ca-93f4-98f824cc1c42' },
     'attack on titan': { slug: 'Shingeki-no-Kyojin', id: 'f5abfdce-15e5-42ca-93f4-98f824cc1c42' },
@@ -533,49 +567,59 @@ export const InMangaProvider = {
   } as Record<string, { slug: string; id: string; isManhwa?: boolean }>,
 
   notInInManga: new Set([
-    'one piece', 'boku no hero academia', 'my hero academia',
     'solo leveling', 'na honjaman level up', 'omniscient reader', 'lector omnisciente',
     'the beginning after the end', 'tbate', 'el comienzo despues del fin',
     'tokyo revengers', 'spy x family', 'blue lock', 'vinland saga', 'sakamoto days',
     'vagabond', 'kaguya sama', 'horimiya', 'wind breaker', 'lookism', 'eleceed',
-    'nano machine', 'mercenary enrollment'
+    'nano machine', 'mercenary enrollment', 'the mansion', 'martial peak', 'magic emperor',
+    'the devil butler'
   ]),
 
   cleanTitle(str = ''): string {
     return (str || '')
       .toLowerCase()
-      .replace(/[卍:·,\-_!?'"()\[\]]/g, ' ')
+      .replace(/[卍:·,\-_!?¡¿'"’“”()\[\]~]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   },
 
-  async resolveManga(title: string) {
+  async resolveManga(title: string, altTitles: string[] = []) {
     const cleanT = this.cleanTitle(title);
     if (!cleanT) return null;
-    for (const [k, v] of Object.entries(this.catalog)) {
-      const cleanK = this.cleanTitle(k);
-      if (cleanT.includes(cleanK) || cleanK.includes(cleanT)) return v;
-    }
+    const matched = lookupMangaCatalogStrict(this.catalog, title, altTitles);
+    if (matched) return matched;
+
+    const allTargets = [title, ...(altTitles || [])].filter(Boolean);
     for (const skip of this.notInInManga) {
-      if (cleanT.includes(skip) || skip.includes(cleanT)) return null;
+      if (isStrictMangaTitleMatch(skip, allTargets)) return null;
     }
-    return await this.searchInManga(cleanT);
+    return await this.searchInManga(cleanT, allTargets);
   },
 
-  async searchInManga(cleanTitle: string) {
+  async searchInManga(cleanTitle: string, targetTitles: string[] = []) {
+    const targets = targetTitles.length > 0 ? targetTitles : [cleanTitle];
     try {
-      const bodyStr = `filter%5Bgeneres%5D%5B%5D=-1&filter%5BqueryString%5D=${encodeURIComponent(cleanTitle)}&filter%5Bskip%5D=0&filter%5Btake%5D=5&filter%5Bsortby%5D=1&filter%5BbroadcastStatus%5D=0&filter%5BonlyFavorites%5D=false&d=`;
+      const bodyStr = `filter%5Bgeneres%5D%5B%5D=-1&filter%5BqueryString%5D=${encodeURIComponent(cleanTitle)}&filter%5Bskip%5D=0&filter%5Btake%5D=8&filter%5Bsortby%5D=1&filter%5BbroadcastStatus%5D=0&filter%5BonlyFavorites%5D=false&d=`;
       const html = await nativeFetchText('https://inmanga.com/manga/getMangasConsultResult', {
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'X-Requested-With': 'XMLHttpRequest'
       }, 'POST', bodyStr, 2500);
       if (html) {
         const regex = /href=["']\/ver\/manga\/([^/]+)\/([a-f0-9\-]{36})["']/gi;
-        const match = regex.exec(html);
-        if (match) {
-          const res = { slug: match[1], id: match[2] };
-          this.catalog[cleanTitle] = res;
-          return res;
+        let match: RegExpExecArray | null;
+        let bestCandidate: { slug: string; id: string } | null = null;
+        let bestScore = -100;
+        while ((match = regex.exec(html)) !== null) {
+          const slugText = match[1].replace(/-/g, ' ');
+          const sc = scoreMangaTitleMatch(slugText, targets);
+          if (sc >= 70 && sc > bestScore) {
+            bestScore = sc;
+            bestCandidate = { slug: match[1], id: match[2] };
+          }
+        }
+        if (bestCandidate) {
+          this.catalog[cleanTitle] = bestCandidate;
+          return bestCandidate;
         }
       }
       this.notInInManga.add(cleanTitle);
@@ -585,8 +629,8 @@ export const InMangaProvider = {
     return null;
   },
 
-  async getChapters(mangaTitle: string) {
-    const item = await this.resolveManga(mangaTitle);
+  async getChapters(mangaTitle: string, altTitles: string[] = []) {
+    const item = await this.resolveManga(mangaTitle, altTitles);
     if (!item || !item.id || item.id.length !== 36) return [];
     try {
       const url = `https://inmanga.com/chapter/getall?mangaIdentification=${item.id}`;
@@ -671,16 +715,350 @@ export const InMangaProvider = {
     return [];
   },
 
-  async getPagesForChapter(mangaTitle: string, chapterNum: number | string): Promise<string[]> {
+  async getPagesForChapter(mangaTitle: string, chapterNum: number | string, altTitles: string[] = []): Promise<string[]> {
     try {
-      const chaps = await this.getChapters(mangaTitle);
+      const chaps = await this.getChapters(mangaTitle, altTitles);
       if (chaps && chaps.length > 0) {
         const parsed = parseFloat(String(chapterNum ?? '').replace(/,/g, ''));
         const targetNum = Number.isFinite(parsed) ? parsed : 1;
-        const matched = chaps.find(c => Math.abs(c.chapterNum - targetNum) < 0.01) || chaps[0];
+        const matched = chaps.find(c => Math.abs(c.chapterNum - targetNum) < 0.01) || (targetNum <= 1 ? chaps[0] : null);
         if (matched && matched.id) {
           const p = await this.getChapterPages(matched.id);
           if (p && p.length > 0) return p;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+};
+
+export const ManhwaWebProvider = {
+  knownCatalog: {
+    'the mansion': 'woollyback_1684963880474',
+    'las sirvientas de la mansion': 'woollyback_1684963880474',
+    'someone stop her': 'dejadefumar_1724705448986',
+    'dambaepiji maseyo': 'dejadefumar_1724705448986',
+    'deja de fumar': 'dejadefumar_1724705448986',
+    'stop smoking': 'dejadefumar_1724705448986',
+    'que alguien la detenga por favor': 'dejadefumar_1724705448986',
+    'got a room': 'sharehouse_1678427324851',
+    'binbang isseoyo': 'sharehouse_1678427324851',
+    'is there an empty room': 'sharehouse_1678427324851',
+    'conviviendo con 4 mujeres': 'sharehouse_1678427324851',
+    'dont tell mom': 'secret_your_mom_1679371230456',
+    'eommahanten bimiriya': 'secret_your_mom_1679371230456',
+    'keep this a secret from mom': 'secret_your_mom_1679371230456',
+    'keep it a secret from your mother': 'secret_your_mom_1679371230456',
+    'keep it a secret from mom': 'secret_your_mom_1679371230456',
+    'secret your mom': 'secret_your_mom_1679371230456',
+    'es un secreto para mama': 'secret_your_mom_1679371230456',
+    'secret class': 'clases_1671363177',
+    'clases secretas': 'clases_1671363177',
+    'my stepmothers friends': 'stepmother_friends_1678307078715-uncensored',
+    'close as neighbors': 'neighbor_1679198210785',
+    'learning the hard way': 'iljin_1685387018318',
+    'a perverts daily life': 'daily_1685321392499',
+    'perverts daily lives': 'daily_1685321392499',
+    'killing stalking': 'killing-stalking_1792788772060',
+    'sweet home': 'sweet-home_1751494099807',
+    'the greatest estate developer': 'comic-el-mejor-ingeniero-del-mundo-olympus_1691758184582',
+    'el mejor ingeniero del mundo': 'comic-el-mejor-ingeniero-del-mundo-olympus_1691758184582',
+    'sss class revival hunter': 'cazador-suicida-de-clase-sss_1693606076426',
+    'sss class suicide hunter': 'cazador-suicida-de-clase-sss_1693606076426',
+    'cazador suicida de clase sss': 'cazador-suicida-de-clase-sss_1693606076426',
+    'solo leveling': 'comic-solo_leveling_1691379040764',
+    'na honjaman level-up': 'comic-solo_leveling_1691379040764',
+    'na honjaman level up': 'comic-solo_leveling_1691379040764',
+    'the beginning after the end': 'la-vida-despues-de-la-muerte_1696084388227',
+    'tbate': 'la-vida-despues-de-la-muerte_1696084388227',
+    'el comienzo despues del fin': 'la-vida-despues-de-la-muerte_1696084388227',
+    'la vida despues de la muerte': 'la-vida-despues-de-la-muerte_1696084388227',
+    'omniscient reader': 'lector-omnisciente-99214996766',
+    "omniscient reader's viewpoint": 'lector-omnisciente-99214996766',
+    'lector omnisciente': 'lector-omnisciente-99214996766',
+    'jeonjijeok dokja sijeom': 'lector-omnisciente-99214996766',
+    'tower of god': 'torrededis_1711414733762',
+    'torre de dios': 'torrededis_1711414733762',
+    'sinui tap': 'torrededis_1711414733762',
+    'nano machine': 'el-maquina-91604803820',
+    'nanomachine': 'el-maquina-91604803820',
+    'eleceed': 'comic-gatitoelectrico_1691509690615',
+    'wind breaker': 'w1nd_breaker_1702769029028',
+    'lookism': 'nuevacara_1718949951191adsa',
+    'lucky guy': 'luckyguy_1686059297358',
+    'mercenary enrollment': 'el-asesino-yu-ijin_1783919929421',
+    'teenage mercenary': 'el-asesino-yu-ijin_1783919929421',
+    'ippakhaebyeon': 'el-asesino-yu-ijin_1783919929421',
+    'one piece': 'one-piece_1695365223767',
+    'dandadan': 'dandadan_1719359658195',
+    'blue lock': 'blue_lock-702790353434',
+    'jujutsu kaisen': 'jujutsu-kaisen_1692934515995',
+    'chainsaw man': 'chainsaw-man-2022_1692739982121',
+    'boku no hero academia': 'boku-no-hero-academia_1695959413079',
+    'my hero academia': 'boku-no-hero-academia_1695959413079',
+    'spy x family': 'spy-x-family_1697218368170',
+    'spy×family': 'spy-x-family_1697218368170',
+    'vinland saga': 'vinlandsaga188',
+    'sakamoto days': 'sakamoto-days_1736929564340',
+    'kaguya-sama: love is war': 'kaguya-sama-love-is-war_1731682922013',
+    'kaguya-sama': 'kaguya-sama-love-is-war_1731682922013',
+    'blue box': 'ao-no-hako_1736960550111',
+    'ao no hako': 'ao-no-hako_1736960550111',
+    'oshi no ko': 'oshi-no-ko_1696329910144',
+    'sousou no frieren': 'sousou-no-frieren_1696233652704',
+    'frieren': 'sousou-no-frieren_1696233652704',
+    'berserk': 'berserk_1695468838183',
+    'tales of demons and gods': 'tales-of-demons-and-gods_1693012543729',
+    'yao shen ji': 'tales-of-demons-and-gods_1693012543729',
+    'martial peak': 'martial-peak_1784076416970',
+    'wu lian dian feng': 'martial-peak_1784076416970',
+    'magic emperor': 'emperador_mágico_1703957316968',
+    'demonic emperor': 'emperador_mágico_1703957316968',
+    'the devil butler': 'emperador_mágico_1703957316968',
+    'mo huang da guan jia': 'emperador_mágico_1703957316968'
+  } as Record<string, string>,
+
+  chaptersCache: new Map<string, any[]>(),
+  notInManhwaWeb: new Set<string>(),
+  inflightResolve: new Map<string, Promise<string | null>>(),
+  inflightChapters: new Map<string, Promise<any[]>>(),
+
+  populateChaptersFromSee(id: string, see: any): any[] {
+    if (!see || !Array.isArray(see.chapters) || see.chapters.length === 0) return [];
+    const rawId = String(see._id || '');
+    const realId = String(see.real_id || see._id || id);
+    const list: any[] = [];
+    for (const c of see.chapters) {
+      const chapStr = String(c.chapter ?? '0').trim();
+      const num = parseFloat(chapStr);
+      if (!Number.isFinite(num)) continue;
+      const verLink = String(c.versions?.[0]?.link || c.link || '').trim();
+      const rawSlug = verLink ? (verLink.split('/').filter(Boolean).pop() || '') : '';
+      const fixedSlug = rawSlug
+        ? (rawId && realId ? rawSlug.replace(rawId, realId) : rawSlug)
+        : `${realId}-${chapStr}_01`;
+      list.push({
+        id: `mweb_${encodeURIComponent(fixedSlug)}`,
+        chapter: chapStr,
+        chapterNum: num,
+        title: `Capítulo ${chapStr}`,
+        pages: 18,
+        externalUrl: null,
+        publishAt: '2025',
+        group: 'ManhwaWeb ES 🇪🇸',
+        lang: 'es',
+        source: 'ManhwaWeb 🇪🇸'
+      });
+    }
+    list.sort((a, b) => a.chapterNum - b.chapterNum);
+    if (list.length > 0) {
+      this.chaptersCache.set(id, list);
+      if (realId && realId !== id) this.chaptersCache.set(realId, list);
+    }
+    return list;
+  },
+
+  async resolveId(title: string, altTitles: string[] = []): Promise<string | null> {
+    if (!title) return null;
+    const known = lookupMangaCatalogStrict(this.knownCatalog, title, altTitles);
+    if (known) return known;
+
+    const cleanKey = FallbackMangaProvider.cleanTitle(title);
+    if (this.notInManhwaWeb.has(cleanKey)) return null;
+    if (this.inflightResolve.has(cleanKey)) return this.inflightResolve.get(cleanKey)!;
+
+    const promise = (async (): Promise<string | null> => {
+      const expanded = MangaSearchSynonyms.expand(title);
+      const rawCandidates = [title, ...(altTitles || []), ...expanded]
+        .map(s => String(s || '').trim())
+        .filter(Boolean);
+      const allTargets = Array.from(new Set(rawCandidates));
+
+      // Prioritize: 1) Primary title, 2) Native CJK/Hangul titles, 3) English/Spanish synonyms, 4) Romaji
+      const cjkTargets = allTargets.filter(t => /[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
+      const latinTargets = allTargets.filter(t => !/[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
+      const orderedRaw = Array.from(new Set([
+        title,
+        ...cjkTargets,
+        ...latinTargets
+      ]));
+
+      const searchQueries: string[] = [];
+      for (const raw of orderedRaw) {
+        const cleaned = raw
+          .replace(/[卍:·,\-_!?¡¿'"’“”()\[\]~]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (cleaned.length >= 2 && !searchQueries.some(q => q.toLowerCase() === cleaned.toLowerCase())) {
+          searchQueries.push(cleaned);
+        }
+      }
+
+      let anySuccessfulFetch = false;
+
+      for (const cleanQ of searchQueries.slice(0, 5)) {
+        try {
+          const url = `https://api.manhwaweb.com/manhwa/library?buscar=${encodeURIComponent(cleanQ)}&estado=&tipo=&erotico=&demografia=&order_item=alfabetico&order_dir=desc&page=0&generos=`;
+          const res = await nativeFetchJson(url, 3400);
+          if (!res || !Array.isArray(res.data)) continue;
+          anySuccessfulFetch = true;
+          if (res.data.length === 0) continue;
+
+          let bestId: string | null = null;
+          let bestScore = -100;
+
+          // Pass 1: Fast summary match on the_real_name / name_esp
+          for (const item of res.data) {
+            const candidateNames = [item.the_real_name, item.name_esp].filter(Boolean);
+            const capBonus = Math.min(4, Number(item._numero_cap || 0) / 100);
+            const typeBonus = String(item._tipo || '').toLowerCase() === 'novela' ? -15 : 5;
+            for (const cName of candidateNames) {
+              const baseSc = scoreMangaTitleMatch(String(cName), allTargets);
+              if (baseSc >= 70) {
+                const totalSc = baseSc + capBonus + typeBonus;
+                if (totalSc > bestScore) {
+                  bestScore = totalSc;
+                  bestId = item.real_id || item._id || null;
+                }
+              }
+            }
+          }
+
+          if (bestId && bestScore >= 75) {
+            this.knownCatalog[cleanKey] = bestId;
+            return bestId;
+          }
+
+          // Pass 2: Deep /manhwa/see/{id} check for top non-novel candidates
+          // ManhwaWeb stores _name (Korean/English), name_raw, and others_name only in /manhwa/see/{id}
+          const topCands = res.data
+            .filter((it: any) => String(it._tipo || '').toLowerCase() !== 'novela' && Number(it._numero_cap || 0) > 0)
+            .slice(0, 3);
+
+          for (const cand of topCands) {
+            const candId = cand.real_id || cand._id;
+            if (!candId) continue;
+            try {
+              const see = await nativeFetchJson(`https://api.manhwaweb.com/manhwa/see/${encodeURI(candId)}`, 3400);
+              if (!see || !Array.isArray(see.chapters) || see.chapters.length === 0) continue;
+              if (String(see._tipo || '').toLowerCase() === 'novela') continue;
+
+              const seeNames = [
+                see.the_real_name,
+                see.name_esp,
+                see._name,
+                see.name_raw,
+                ...(Array.isArray(see.others_name) ? see.others_name : [])
+              ]
+                .map(s => String(s || '').trim())
+                .filter(Boolean);
+
+              const capBonus = Math.min(4, see.chapters.length / 100);
+              for (const sName of seeNames) {
+                const sc = scoreMangaTitleMatch(sName, allTargets);
+                if (sc >= 70 && sc + capBonus + 5 > bestScore) {
+                  bestScore = sc + capBonus + 5;
+                  bestId = String(see.real_id || see._id || candId);
+                  this.populateChaptersFromSee(bestId, see);
+                }
+              }
+            } catch {
+              // ignore individual see error
+            }
+          }
+
+          if (bestId) {
+            this.knownCatalog[cleanKey] = bestId;
+            return bestId;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (anySuccessfulFetch) {
+        this.notInManhwaWeb.add(cleanKey);
+      }
+      return null;
+    })();
+
+    this.inflightResolve.set(cleanKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inflightResolve.delete(cleanKey);
+    }
+  },
+
+  async getChapters(mangaTitle: string, altTitles: string[] = []): Promise<any[]> {
+    const id = await this.resolveId(mangaTitle, altTitles);
+    if (!id) return [];
+    if (this.chaptersCache.has(id)) return this.chaptersCache.get(id) || [];
+    if (this.inflightChapters.has(id)) return this.inflightChapters.get(id)!;
+
+    const promise = (async (): Promise<any[]> => {
+      try {
+        const see = await nativeFetchJson(`https://api.manhwaweb.com/manhwa/see/${encodeURI(id)}`, 3600);
+        if (see && Array.isArray(see.chapters) && see.chapters.length > 0) {
+          return this.populateChaptersFromSee(id, see);
+        }
+      } catch {
+        // ignore
+      }
+      return [];
+    })();
+
+    this.inflightChapters.set(id, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inflightChapters.delete(id);
+    }
+  },
+
+  async getChapterPages(mwebId: string): Promise<string[]> {
+    if (!mwebId) return [];
+    const rawSlug = String(mwebId).startsWith('mweb_')
+      ? decodeURIComponent(String(mwebId).slice(5))
+      : String(mwebId);
+    if (!rawSlug) return [];
+
+    const baseNoVer = rawSlug.replace(/_\d+$/, '');
+    const trySlugs = Array.from(new Set([
+      rawSlug,
+      `${baseNoVer}_01`,
+      baseNoVer,
+      `${baseNoVer}_02`
+    ]));
+
+    for (const candidateSlug of trySlugs) {
+      try {
+        const res = await nativeFetchJson(`https://api.manhwaweb.com/chapters/see/${encodeURI(candidateSlug)}`, 3800);
+        const imgs = res?.chapter?.img;
+        if (Array.isArray(imgs) && imgs.length > 0) {
+          const validImgs = imgs
+            .map((u: unknown) => String(u || '').trim())
+            .filter((u: string) => u.startsWith('http') && !u.includes('imageshack.com'));
+          if (validImgs.length > 0) return validImgs;
+        }
+      } catch {
+        // try next slug variant
+      }
+    }
+    return [];
+  },
+
+  async getPagesForChapter(mangaTitle: string, chapterNum: number | string, altTitles: string[] = []): Promise<string[]> {
+    try {
+      const chaps = await this.getChapters(mangaTitle, altTitles);
+      if (chaps && chaps.length > 0) {
+        const parsed = parseFloat(String(chapterNum ?? ''));
+        const target = Number.isFinite(parsed) ? parsed : 1;
+        const matched = chaps.find(c => Math.abs(c.chapterNum - target) < 0.01) || (target <= 1 ? chaps[0] : null);
+        if (matched && matched.id) {
+          return await this.getChapterPages(matched.id);
         }
       }
     } catch {
@@ -738,20 +1116,32 @@ export const MangaPillProvider = {
       .trim();
   },
 
-  async resolvePath(title: string): Promise<string | null> {
+  async resolvePath(title: string, altTitles: string[] = []): Promise<string | null> {
     const cleanT = this.cleanTitle(title);
     if (!cleanT) return null;
-    for (const [k, v] of Object.entries(this.catalog)) {
-      const cleanK = this.cleanTitle(k);
-      if (cleanT === cleanK || cleanT.includes(cleanK) || cleanK.includes(cleanT)) return v;
-    }
+    const matched = lookupMangaCatalogStrict(this.catalog, title, altTitles);
+    if (matched) return matched;
+
+    const allTargets = [title, ...(altTitles || []), ...MangaSearchSynonyms.expand(title)].filter(Boolean);
     try {
       const html = await nativeFetchText(`https://mangapill.com/search?q=${encodeURIComponent(cleanT)}`, {}, 'GET', null, 2500);
       if (html) {
-        const m = /href="(\/manga\/\d+\/[^"]+)"/.exec(html);
-        if (m) {
-          this.catalog[cleanT] = m[1];
-          return m[1];
+        const regex = /href="(\/manga\/\d+\/([^"]+))"/gi;
+        let m: RegExpExecArray | null;
+        let bestPath: string | null = null;
+        let bestScore = -100;
+        while ((m = regex.exec(html)) !== null) {
+          const fullPath = m[1];
+          const slugTitle = m[2].replace(/-/g, ' ');
+          const sc = scoreMangaTitleMatch(slugTitle, allTargets);
+          if (sc >= 70 && sc > bestScore) {
+            bestScore = sc;
+            bestPath = fullPath;
+          }
+        }
+        if (bestPath) {
+          this.catalog[cleanT] = bestPath;
+          return bestPath;
         }
       }
     } catch {
@@ -760,8 +1150,8 @@ export const MangaPillProvider = {
     return null;
   },
 
-  async getChapters(mangaTitle: string): Promise<any[]> {
-    const path = await this.resolvePath(mangaTitle);
+  async getChapters(mangaTitle: string, altTitles: string[] = []): Promise<any[]> {
+    const path = await this.resolvePath(mangaTitle, altTitles);
     if (!path) return [];
     if (this.chaptersCache.has(path)) return this.chaptersCache.get(path) || [];
     try {
@@ -819,13 +1209,13 @@ export const MangaPillProvider = {
     return [];
   },
 
-  async getPagesForChapter(mangaTitle: string, chapterNum: number | string): Promise<string[]> {
+  async getPagesForChapter(mangaTitle: string, chapterNum: number | string, altTitles: string[] = []): Promise<string[]> {
     try {
-      const chaps = await this.getChapters(mangaTitle);
+      const chaps = await this.getChapters(mangaTitle, altTitles);
       if (chaps && chaps.length > 0) {
         const parsed = parseFloat(String(chapterNum ?? ''));
         const target = Number.isFinite(parsed) ? parsed : 1;
-        const matched = chaps.find(c => Math.abs(c.chapterNum - target) < 0.01) || chaps[0];
+        const matched = chaps.find(c => Math.abs(c.chapterNum - target) < 0.01) || (target <= 1 ? chaps[0] : null);
         if (matched) return await this.getChapterPages(matched.id);
       }
     } catch {
@@ -851,24 +1241,20 @@ export const SpanishWebtoonProvider = {
     'lookism': { slug: 'lookism', total: 500 },
     'eleceed': { slug: 'eleceed', total: 310 },
     'nano machine': { slug: 'nano-machine', total: 220 },
-    'mercenary enrollment': { slug: 'mercenary-enrollment', total: 200 }
+    'mercenary enrollment': { slug: 'mercenary-enrollment', total: 200 },
+    'the mansion': { slug: 'the-mansion', total: 57 }
   } as Record<string, { slug: string; total: number }>,
 
   cleanTitle(str = ''): string {
     return (str || '').toLowerCase().replace(/[卍:·,\-_!?'"()\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
   },
 
-  resolveWebtoon(title = '') {
-    const clean = this.cleanTitle(title);
-    for (const [k, v] of Object.entries(this.titles)) {
-      const cleanK = this.cleanTitle(k);
-      if (clean.includes(cleanK) || cleanK.includes(clean)) return v;
-    }
-    return null;
+  resolveWebtoon(title = '', altTitles: string[] = []) {
+    return lookupMangaCatalogStrict(this.titles, title, altTitles);
   },
 
-  isWebtoon(title = ''): boolean {
-    return !!this.resolveWebtoon(title);
+  isWebtoon(title = '', altTitles: string[] = []): boolean {
+    return !!this.resolveWebtoon(title, altTitles);
   },
 
   getChapters() {
@@ -876,11 +1262,16 @@ export const SpanishWebtoonProvider = {
   },
 
   async getChapterPages(slug: string, chapNum: number | string) {
-    return await InMangaProvider.getPagesForChapter(slug.replace(/-/g, ' '), chapNum);
+    const cleanTitle = slug.replace(/-/g, ' ');
+    const mweb = await ManhwaWebProvider.getPagesForChapter(cleanTitle, chapNum);
+    if (mweb && mweb.length > 0) return mweb;
+    return await InMangaProvider.getPagesForChapter(cleanTitle, chapNum);
   },
 
-  async getPagesForChapter(title: string, chapNum: number | string) {
-    return await InMangaProvider.getPagesForChapter(title, chapNum);
+  async getPagesForChapter(title: string, chapNum: number | string, altTitles: string[] = []) {
+    const mweb = await ManhwaWebProvider.getPagesForChapter(title, chapNum, altTitles);
+    if (mweb && mweb.length > 0) return mweb;
+    return await InMangaProvider.getPagesForChapter(title, chapNum, altTitles);
   }
 };
 
@@ -946,12 +1337,22 @@ export const MangaDex = {
     'eleceed': '7e544761-7d3d-4fce-8137-719814d7d138',
     'nano machine': '6e4805a6-75ab-462d-883c-4ddedb8e4df6',
     'mercenary enrollment': '9ecd208c-c592-4462-9f57-4d7d4a9f956f',
+    'teenage mercenary': '9ecd208c-c592-4462-9f57-4d7d4a9f956f',
     'monster': 'd9e30523-9d65-469e-92a2-302995770950',
     'fire punch': '6fef1f74-a099-4f83-9456-978852b695eb',
     'dr. stone': '239d6260-d71f-43b0-afff-074e3619e3de',
     'dr stone': '239d6260-d71f-43b0-afff-074e3619e3de',
     'gantz': 'c1522b6e-00f2-4c28-a06e-58b95b77b59a',
-    'choujin x': '5d5646f4-27c0-4b4e-8f57-e102e9f88e30'
+    'choujin x': '5d5646f4-27c0-4b4e-8f57-e102e9f88e30',
+    'blue box': 'f98660a1-d2e2-461c-960d-7bd13df8b76d',
+    'ao no hako': 'f98660a1-d2e2-461c-960d-7bd13df8b76d',
+    'tales of demons and gods': 'f1fe6de3-eb26-4c0c-b358-f66f0b0976e7',
+    'yao shen ji': 'f1fe6de3-eb26-4c0c-b358-f66f0b0976e7',
+    'martial peak': 'fcfbd13f-fb59-45a6-9a3f-7a5b32e54f25',
+    'wu lian dian feng': 'fcfbd13f-fb59-45a6-9a3f-7a5b32e54f25',
+    'magic emperor': '8d163365-15a6-4031-8671-29a11e3b6d69',
+    'demonic emperor': '8d163365-15a6-4031-8671-29a11e3b6d69',
+    'the devil butler': '8d163365-15a6-4031-8671-29a11e3b6d69'
   } as Record<string, string>,
 
   chaptersMemCache: new Map<string, any>(),
@@ -973,64 +1374,83 @@ export const MangaDex = {
     return title || t['ja-ro'] || t['ko-ro'] || (Object.values(t)[0] as string) || 'Manga';
   },
 
+  resolvedMetaCache: new Map<string, { id: string | null; extraAltTitles: string[] }>(),
+
   async resolveMangaDexId(title: string, altTitles: string[] = []): Promise<string | null> {
     if (!title) return null;
-    const cleanT = FallbackMangaProvider.cleanTitle(title);
+    const known = lookupMangaCatalogStrict(this.knownDexMap, title, altTitles);
+    if (known) return known;
 
-    for (const [key, uuid] of Object.entries(this.knownDexMap)) {
-      const cleanK = FallbackMangaProvider.cleanTitle(key);
-      if (cleanT.includes(cleanK) || cleanK.includes(cleanT)) return uuid;
-      if (Array.isArray(altTitles)) {
-        for (const alt of altTitles) {
-          const cleanAlt = FallbackMangaProvider.cleanTitle(String(alt));
-          if (cleanAlt && (cleanAlt.includes(cleanK) || cleanK.includes(cleanAlt))) return uuid;
+    const cleanKey = FallbackMangaProvider.cleanTitle(title);
+    if (this.resolvedMetaCache.has(cleanKey)) {
+      const cached = this.resolvedMetaCache.get(cleanKey)!;
+      if (Array.isArray(altTitles) && cached.extraAltTitles.length > 0) {
+        for (const t of cached.extraAltTitles) {
+          if (t && !altTitles.includes(t)) altTitles.push(t);
         }
       }
+      return cached.id;
     }
 
-    const queries = [title, ...(altTitles || [])];
+    const expanded = MangaSearchSynonyms.expand(title);
+    const allTargets = Array.from(new Set([title, ...(altTitles || []), ...expanded].filter(Boolean)));
+    const cjkTargets = allTargets.filter(t => /[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
+    const latinTargets = allTargets.filter(t => !/[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
+    const queries = Array.from(new Set([title, ...latinTargets, ...cjkTargets])).slice(0, 6);
+    const ratings = '&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic';
+
     for (const q of queries) {
       if (!q || q.length < 2) continue;
       try {
         const cleanQ = FallbackMangaProvider.cleanTitle(q);
-        const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&limit=10`;
+        if (!cleanQ || cleanQ.length < 2) continue;
+        const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&limit=10${ratings}`;
         const data = await nativeFetchJson(url);
         if (data?.data?.length > 0) {
+          let bestId: string | null = null;
+          let bestScore = -100;
+          let bestAltTitles: string[] = [];
           for (const item of data.data) {
-            const itemTitles = [
+            const rawTitles = [
               ...Object.values(item.attributes?.title || {}),
               ...(item.attributes?.altTitles || []).flatMap((a: any) => Object.values(a))
-            ].map(s => FallbackMangaProvider.cleanTitle(String(s)));
+            ].map(s => String(s || '').trim()).filter(Boolean);
 
-            const isDoujin = itemTitles.some(t => t.includes('doujinshi') || t.includes('fan comic') || t.includes('anthology'));
+            const isDoujin = rawTitles.some(t => {
+              const low = t.toLowerCase();
+              return low.includes('doujinshi') || low.includes('fan comic') || low.includes('anthology');
+            });
             if (isDoujin) continue;
 
-            if (itemTitles.some(t => t === cleanT || t.includes(cleanT) || cleanT.includes(t))) {
-              return item.id;
+            for (const candTitle of rawTitles) {
+              const sc = scoreMangaTitleMatch(candTitle, allTargets);
+              if (sc >= 70 && sc > bestScore) {
+                bestScore = sc;
+                bestId = item.id;
+                bestAltTitles = rawTitles;
+              }
             }
           }
-
-          const words = cleanQ.split(' ').filter(w => w.length >= 3);
-          const partialMatch = data.data.find((it: any) => {
-            const itemTitles = [
-              ...Object.values(it.attributes?.title || {}),
-              ...(it.attributes?.altTitles || []).flatMap((a: any) => Object.values(a))
-            ].map(s => FallbackMangaProvider.cleanTitle(String(s)));
-            const isDoujin = itemTitles.some(t => t.includes('doujinshi') || t.includes('fan comic'));
-            if (isDoujin) return false;
-            return words.some(w => itemTitles.some(t => t.includes(w)));
-          });
-          if (partialMatch) return partialMatch.id;
+          if (bestId) {
+            this.resolvedMetaCache.set(cleanKey, { id: bestId, extraAltTitles: bestAltTitles });
+            if (Array.isArray(altTitles) && bestAltTitles.length > 0) {
+              for (const t of bestAltTitles) {
+                if (t && !altTitles.includes(t)) altTitles.push(t);
+              }
+            }
+            return bestId;
+          }
         }
       } catch {
         // ignore
       }
     }
+    this.resolvedMetaCache.set(cleanKey, { id: null, extraAltTitles: [] });
     return null;
   },
 
   async getCatalog(type = 'ALL', limit = 32): Promise<any[]> {
-    let url = `https://api.mangadex.org/manga?limit=${limit}&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a`;
+    let url = `https://api.mangadex.org/manga?limit=${limit}&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`;
     if (type === 'MANGA') url += '&originalLanguage%5B%5D=ja';
     else if (type === 'MANHWA') url += '&originalLanguage%5B%5D=ko';
     else if (type === 'MANHUA') url += '&originalLanguage%5B%5D=zh';
@@ -1070,7 +1490,7 @@ export const MangaDex = {
     if (!query) return [];
     try {
       const cleanQ = FallbackMangaProvider.cleanTitle(query);
-      const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&limit=${limit}&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a`;
+      const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&limit=${limit}&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`;
       const data = await nativeFetchJson(url);
       if (!data?.data) return [];
       return data.data.map((m: any) => {
@@ -1099,8 +1519,18 @@ export const MangaDex = {
     }
   },
 
-  async getChapters(mangaId: string | null, mangaTitle = '', preferredSource: string | null = null, onBgUpdate?: (fullMerged: any) => void) {
+  async getChapters(
+    mangaId: string | null,
+    mangaTitle = '',
+    preferredSource: string | null = null,
+    onBgUpdate?: (fullMerged: any) => void,
+    altTitlesParam?: string[]
+  ) {
     const activeSource = preferredSource || MangaSourceManager.getActiveSourceId();
+    const activeManga = nWin.Store?.state?.activeManga || state.obraLecturaActual;
+    const effectiveAltTitles: string[] = Array.isArray(altTitlesParam) && altTitlesParam.length > 0
+      ? [...altTitlesParam]
+      : (Array.isArray(activeManga?.altTitles) ? [...activeManga.altTitles] : []);
     const cacheKey = `${mangaId || FallbackMangaProvider.cleanTitle(mangaTitle)}_${activeSource}`;
 
     if (this.chaptersMemCache.has(cacheKey)) {
@@ -1109,19 +1539,42 @@ export const MangaDex = {
 
     let resolvedId = mangaId;
     if (!resolvedId && mangaTitle) {
-      resolvedId = await this.resolveMangaDexId(mangaTitle);
+      resolvedId = await this.resolveMangaDexId(mangaTitle, effectiveAltTitles);
+    } else if (resolvedId && mangaTitle) {
+      // Ensure cached extraAltTitles from MangaDex are merged into effectiveAltTitles
+      const cleanKey = FallbackMangaProvider.cleanTitle(mangaTitle);
+      const cachedMeta = this.resolvedMetaCache.get(cleanKey);
+      if (cachedMeta?.extraAltTitles?.length) {
+        for (const t of cachedMeta.extraAltTitles) {
+          if (t && !effectiveAltTitles.includes(t)) effectiveAltTitles.push(t);
+        }
+      }
+    }
+    if (activeManga && Array.isArray(activeManga.altTitles)) {
+      for (const t of effectiveAltTitles) {
+        if (t && !activeManga.altTitles.includes(t)) activeManga.altTitles.push(t);
+      }
     }
 
     const inmangaPromise = Promise.race([
-      InMangaProvider.getChapters(mangaTitle).catch(() => []),
-      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 3200))
+      InMangaProvider.getChapters(mangaTitle, effectiveAltTitles).catch(() => []),
+      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 3800))
+    ]);
+    const mwebPromise = Promise.race([
+      ManhwaWebProvider.getChapters(mangaTitle, effectiveAltTitles).catch(() => []),
+      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 4800))
     ]);
     const mpillPromise = Promise.race([
-      MangaPillProvider.getChapters(mangaTitle).catch(() => []),
-      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 3400))
+      MangaPillProvider.getChapters(mangaTitle, effectiveAltTitles).catch(() => []),
+      new Promise<any[]>(resolve => setTimeout(() => resolve([]), 3800))
     ]);
 
-    const buildChapterResult = (rawChapters: any[], inmangaChapters: any[], mpillChapters: any[] = []) => {
+    const buildChapterResult = (
+      rawChapters: any[],
+      inmangaChapters: any[],
+      mpillChapters: any[] = [],
+      mwebChapters: any[] = []
+    ) => {
       const dexChapters: any[] = [];
       for (const c of (rawChapters || [])) {
         const attr = c.attributes || {};
@@ -1151,6 +1604,7 @@ export const MangaDex = {
         return nWin.NyAnimeMangaLang.buildStrictLanguageBuckets({
           dexChapters,
           inmangaChapters: inmangaChapters || [],
+          manhwaWebChapters: mwebChapters || [],
           mangaPillChapters: mpillChapters || []
         });
       }
@@ -1179,6 +1633,7 @@ export const MangaDex = {
       };
       const spanish = dedup([
         ...dexChapters.filter(c => normLang(c.lang) === 'es'),
+        ...(mwebChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'ManhwaWeb ES 🇪🇸' })),
         ...(inmangaChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'InManga Scan 🇪🇸' }))
       ]);
       const english = dedup([
@@ -1197,7 +1652,7 @@ export const MangaDex = {
         other,
         all,
         total: all.length,
-        isCustomWebtoon: spanish.some((c: any) => String(c.id).startsWith('inmanga_'))
+        isCustomWebtoon: spanish.some((c: any) => String(c.id).startsWith('inmanga_') || String(c.id).startsWith('mweb_'))
       };
     };
 
@@ -1206,10 +1661,11 @@ export const MangaDex = {
       const esBaseUrl = resolvedId ? `https://api.mangadex.org/manga/${resolvedId}/feed?${dexCommon}&translatedLanguage%5B%5D=es&translatedLanguage%5B%5D=es-la` : null;
       const enBaseUrl = resolvedId ? `https://api.mangadex.org/manga/${resolvedId}/feed?${dexCommon}&translatedLanguage%5B%5D=en` : null;
 
-      const [esData, enData, inmangaChapters, mpillInitial] = await Promise.all([
+      const [esData, enData, inmangaChapters, mwebInitial, mpillInitial] = await Promise.all([
         esBaseUrl ? nativeFetchJson(`${esBaseUrl}&offset=0`, 4200).catch(() => null) : Promise.resolve(null),
         enBaseUrl ? nativeFetchJson(`${enBaseUrl}&offset=0`, 4200).catch(() => null) : Promise.resolve(null),
         inmangaPromise,
+        mwebPromise,
         mpillPromise
       ]);
 
@@ -1219,6 +1675,7 @@ export const MangaDex = {
       ];
       const esTotal = esData?.total || 0;
       const enTotal = enData?.total || 0;
+      const mwebChapters = Array.isArray(mwebInitial) ? mwebInitial : [];
       const mpillChapters = Array.isArray(mpillInitial) ? mpillInitial : [];
 
       const validInternal = rawChapters.filter(c => c.attributes?.pages > 0 && !c.attributes?.externalUrl);
@@ -1227,9 +1684,15 @@ export const MangaDex = {
         return (!Number.isNaN(n) && n < min) ? n : min;
       }, 999999);
       const minInmChap = inmangaChapters?.length > 0 ? inmangaChapters[0].chapterNum : 999999;
+      const minMwebChap = mwebChapters?.length > 0 ? mwebChapters[0].chapterNum : 999999;
       const minMpillChap = mpillChapters?.length > 0 ? mpillChapters[0].chapterNum : 999999;
-      const minOverallChap = Math.min(minDexChap, minInmChap, minMpillChap);
-      const maxSourceCount = Math.max(validInternal.length, (inmangaChapters || []).length, mpillChapters.length);
+      const minOverallChap = Math.min(minDexChap, minInmChap, minMwebChap, minMpillChap);
+      const maxSourceCount = Math.max(
+        validInternal.length,
+        (inmangaChapters || []).length,
+        mwebChapters.length,
+        mpillChapters.length
+      );
 
       if (resolvedId && (minOverallChap > 2 || maxSourceCount < 12)) {
         const allLangBase = `https://api.mangadex.org/manga/${resolvedId}/feed?${dexCommon}`;
@@ -1270,7 +1733,7 @@ export const MangaDex = {
               }
             }
             if (added) {
-              const fullMerged = buildChapterResult(rawChapters, inmangaChapters, mpillChapters);
+              const fullMerged = buildChapterResult(rawChapters, inmangaChapters, mpillChapters, mwebChapters);
               this.chaptersMemCache.set(cacheKey, fullMerged);
               const curActive = nWin.Store?.state?.activeManga || state.obraLecturaActual;
               if (curActive && (curActive.dexId === resolvedId || curActive.title === mangaTitle)) {
@@ -1284,17 +1747,27 @@ export const MangaDex = {
         }, 30);
       }
 
-      const finalResult = buildChapterResult(rawChapters, inmangaChapters, mpillChapters);
+      const finalResult = buildChapterResult(rawChapters, inmangaChapters, mpillChapters, mwebChapters);
       this.chaptersMemCache.set(cacheKey, finalResult);
       return finalResult;
     } catch (e) {
       console.error('Error fetching chapters from MangaDex, using multi-source fallback:', e);
-      const [inmangaChapters, mpillChapters] = await Promise.all([inmangaPromise, mpillPromise]);
-      return buildChapterResult([], inmangaChapters, mpillChapters);
+      const [inmangaChapters, mwebChapters, mpillChapters] = await Promise.all([
+        inmangaPromise,
+        mwebPromise,
+        mpillPromise
+      ]);
+      return buildChapterResult([], inmangaChapters, mpillChapters, mwebChapters);
     }
   },
 
-  async getChapterPages(chapterOrId: any, mangaTitle = '', chapterNum: number | string = 1, preferredLangParam: string | null = null) {
+  async getChapterPages(
+    chapterOrId: any,
+    mangaTitle = '',
+    chapterNum: number | string = 1,
+    preferredLangParam: string | null = null,
+    altTitlesParam?: string[]
+  ) {
     let chapterId = '';
     let chapterObj: any = null;
     const rawFallbackChap = parseFloat(String(chapterNum ?? ''));
@@ -1313,6 +1786,11 @@ export const MangaDex = {
         c => c.id === chapterId || Math.abs(parseFloat(c.chapterNum) - chap) < 0.001
       ) || null;
     }
+
+    const activeManga = nWin.Store?.state?.activeManga || state.obraLecturaActual;
+    const effectiveAltTitles: string[] = Array.isArray(altTitlesParam) && altTitlesParam.length > 0
+      ? altTitlesParam
+      : (Array.isArray(activeManga?.altTitles) ? activeManga.altTitles : []);
 
     const normLangFn = nWin.NyAnimeMangaLang?.normalizeMangaLang || ((raw: string) => {
       const s = String(raw || '').trim().toLowerCase();
@@ -1349,7 +1827,7 @@ export const MangaDex = {
     if (this.pagesInflightMap.has(pageCacheKey)) return this.pagesInflightMap.get(pageCacheKey);
 
     const resolvePromise = (async () => {
-      const fallbackInfo = FallbackMangaProvider.resolveSlugAndTotal(mangaTitle, 0);
+      const fallbackInfo = FallbackMangaProvider.resolveSlugAndTotal(mangaTitle, 0, effectiveAltTitles);
       const slug = fallbackInfo.slug;
 
       const candidates = (langSel.candidates || []).map((c: any) => ({
@@ -1365,6 +1843,7 @@ export const MangaDex = {
         String(id).includes('-') &&
         !String(id).startsWith('cdn_') &&
         !String(id).startsWith('inmanga_') &&
+        !String(id).startsWith('mweb_') &&
         !String(id).startsWith('mpill_') &&
         !String(id).startsWith('sl_es_') &&
         !String(id).startsWith('webtoon_es_') &&
@@ -1401,6 +1880,15 @@ export const MangaDex = {
           } catch {
             // next candidate
           }
+        } else if (cId.startsWith('mweb_') && (targetLang === 'es' || targetLang === 'all')) {
+          try {
+            const pages = await ManhwaWebProvider.getChapterPages(cId);
+            if (pages && pages.length > 0) {
+              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: cand.group || 'ManhwaWeb ES 🇪🇸', chapterId: cId, source: 'ManhwaWeb 🇪🇸' };
+            }
+          } catch {
+            // next
+          }
         } else if (cId.startsWith('inmanga_') && (targetLang === 'es' || targetLang === 'all')) {
           try {
             const pages = await InMangaProvider.getChapterPages(cId);
@@ -1424,7 +1912,15 @@ export const MangaDex = {
 
       if (mangaTitle && (targetLang === 'es' || targetLang === 'all')) {
         try {
-          const inmPages = await InMangaProvider.getPagesForChapter(mangaTitle, chap);
+          const mwebPages = await ManhwaWebProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
+          if (mwebPages && mwebPages.length > 0) {
+            return { pages: mwebPages, saverPages: mwebPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'ManhwaWeb ES 🇪🇸', source: 'ManhwaWeb 🇪🇸' };
+          }
+        } catch {
+          // ignore
+        }
+        try {
+          const inmPages = await InMangaProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
           if (inmPages && inmPages.length > 0) {
             return { pages: inmPages, saverPages: inmPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'InManga Scan 🇪🇸', source: 'InManga' };
           }
@@ -1433,13 +1929,11 @@ export const MangaDex = {
         }
       }
 
-      const activeManga = nWin.Store?.state?.activeManga || state.obraLecturaActual;
       let targetDexId = activeManga?.dexId;
       if (!targetDexId && mangaTitle) {
-        const cleanT = FallbackMangaProvider.cleanTitle(mangaTitle);
-        targetDexId = this.knownDexMap[cleanT] || null;
+        targetDexId = lookupMangaCatalogStrict(this.knownDexMap, mangaTitle, effectiveAltTitles);
         if (!targetDexId) {
-          try { targetDexId = await this.resolveMangaDexId(mangaTitle); } catch { /* ignore */ }
+          try { targetDexId = await this.resolveMangaDexId(mangaTitle, effectiveAltTitles); } catch { /* ignore */ }
         }
       }
 
@@ -1451,7 +1945,7 @@ export const MangaDex = {
           else if (targetLang === 'ja') langFilterQuery = '&translatedLanguage%5B%5D=ja&translatedLanguage%5B%5D=ja-ro';
           else if (targetLang === 'ko') langFilterQuery = '&translatedLanguage%5B%5D=ko&translatedLanguage%5B%5D=ko-ro';
 
-          const directUrl = `https://api.mangadex.org/chapter?manga=${targetDexId}&chapter=${chap}${langFilterQuery}&order%5BpublishAt%5D=desc&includes%5B%5D=scanlation_group&limit=20`;
+          const directUrl = `https://api.mangadex.org/chapter?manga=${targetDexId}&chapter=${chap}${langFilterQuery}&order%5BpublishAt%5D=desc&includes%5B%5D=scanlation_group&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic&limit=20`;
           const directRes = await nativeFetchJson(directUrl, 3800);
 
           if (directRes && Array.isArray(directRes.data) && directRes.data.length > 0) {
@@ -1502,7 +1996,7 @@ export const MangaDex = {
 
       if (mangaTitle && (targetLang === 'en' || targetLang === 'all')) {
         try {
-          const mpPages = await MangaPillProvider.getPagesForChapter(mangaTitle, chap);
+          const mpPages = await MangaPillProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
           if (mpPages && mpPages.length > 0) {
             return { pages: mpPages, saverPages: mpPages, isDirect: true, slug, chap, isSpanish: false, lang: 'en', group: 'MangaPill HD 🇬🇧', source: 'MangaPill' };
           }
@@ -1533,10 +2027,10 @@ export const AniListMangaService = {
   async getCatalog(category = 'ALL', limit = 48): Promise<any[]> {
     if (this.cache[category]?.length > 0) return this.cache[category];
 
-    let filter = 'type: MANGA, sort: POPULARITY_DESC';
-    if (category === 'MANGA') filter = 'type: MANGA, countryOfOrigin: "JP", sort: POPULARITY_DESC';
-    else if (category === 'MANHWA') filter = 'type: MANGA, countryOfOrigin: "KR", sort: POPULARITY_DESC';
-    else if (category === 'MANHUA') filter = 'type: MANGA, countryOfOrigin: "CN", sort: POPULARITY_DESC';
+    let filter = 'type: MANGA, isAdult: false, sort: POPULARITY_DESC';
+    if (category === 'MANGA') filter = 'type: MANGA, countryOfOrigin: "JP", isAdult: false, sort: POPULARITY_DESC';
+    else if (category === 'MANHWA') filter = 'type: MANGA, countryOfOrigin: "KR", isAdult: false, sort: POPULARITY_DESC';
+    else if (category === 'MANHUA') filter = 'type: MANGA, countryOfOrigin: "CN", isAdult: false, sort: POPULARITY_DESC';
 
     const query = `
       query {
@@ -1544,6 +2038,7 @@ export const AniListMangaService = {
           media(${filter}) {
             id
             title { romaji english native }
+            synonyms
             coverImage { extraLarge large medium color }
             bannerImage
             description
@@ -1578,7 +2073,7 @@ export const AniListMangaService = {
         else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
-        const altList = [m.title?.romaji, m.title?.english, m.title?.native].filter(Boolean);
+        const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
         const cover = m.coverImage?.extraLarge || m.coverImage?.large || m.coverImage?.medium || '';
         const staffAuthor = (m.staff?.nodes || []).map((n: any) => n?.name?.full).filter(Boolean).join(' · ');
 
@@ -1618,6 +2113,7 @@ export const AniListMangaService = {
           media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
             id
             title { romaji english native }
+            synonyms
             coverImage { extraLarge large medium color }
             bannerImage
             description
@@ -1651,7 +2147,7 @@ export const AniListMangaService = {
         else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
-        const altList = [m.title?.romaji, m.title?.english, m.title?.native].filter(Boolean);
+        const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
         const cover = m.coverImage?.extraLarge || m.coverImage?.large || '';
         const staffAuthor = (m.staff?.nodes || []).map((n: any) => n?.name?.full).filter(Boolean).join(' · ');
 
@@ -1720,6 +2216,7 @@ export const AniListMangaService = {
           ) {
             id
             title { romaji english native }
+            synonyms
             coverImage { extraLarge large medium color }
             bannerImage
             description
@@ -1765,7 +2262,7 @@ export const AniListMangaService = {
         else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
-        const altList = [m.title?.romaji, m.title?.english, m.title?.native].filter(Boolean);
+        const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
         const cover = m.coverImage?.extraLarge || m.coverImage?.large || '';
         const staffAuthor = (m.staff?.nodes || []).map((n: any) => n?.name?.full).filter(Boolean).join(' · ');
 

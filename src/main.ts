@@ -17,6 +17,11 @@ import { KeiyoushiCatalogManager } from './services/keiyoushi.ts';
 import { organizeAnimeFranchise, computeAvailableEpisodes } from './utils/seasonOrder.ts';
 import {
   normalizeMangaLang,
+  normalizeMangaCompareTitle,
+  tokenizeMangaTitle,
+  scoreMangaTitleMatch,
+  isStrictMangaTitleMatch,
+  lookupMangaCatalogStrict,
   buildStrictLanguageBuckets,
   selectPageCandidatesForLanguage
 } from './utils/mangaLanguage.ts';
@@ -130,7 +135,15 @@ import {
 } from './ui/scheduleView.ts';
 
 import {
+  AniListMangaService,
+  InMangaProvider,
   KeiyoushiManager,
+  ManhwaWebProvider,
+  MangaDex,
+  MangaPillProvider,
+  SpanishWebtoonProvider,
+  buscarMangaMultiFuente,
+  mangaUiState,
   abrirMangaPorIndice,
   cambiarEstadoLectura,
   cambiarGeneroLectura,
@@ -262,9 +275,18 @@ mWin.NyAnimeSeasons = {
 
 mWin.NyAnimeMangaLang = {
   normalizeMangaLang,
+  normalizeMangaCompareTitle,
+  tokenizeMangaTitle,
+  scoreMangaTitleMatch,
+  isStrictMangaTitleMatch,
+  lookupMangaCatalogStrict,
   buildStrictLanguageBuckets,
   selectPageCandidatesForLanguage
 };
+mWin.ManhwaWebProvider = ManhwaWebProvider;
+mWin.MangaDex = MangaDex;
+mWin.mangaUiState = mangaUiState;
+mWin.AniListMangaService = AniListMangaService;
 
 mWin.Hls = Hls;
 
@@ -409,6 +431,14 @@ Object.assign(mWin, {
   cambiarVistaEmision,
   onScheduleSearchInput,
   // Manga Catalog
+  ManhwaWebProvider,
+  InMangaProvider,
+  MangaPillProvider,
+  SpanishWebtoonProvider,
+  MangaDex,
+  AniListMangaService,
+  buscarMangaMultiFuente,
+  cargarMangasYNovelas,
   recargarCatalogoManga,
   limpiarHistorialManga,
   onMangaSearchInput,
@@ -422,6 +452,7 @@ Object.assign(mWin, {
   toggleFavoritoMangaCardPorIndice,
   toggleFavoritoMangaCard,
   // Manga Detail
+  abrirDetalleManga,
   cerrarDetalleManga,
   toggleMangaFavoritoActual,
   mostrarModalFuentesManga,

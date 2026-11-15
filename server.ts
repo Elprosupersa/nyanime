@@ -173,8 +173,21 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
     };
 
     if (!isMangaDex) {
-      headers['Referer'] = targetOrigin + '/';
-      headers['Origin'] = targetOrigin;
+      if (
+        targetUrl.hostname.endsWith('manhwaweb.com') ||
+        targetUrl.hostname.endsWith('img1mw.xyz') ||
+        targetUrl.hostname.endsWith('img2mw.xyz') ||
+        targetUrl.hostname.endsWith('img3mw.xyz') ||
+        targetUrl.hostname.endsWith('img4mw.xyz') ||
+        targetUrl.hostname.endsWith('lezhin.com') ||
+        targetUrl.hostname.endsWith('lezhincomics.com')
+      ) {
+        headers['Referer'] = 'https://manhwaweb.com/';
+        headers['Origin'] = 'https://manhwaweb.com';
+      } else {
+        headers['Referer'] = targetOrigin + '/';
+        headers['Origin'] = targetOrigin;
+      }
     }
     const customCt = req.headers['x-custom-content-type'];
     const reqCt = req.headers['content-type'];
@@ -267,6 +280,24 @@ async function handleImgProxy(req: http.IncomingMessage, res: http.ServerRespons
         targetUrl.pathname.includes('/mangap/')
       ) {
         headers['Referer'] = 'https://mangapill.com/';
+      } else if (
+        targetUrl.hostname.endsWith('manhwaweb.com') ||
+        targetUrl.hostname.endsWith('img1mw.xyz') ||
+        targetUrl.hostname.endsWith('img2mw.xyz') ||
+        targetUrl.hostname.endsWith('img3mw.xyz') ||
+        targetUrl.hostname.endsWith('img4mw.xyz') ||
+        targetUrl.hostname.endsWith('toptoon.com') ||
+        targetUrl.hostname.endsWith('lezhin.com') ||
+        targetUrl.hostname.endsWith('lezhincomics.com')
+      ) {
+        headers['Referer'] = 'https://manhwaweb.com/';
+        headers['Origin'] = 'https://manhwaweb.com';
+      } else if (
+        targetUrl.hostname.endsWith('webtoons.com') ||
+        targetUrl.hostname.endsWith('pstatic.net') ||
+        targetUrl.hostname.endsWith('naver.net')
+      ) {
+        headers['Referer'] = 'https://www.webtoons.com/';
       } else {
         headers['Referer'] = targetUrl.origin + '/';
       }

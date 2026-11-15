@@ -70,6 +70,155 @@ export function deduplicateLanguageChapters(items: MangaChapterItem[]): MangaCha
   return result;
 }
 
+const MANGA_TITLE_STOPWORDS = new Set([
+  'the', 'a', 'an', 'el', 'la', 'los', 'las', 'un', 'una'
+]);
+
+const MANGA_SPINOFF_MARKERS = new Set([
+  'ragnarok', 'arise', 'boruto', 'generations', 'illegals', 'vigilantes',
+  'smash', 'party', 'anthology', 'doujinshi', 'oneshot', 'gaiden', 'spinoff',
+  'modulo', 'nagi', 'aftermath', 'another', 're', 'episode', 'spin', 'off',
+  'fan', 'comic', 'novel', 'light'
+]);
+
+export function normalizeMangaCompareTitle(raw?: string | null): string {
+  const s = String(raw || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u00d7/g, ' x ')
+    // Strip parenthetical years or format tags e.g. "(2020)", "(Manhwa)", "[Webtoon]"
+    .replace(/[([]\s*(?:19\d{2}|20\d{2}|manhwa|manga|manhua|webtoon|novel|novela|colored|full\s*color|espanol|spanish|english)\s*[)\]]/gi, ' ')
+    // Normalize common leetspeak in ManhwaWeb titles (e.g. L3vel1ng, Di0s, W1nd, C4d3n4s)
+    .replace(/([a-z])0([a-z])/g, '$1o$2')
+    .replace(/([a-z])1([a-z])/g, '$1i$2')
+    .replace(/([a-z])3([a-z])/g, '$1e$2')
+    .replace(/([a-z])4([a-z])/g, '$1a$2')
+    .replace(/([a-z])0([a-z])/g, '$1o$2')
+    .replace(/([a-z])1([a-z])/g, '$1i$2')
+    .replace(/([a-z])3([a-z])/g, '$1e$2')
+    .replace(/([a-z])4([a-z])/g, '$1a$2')
+    .replace(/([a-z0-9])['’]([a-z0-9])/g, '$1$2')
+    .replace(/[卍:·,\-_!?¡¿'"’“”()[\]/\\~+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s;
+}
+
+export function tokenizeMangaTitle(raw?: string | null): string[] {
+  const norm = normalizeMangaCompareTitle(raw);
+  if (!norm) return [];
+  const all = norm.split(' ').filter(Boolean);
+  const filtered = all.filter((w) => !MANGA_TITLE_STOPWORDS.has(w));
+  return filtered.length > 0 ? filtered : all;
+}
+
+export function scoreMangaTitleMatch(
+  candidateTitle: string,
+  targetTitles: string | string[]
+): number {
+  const targets = (Array.isArray(targetTitles) ? targetTitles : [targetTitles])
+    .map((t) => String(t || '').trim())
+    .filter(Boolean);
+  if (!candidateTitle || targets.length === 0) return -100;
+
+  const normCand = normalizeMangaCompareTitle(candidateTitle);
+  if (!normCand) return -100;
+  const candTokens = tokenizeMangaTitle(candidateTitle);
+  if (candTokens.length === 0) return -100;
+  const candSet = new Set(candTokens);
+
+  let bestScore = -100;
+
+  for (const rawTarget of targets) {
+    const normTarg = normalizeMangaCompareTitle(rawTarget);
+    if (!normTarg) continue;
+
+    if (normCand === normTarg) {
+      bestScore = Math.max(bestScore, 100 + candTokens.length);
+      continue;
+    }
+
+    const targTokens = tokenizeMangaTitle(rawTarget);
+    if (targTokens.length === 0) continue;
+    const targSet = new Set(targTokens);
+
+    if (candTokens.join(' ') === targTokens.join(' ')) {
+      bestScore = Math.max(bestScore, 96 + candTokens.length);
+      continue;
+    }
+
+    // Reject if candidate or target has a spin-off/sequel marker that the other lacks
+    let hasSpinoffConflict = false;
+    for (const marker of MANGA_SPINOFF_MARKERS) {
+      if (candSet.has(marker) !== targSet.has(marker)) {
+        hasSpinoffConflict = true;
+        break;
+      }
+    }
+    if (hasSpinoffConflict) continue;
+
+    let matched = 0;
+    for (const t of targSet) {
+      if (candSet.has(t)) matched++;
+    }
+    if (matched === 0) continue;
+
+    const missingInCand = targSet.size - matched;
+    let extraInCand = 0;
+    for (const c of candSet) {
+      if (!targSet.has(c)) extraInCand++;
+    }
+
+    // Short titles (1-2 meaningful tokens, e.g. "The Mansion", "Monster", "Naruto", "Solo Leveling"):
+    // Require exact token set match (0 extra foreign tokens and 0 missing tokens).
+    if (targSet.size <= 2 || candSet.size <= 2) {
+      if (missingInCand === 0 && extraInCand === 0) {
+        bestScore = Math.max(bestScore, 92 + matched);
+      }
+      continue;
+    }
+
+    // Longer titles (3+ meaningful tokens):
+    // Require at least 80% of target tokens matched (minimum 3 tokens) and at most 1 extra token
+    const coverage = matched / targSet.size;
+    if (matched >= 3 && coverage >= 0.8 && extraInCand <= 1 && missingInCand <= 1) {
+      const score = Math.round(coverage * 85) - extraInCand * 8 - missingInCand * 10;
+      bestScore = Math.max(bestScore, score);
+    }
+  }
+
+  return bestScore;
+}
+
+export function isStrictMangaTitleMatch(
+  candidateTitle: string,
+  targetTitles: string | string[]
+): boolean {
+  return scoreMangaTitleMatch(candidateTitle, targetTitles) >= 70;
+}
+
+export function lookupMangaCatalogStrict<T>(
+  catalog: Record<string, T>,
+  title: string,
+  altTitles: string[] = []
+): T | null {
+  const targets = [title, ...(altTitles || [])].filter(Boolean);
+  if (targets.length === 0) return null;
+
+  let bestVal: T | null = null;
+  let bestScore = -100;
+
+  for (const [key, val] of Object.entries(catalog)) {
+    const sc = scoreMangaTitleMatch(key, targets);
+    if (sc >= 70 && sc > bestScore) {
+      bestScore = sc;
+      bestVal = val;
+    }
+  }
+  return bestVal;
+}
+
 /**
  * Separa estrictamente cada idioma para que el filtro "🇪🇸 Español" NUNCA mezcle capítulos
  * de Inglés (MangaPill / MangaDex EN) haciéndolos pasar por Español.
@@ -79,6 +228,7 @@ export function deduplicateLanguageChapters(items: MangaChapterItem[]): MangaCha
 export function buildStrictLanguageBuckets(input: {
   dexChapters: MangaChapterItem[];
   inmangaChapters?: MangaChapterItem[];
+  manhwaWebChapters?: MangaChapterItem[];
   mangaPillChapters?: MangaChapterItem[];
 }): MangaLanguageBuckets {
   const rawSpanish: MangaChapterItem[] = [];
@@ -94,6 +244,18 @@ export function buildStrictLanguageBuckets(input: {
     else if (norm === 'ja') rawJapanese.push(c);
     else if (norm === 'ko') rawKorean.push(c);
     else rawOther.push(c);
+  }
+
+  for (const c of input.manhwaWebChapters || []) {
+    const norm = normalizeMangaLang(c.lang || 'es');
+    if (norm === 'es') {
+      rawSpanish.push({
+        ...c,
+        lang: 'es',
+        group: c.group || 'ManhwaWeb ES 🇪🇸',
+        source: c.source || 'ManhwaWeb 🇪🇸'
+      });
+    }
   }
 
   for (const c of input.inmangaChapters || []) {
@@ -120,9 +282,15 @@ export function buildStrictLanguageBuckets(input: {
     }
   }
 
-  // Within Spanish: prefer MangaDex ES first over InManga when both cover same chapter, preserving InManga in otherVersions
+  // Within Spanish: prefer MangaDex ES first, then ManhwaWeb ES, then InManga ES, preserving alternatives in otherVersions
   const spanishDexFirst = [
-    ...rawSpanish.filter((c) => c.source !== 'InManga 🇪🇸' && c.source !== 'InManga'),
+    ...rawSpanish.filter(
+      (c) =>
+        c.source !== 'InManga 🇪🇸' &&
+        c.source !== 'InManga' &&
+        c.source !== 'ManhwaWeb 🇪🇸'
+    ),
+    ...rawSpanish.filter((c) => c.source === 'ManhwaWeb 🇪🇸'),
     ...rawSpanish.filter((c) => c.source === 'InManga 🇪🇸' || c.source === 'InManga')
   ];
   const englishDexFirst = [
@@ -152,7 +320,9 @@ export function buildStrictLanguageBuckets(input: {
     other,
     all,
     total: all.length,
-    isCustomWebtoon: finalSpanish.some((c) => String(c.id).startsWith('inmanga_'))
+    isCustomWebtoon: finalSpanish.some(
+      (c) => String(c.id).startsWith('inmanga_') || String(c.id).startsWith('mweb_')
+    )
   };
 }
 

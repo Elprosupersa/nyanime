@@ -12,6 +12,7 @@ import {
 } from './appState.ts';
 import {
   InMangaProvider,
+  ManhwaWebProvider,
   MangaDex,
   mangaUiState
 } from './mangaCatalogView.ts';
@@ -117,7 +118,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
     } else {
       let hasFallbackPages = false;
       try {
-        const testFb = await MangaDex.getChapterPages(capitulo, activeManga?.title, capitulo.chapterNum);
+        const testFb = await MangaDex.getChapterPages(capitulo, activeManga?.title, capitulo.chapterNum, null, activeManga?.altTitles);
         if (testFb?.pages?.length > 0) {
           hasFallbackPages = true;
           capitulo.externalUrl = null;
@@ -144,6 +145,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
   if (titulo) titulo.textContent = `${activeManga?.title || 'Manga'} · Cap. ${capitulo.chapter}`;
   if (pageInd) pageInd.textContent = 'Cargando páginas HD...';
   if (content) {
+    content.dataset.triedEsFallback = '';
     content.innerHTML = '<div class="loader" style="min-height:50vh;"><div class="spinner"></div></div>';
     content.style.backgroundColor = readerCurrentSettings.bg;
   }
@@ -186,7 +188,8 @@ export async function abrirLectorManga(idx: number): Promise<void> {
         capitulo,
         activeManga?.title,
         capitulo.chapterNum,
-        mangaUiState.idiomaMangaSeleccionado || 'es'
+        mangaUiState.idiomaMangaSeleccionado || 'es',
+        activeManga?.altTitles
       );
     } catch (ePages) {
       console.warn('[abrirLectorManga] Error inicial en getChapterPages:', ePages);
@@ -310,6 +313,16 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
   }
   const inmangaId = imgEl.dataset.inmangaId;
 
+  // ManhwaWeb CDN mirror failover (img1mw.xyz <-> img2mw.xyz)
+  if ((rawUrl.includes('img1mw.xyz') || rawUrl.includes('img2mw.xyz')) && !imgEl.dataset.triedMwMirror) {
+    imgEl.dataset.triedMwMirror = '1';
+    const altMirrorUrl = rawUrl.includes('img1mw.xyz')
+      ? rawUrl.replace('img1mw.xyz', 'img2mw.xyz')
+      : rawUrl.replace('img2mw.xyz', 'img1mw.xyz');
+    imgEl.src = toFastImgUrl(altMirrorUrl);
+    return;
+  }
+
   if (inmangaId || rawUrl.includes('intomanga.com') || rawUrl.includes('inmanga.com')) {
     const mirrorStep = parseInt(imgEl.dataset.inmangaStep || '0', 10);
     if (inmangaId && mirrorStep < 4) {
@@ -351,7 +364,7 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
       imgEl.src = rawUrl;
       return;
     }
-    if (!imgEl.dataset.triedFreshNode && currentCap?.id && String(currentCap.id).includes('-') && !String(currentCap.id).startsWith('inmanga_')) {
+    if (!imgEl.dataset.triedFreshNode && currentCap?.id && String(currentCap.id).includes('-') && !String(currentCap.id).startsWith('inmanga_') && !String(currentCap.id).startsWith('mweb_')) {
       imgEl.dataset.triedFreshNode = '1';
       try {
         const freshServer = await nativeFetchJson(`https://api.mangadex.org/at-home/server/${currentCap.id}?forcePort443=true`);
@@ -369,18 +382,20 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
   }
 
   const retries = parseInt(imgEl.dataset.retries || '0', 10);
-  if (retries < 2) {
+  if (retries < 1) {
     imgEl.dataset.retries = String(retries + 1);
     setTimeout(() => {
       if (imgEl?.isConnected) {
         const baseSrc = (imgEl.dataset.origSrc || imgEl.src).split('&t=')[0];
         imgEl.src = baseSrc + (baseSrc.includes('?') ? '&t=' : '?t=') + Date.now();
       }
-    }, (retries + 1) * 500);
+    }, 450);
     return;
   }
 
-  if (p === 1) {
+  const contentEl = document.getElementById('lector-content');
+  if (p === 1 && contentEl && contentEl.dataset.triedEsFallback !== '1') {
+    contentEl.dataset.triedEsFallback = '1';
     const normLangFn = nWin.NyAnimeMangaLang?.normalizeMangaLang || ((l: string) => {
       const s = String(l || '').trim().toLowerCase();
       if (s === 'es' || s === 'es-la' || s === 'es-es' || s === 'es-419') return 'es';
@@ -411,55 +426,46 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
       }
     }
 
-    try {
-      const directOnDemand = await MangaDex.getChapterPages(currentCap, title, chap, activeTabLang);
-      if (directOnDemand?.pages?.length > 0 && directOnDemand.chapterId && directOnDemand.chapterId !== currentCap?.id) {
-        if (currentCap) {
-          currentCap.id = directOnDemand.chapterId;
-          currentCap.group = directOnDemand.group || 'Oficial';
-          currentCap.pages = directOnDemand.pages.length;
-          currentCap.lang = directOnDemand.lang || currentCap.lang;
-        }
-        if (directOnDemand.group) mostrarToast(`Cambiando a versión de ${directOnDemand.group}...`, 'info');
-        void abrirLectorManga(mangaUiState.capituloActualIdx);
-        return;
-      }
-    } catch {
-      // ignore
-    }
-
     if (capLang === 'es' || activeTabLang === 'all') {
+      const alreadyManhwaWeb = String(currentCap?.id || '').startsWith('mweb_') || String(currentCap?.group || '').includes('ManhwaWeb');
+      const alreadyInManga = String(currentCap?.id || '').startsWith('inmanga_') || String(currentCap?.group || '').includes('InManga');
       try {
-        const inmangaPages = await InMangaProvider.getPagesForChapter(title, chap);
-        if (inmangaPages?.length > 0) {
-          mostrarToast('Cargando capítulo desde InManga...', 'info');
+        let esPages: string[] = [];
+        let esGroupLabel = '';
+        if (!alreadyManhwaWeb) {
+          esPages = await ManhwaWebProvider.getPagesForChapter(title, chap, activeManga?.altTitles);
+          esGroupLabel = 'ManhwaWeb ES 🇪🇸';
+        }
+        if ((!esPages || esPages.length === 0) && !alreadyInManga) {
+          esPages = await InMangaProvider.getPagesForChapter(title, chap, activeManga?.altTitles);
+          esGroupLabel = 'InManga Scan 🇪🇸';
+        }
+        if (esPages?.length > 0) {
+          mostrarToast(`Cargando capítulo desde ${esGroupLabel}...`, 'info');
           if (currentCap) {
-            currentCap.group = 'InManga Scan 🇪🇸';
+            currentCap.group = esGroupLabel;
             currentCap.lang = 'es';
           }
           const titulo = document.getElementById('lector-titulo');
-          if (titulo) titulo.textContent = `${title || 'Manga'} · Cap. ${chap} (InManga Scan 🇪🇸)`;
-          const content = document.getElementById('lector-content');
-          if (content) {
-            content.innerHTML = inmangaPages.map((url, i) => {
-              const pNum = i + 1;
-              const fastUrl = toFastImgUrl(url);
-              let inId = '';
-              if (url.includes('identification=')) inId = url.split('identification=')[1].split('&')[0];
-              return `
-                <div class="webtoon-page-wrap" id="page-wrap-${pNum}" style="background:${readerCurrentSettings.bg}; min-height:220px; position:relative;">
-                  <div class="webtoon-page-skeleton" id="skel-${pNum}">
-                    <div class="spinner" style="width:28px; height:28px;"></div>
-                    <span>Cargando página ${pNum}...</span>
-                  </div>
-                  <img src="${fastUrl}" data-raw-url="${escHtml(url)}" data-inmanga-id="${escHtml(inId)}" data-orig-src="${escHtml(fastUrl)}" data-page="${pNum}" class="webtoon-page-img" id="img-page-${pNum}" loading="${pNum <= 3 ? 'eager' : 'lazy'}" style="max-width:${readerCurrentSettings.width};" onload="this.parentElement.classList.add('loaded'); document.getElementById('skel-${pNum}')?.remove()" onerror="handleMangaImgError(this)"/>
+          if (titulo) titulo.textContent = `${title || 'Manga'} · Cap. ${chap} (${esGroupLabel})`;
+          contentEl.innerHTML = esPages.map((url, i) => {
+            const pNum = i + 1;
+            const fastUrl = toFastImgUrl(url);
+            let inId = '';
+            if (url.includes('identification=')) inId = url.split('identification=')[1].split('&')[0];
+            return `
+              <div class="webtoon-page-wrap" id="page-wrap-${pNum}" style="background:${readerCurrentSettings.bg}; min-height:220px; position:relative;">
+                <div class="webtoon-page-skeleton" id="skel-${pNum}">
+                  <div class="spinner" style="width:28px; height:28px;"></div>
+                  <span>Cargando página ${pNum}...</span>
                 </div>
-              `;
-            }).join('');
-          }
+                <img src="${fastUrl}" data-raw-url="${escHtml(url)}" data-inmanga-id="${escHtml(inId)}" data-orig-src="${escHtml(fastUrl)}" data-page="${pNum}" class="webtoon-page-img" id="img-page-${pNum}" loading="${pNum <= 3 ? 'eager' : 'lazy'}" style="max-width:${readerCurrentSettings.width};" onload="this.parentElement.classList.add('loaded'); document.getElementById('skel-${pNum}')?.remove()" onerror="handleMangaImgError(this)"/>
+              </div>
+            `;
+          }).join('');
           const pageInd = document.getElementById('lector-page-indicator');
-          if (pageInd) pageInd.textContent = `📄 1 / ${inmangaPages.length} · 0%`;
-          setupLectorPageObserver(inmangaPages.length);
+          if (pageInd) pageInd.textContent = `📄 1 / ${esPages.length} · 0%`;
+          setupLectorPageObserver(esPages.length);
           return;
         }
       } catch {
@@ -478,6 +484,20 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
     const pageInd = document.getElementById('lector-page-indicator');
     if (pageInd && visibleWraps.length > 0) {
       pageInd.textContent = `📄 1 / ${visibleWraps.length} · 0%`;
+    } else if (visibleWraps.length === 0 && contentEl) {
+      contentEl.innerHTML = `
+        <div style="text-align:center; padding:50px 20px; color:#94a3b8;">
+          <div style="font-size:36px; margin-bottom:12px;">📑</div>
+          <div style="font-size:17px; font-weight:700; color:#fff; margin-bottom:8px;">No se pudieron cargar las imágenes</div>
+          <div style="font-size:13px; line-height:1.5; color:#cbd5e1; max-width:340px; margin:0 auto 20px;">
+            El servidor de imágenes está ocupado o temporalmente inaccesible. Reintenta o cambia de servidor.
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px; max-width:260px; margin:0 auto;">
+            <button class="chip active" style="padding:10px 16px; font-weight:600;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">🔄 Reintentar Capítulo</button>
+            <button class="chip" style="padding:10px 16px;" onclick="mostrarModalFuentesManga()">🌐 Cambiar Fuente</button>
+          </div>
+        </div>
+      `;
     }
   }
 }

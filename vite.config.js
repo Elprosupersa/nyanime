@@ -96,8 +96,21 @@ function nyanimeServerProxyPlugin() {
         };
 
         if (!isMangaDex) {
-          headers['Referer'] = safeUrl.origin + '/';
-          headers['Origin'] = safeUrl.origin;
+          if (
+            safeUrl.hostname.endsWith('manhwaweb.com') ||
+            safeUrl.hostname.endsWith('img1mw.xyz') ||
+            safeUrl.hostname.endsWith('img2mw.xyz') ||
+            safeUrl.hostname.endsWith('img3mw.xyz') ||
+            safeUrl.hostname.endsWith('img4mw.xyz') ||
+            safeUrl.hostname.endsWith('lezhin.com') ||
+            safeUrl.hostname.endsWith('lezhincomics.com')
+          ) {
+            headers['Referer'] = 'https://manhwaweb.com/';
+            headers['Origin'] = 'https://manhwaweb.com';
+          } else {
+            headers['Referer'] = safeUrl.origin + '/';
+            headers['Origin'] = safeUrl.origin;
+          }
         }
         if (req.headers['x-custom-content-type']) {
           headers['Content-Type'] = req.headers['x-custom-content-type'];
@@ -184,8 +197,30 @@ function nyanimeServerProxyPlugin() {
         };
 
         if (!isMangaDex) {
-          if (safeUrl.hostname.endsWith('readdetectiveconan.com') || safeUrl.hostname.endsWith('mangapill.com') || safeUrl.pathname.includes('/mangap/')) {
+          if (
+            safeUrl.hostname.endsWith('readdetectiveconan.com') ||
+            safeUrl.hostname.endsWith('mangapill.com') ||
+            safeUrl.pathname.includes('/mangap/')
+          ) {
             headers['Referer'] = 'https://mangapill.com/';
+          } else if (
+            safeUrl.hostname.endsWith('manhwaweb.com') ||
+            safeUrl.hostname.endsWith('img1mw.xyz') ||
+            safeUrl.hostname.endsWith('img2mw.xyz') ||
+            safeUrl.hostname.endsWith('img3mw.xyz') ||
+            safeUrl.hostname.endsWith('img4mw.xyz') ||
+            safeUrl.hostname.endsWith('toptoon.com') ||
+            safeUrl.hostname.endsWith('lezhin.com') ||
+            safeUrl.hostname.endsWith('lezhincomics.com')
+          ) {
+            headers['Referer'] = 'https://manhwaweb.com/';
+            headers['Origin'] = 'https://manhwaweb.com';
+          } else if (
+            safeUrl.hostname.endsWith('webtoons.com') ||
+            safeUrl.hostname.endsWith('pstatic.net') ||
+            safeUrl.hostname.endsWith('naver.net')
+          ) {
+            headers['Referer'] = 'https://www.webtoons.com/';
           } else {
             headers['Referer'] = safeUrl.origin + '/';
           }

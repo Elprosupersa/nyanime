@@ -110,7 +110,8 @@ export async function seleccionarFuenteManga(sourceId: string): Promise<void> {
     () => {
       actualizarConteosIdiomaTabs();
       renderCapitulosMangaModal();
-    }
+    },
+    activeManga.altTitles
   );
   actualizarConteosIdiomaTabs();
   renderCapitulosMangaModal();
@@ -140,7 +141,7 @@ export function abrirModalDescargaManga(): void {
     <div class="mihon-dl-option-card" onclick="iniciarDescargaCapitulos(${totalCaps})">
       <div>
         <div class="mihon-dl-option-title">⚡ Descargar todo el manga (${totalCaps} caps)</div>
-        <div class="mihon-dl-option-sub">Guarda la serie completa en este idioma en tu dispositivo.</div>
+        <div class="mihon-dl-option-sub">Guarda la serie completa en este idioma en este dispositivo.</div>
       </div>
       <button class="chip active">Descargar Todo</button>
     </div>
@@ -192,7 +193,13 @@ export async function iniciarDescargaCapitulos(count: number): Promise<void> {
       if (progressText) {
         progressText.textContent = `Cap. ${cap.chapter} (${cIdx + 1}/${toDownload.length}): Resolviendo servidor...`;
       }
-      const resPages = await MangaDex.getChapterPages(cap, activeManga.title, cap.chapterNum);
+      const resPages = await MangaDex.getChapterPages(
+        cap,
+        activeManga.title,
+        cap.chapterNum,
+        null,
+        activeManga.altTitles
+      );
       const pageUrls = resPages?.pages?.length > 0 ? resPages.pages : (resPages?.saverPages || []);
       if (!pageUrls || pageUrls.length === 0) {
         throw new Error(`No se encontraron páginas descargables para Cap. ${cap.chapter}`);
@@ -283,7 +290,8 @@ export async function prefetchCapituloObjetivoManga(manga: any, targetChapterObj
       chapObj || { chapter: String(chapNum), chapterNum: chapNum, lang: defaultLang },
       manga.title,
       chapNum,
-      activeTabLang
+      activeTabLang,
+      manga.altTitles
     );
     if (res?.pages?.length > 0) prewarmMangaImages(res, 3);
   } catch {
@@ -307,8 +315,24 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
     pantalla.scrollTo(0, 0);
   }
 
-  const fallbackModalCover = generarPortadaSVG(manga.title, manga.origLang, manga.flag?.split(' ')[1] || 'Manga');
-  const coverUrl = manga.cover || fallbackModalCover;
+  const inferredFlag =
+    manga.flag ||
+    (manga.countryOfOrigin === 'KR' || manga.origLang === 'ko' || String(manga.type || '').toLowerCase() === 'manhwa'
+      ? '🇰🇷 Manhwa'
+      : manga.countryOfOrigin === 'CN' || manga.origLang === 'zh' || String(manga.type || '').toLowerCase() === 'manhua'
+        ? '🇨🇳 Manhua'
+        : String(manga.format || manga.type || '').toUpperCase().includes('NOVEL')
+          ? '📖 Novela'
+          : '🇯🇵 Manga');
+  manga.flag = inferredFlag;
+
+  const fallbackModalCover = generarPortadaSVG(manga.title, manga.origLang, inferredFlag.split(' ')[1] || 'Manga');
+  const rawCover = manga.cover || '';
+  const coverUrl = rawCover
+    ? rawCover.includes('img1mw.xyz') || rawCover.includes('img2mw.xyz') || rawCover.includes('manhwaweb.com')
+      ? toFastImgUrl(rawCover)
+      : rawCover
+    : fallbackModalCover;
 
   const heroBlur = document.getElementById('mihon-hero-blur');
   if (heroBlur) heroBlur.style.backgroundImage = `url("${coverUrl}")`;
@@ -334,15 +358,15 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
   if (tituloEl) tituloEl.textContent = manga.title || 'Manga';
   if (authorEl) authorEl.textContent = `✍️ ${manga.author || 'Autor Oficial'}`;
   if (sinopsisEl) {
-    sinopsisEl.textContent = manga.desc || 'Disfruta de los capítulos oficiales y traducciones de la comunidad.';
+    sinopsisEl.textContent = manga.desc || manga.synopsis || 'Disfruta de los capítulos oficiales y traducciones de la comunidad.';
     sinopsisEl.classList.remove('expanded');
   }
   const synToggle = document.getElementById('mihon-synopsis-toggle');
   if (synToggle) synToggle.textContent = 'Leer más ▾';
 
   if (sourceNameEl) {
-    const isManhwa = (manga.title || '').toLowerCase().includes('solo leveling');
-    const activeSrc = manga.preferredSource ? MangaSourceManager.getSource(manga.preferredSource).name : (isManhwa ? 'Webtoon' : 'MangaDex');
+    const isManhwa = inferredFlag.includes('Manhwa') || inferredFlag.includes('Manhua') || (manga.title || '').toLowerCase().includes('solo leveling');
+    const activeSrc = manga.preferredSource ? MangaSourceManager.getSource(manga.preferredSource).name : (isManhwa ? 'ManhwaWeb ES' : 'MangaDex');
     sourceNameEl.textContent = activeSrc;
   }
 
@@ -353,7 +377,7 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
       </span>
       <span class="mihon-badge">★ ${escHtml(manga.score || '8.7')}</span>
       <span class="mihon-badge">📅 ${escHtml(manga.year || '2024')}</span>
-      <span class="mihon-badge">${escHtml(manga.flag || '🇯🇵 Manga')}</span>
+      <span class="mihon-badge">${escHtml(inferredFlag)}</span>
     `;
   }
 
@@ -402,8 +426,6 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
     }
     if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
 
-    void prefetchCapituloObjetivoManga(manga, { chapter: String(nextChapGuess), chapterNum: nextChapGuess });
-
     if (!dexId) {
       dexId = await MangaDex.resolveMangaDexId(manga.title, manga.altTitles);
       manga.dexId = dexId;
@@ -415,7 +437,8 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
       () => {
         actualizarConteosIdiomaTabs();
         renderCapitulosMangaModal();
-      }
+      },
+      manga.altTitles
     );
   }
 
