@@ -48,11 +48,26 @@ import {
   isBlockedOrUnsafeStreamHost,
   rankAndDeduplicateSources,
   formatAiringCountdown,
-  extractEpisodeDetailsMap
+  extractEpisodeDetailsMap,
+  selectBestArchiveOrgDocs,
+  extractArchiveOrgSourcesFromMetadata,
+  isArchiveOrgSpanishMetadata,
+  parseHentaiJkSearchSlugs,
+  parseHentaiJkEpisodeSources,
+  parseJkPlayerDirectM3u8,
+  resolveDotanboritoDirectM3u8,
+  buildHentaiLaMediaImages,
+  resolveDevalue,
+  parseHentaiLaCatalogData,
+  parseHentaiLaHubData,
+  parseHentaiLaMediaDetail,
+  parseHentaiLaEpisodeSources
 } from './utils/animeSources.ts';
 import {
+  HENTAILA_GENRES,
   JKANIME_FILTER_CONFIG,
   JKANIME_GENRES,
+  buildHentaiLaCatalogUrl,
   buildJKAnimeDirectoryUrl,
   parseJKAnimeDirectory,
   mapDirectoryFiltersToAniListVariables,
@@ -312,7 +327,20 @@ mWin.NyAnimeVideoSources = {
   isBlockedOrUnsafeStreamHost,
   rankAndDeduplicateSources,
   formatAiringCountdown,
-  extractEpisodeDetailsMap
+  extractEpisodeDetailsMap,
+  selectBestArchiveOrgDocs,
+  extractArchiveOrgSourcesFromMetadata,
+  isArchiveOrgSpanishMetadata,
+  parseHentaiJkSearchSlugs,
+  parseHentaiJkEpisodeSources,
+  parseJkPlayerDirectM3u8,
+  resolveDotanboritoDirectM3u8,
+  buildHentaiLaMediaImages,
+  resolveDevalue,
+  parseHentaiLaCatalogData,
+  parseHentaiLaHubData,
+  parseHentaiLaMediaDetail,
+  parseHentaiLaEpisodeSources
 };
 
 mWin.NyAnimeOffline = {
@@ -327,8 +355,10 @@ mWin.RealCommentsManager = RealCommentsManager;
 mWin.KeiyoushiCatalogManager = KeiyoushiCatalogManager;
 mWin.KeiyoushiManager = KeiyoushiManager;
 mWin.NyAnimeDirectoryFilters = {
+  HENTAILA_GENRES,
   JKANIME_FILTER_CONFIG,
   JKANIME_GENRES,
+  buildHentaiLaCatalogUrl,
   buildJKAnimeDirectoryUrl,
   parseJKAnimeDirectory,
   mapDirectoryFiltersToAniListVariables,

@@ -99,7 +99,9 @@ describe('proxySecurity - Anti-SSRF & Allowlist', () => {
       'https://flaswish.com/e/abc123',
       'https://dhcplay.com/f/abc123',
       'https://a4.mp4upload.com:183/d/abc/video.mp4',
-      'https://s216.vidcache.net:8166/play/abc/video.mp4'
+      'https://s216.vidcache.net:8166/play/abc/video.mp4',
+      'https://archive.org/download/ane-wa-yanmama-junyuu-chuu-1_202602/ane-wa-yanmama-junyuu-chuu-1.mp4',
+      'https://ia801401.us.archive.org/15/items/ane-wa-yanmama-junyuu-chuu-1_202602/ane-wa-yanmama-junyuu-chuu-1.mp4'
     ];
 
     for (const url of validUrls) {
@@ -113,6 +115,11 @@ describe('proxySecurity - Anti-SSRF & Allowlist', () => {
     expect(resolveVideoStreamReferer(new URL('https://s216.vidcache.net:8166/play/abc/video.mp4'))).toBe(
       'https://www.yourupload.com/'
     );
+    expect(
+      resolveVideoStreamReferer(
+        new URL('https://archive.org/download/ane-wa-yanmama-junyuu-chuu-1_202602/ane-wa-yanmama-junyuu-chuu-1.mp4')
+      )
+    ).toBe('https://archive.org/');
   });
 
   it('detects private hosts and allowlist wildcards accurately', () => {

@@ -16,6 +16,8 @@ function nyanimeServerProxyPlugin() {
   const apiLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
   const imgLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
   const videoLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
+  const proxyResponseCache = new Map();
+  const PROXY_CACHE_TTL_MS = 5 * 60 * 1000;
 
   const getIp = (req) => {
     const fwd = req.headers['x-forwarded-for'];
@@ -139,6 +141,16 @@ function nyanimeServerProxyPlugin() {
           });
         }
 
+        const cacheKey = `${req.method || 'GET'}::${safeUrl.toString()}::${bodyData ? bodyData.toString('utf8') : ''}`;
+        const cachedEntry = proxyResponseCache.get(cacheKey);
+        if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
+          res.setHeader('Content-Type', cachedEntry.contentType);
+          res.setHeader('Cache-Control', 'public, max-age=120');
+          res.statusCode = 200;
+          res.end(cachedEntry.buffer);
+          return;
+        }
+
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 9000);
         const upstream = await fetchSafeRedirects(safeUrl, {
@@ -157,14 +169,38 @@ function nyanimeServerProxyPlugin() {
         }
 
         const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+        const outBuf = Buffer.from(arrayBuf);
+        if (upstream.status === 200 && outBuf.byteLength > 0 && outBuf.byteLength < 512_000) {
+          if (proxyResponseCache.size > 400) {
+            const firstKey = proxyResponseCache.keys().next().value;
+            if (firstKey) proxyResponseCache.delete(firstKey);
+          }
+          proxyResponseCache.set(cacheKey, {
+            buffer: outBuf,
+            contentType,
+            expiresAt: Date.now() + PROXY_CACHE_TTL_MS
+          });
+        }
+
+        const isProbe = parsed.searchParams.get('probe') === '1';
+        res.setHeader('X-Upstream-Status', String(upstream.status));
+        if (isProbe && upstream.status >= 400) {
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.statusCode = 200;
+          res.end('');
+          return;
+        }
+
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=120');
         res.statusCode = upstream.status;
-        res.end(Buffer.from(arrayBuf));
+        res.end(outBuf);
       } catch (err) {
-        res.statusCode = 502;
+        const isProbe = req.url?.includes('probe=1');
+        res.setHeader('X-Upstream-Status', '502');
+        res.statusCode = isProbe ? 200 : 502;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ error: String(err?.message || err) }));
+        res.end(isProbe ? '' : JSON.stringify({ error: String(err?.message || err) }));
       }
     });
 

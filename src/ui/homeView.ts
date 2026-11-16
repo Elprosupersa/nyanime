@@ -15,10 +15,12 @@ import {
 import { computeProgressPercent, formatPlaybackTime } from '../utils/playerResume.ts';
 import { AniListMangaService } from './mangaCatalogView.ts';
 import {
+  HENTAILA_GENRES,
   JKANIME_FILTER_CONFIG,
   JKANIME_GENRES,
   JKANIME_QUICK_GENRE_IDS,
   SearchDirectoryFilters,
+  buildHentaiLaCatalogUrl,
   countActiveDirectoryFilters,
   createDefaultDirectoryFilters,
   filterMediaByLetter,
@@ -26,6 +28,11 @@ import {
   hasActiveDirectoryFilters,
   mapDirectoryFiltersToAniListVariables
 } from '../utils/directoryFilters.ts';
+import {
+  HentaiLaCatalogItem,
+  normalizeSlugText,
+  parseHentaiLaCatalogData
+} from '../utils/animeSources.ts';
 
 export async function cargarCatalogoHome(): Promise<void> {
   const cacheKey = 'home_catalog_v2';
@@ -451,6 +458,185 @@ function shouldRunSearchForCurrentState(term: string): boolean {
   );
 }
 
+const animeDirectoryMemCache = new Map<string, { items: any[]; pageInfo: SearchPageMeta }>();
+let filterChangeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const FALLBACK_ANIME_DIRECTORY_CATALOG: ReadonlyArray<any> = [
+  {
+    id: 151807,
+    title: { romaji: 'Ore dake Level Up na Ken', english: 'Solo Leveling' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-m1gX3iwfIsLu.png', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-m1gX3iwfIsLu.png' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 12,
+    startDate: { year: 2024 },
+    averageScore: 83,
+    genres: ['Action', 'Adventure', 'Fantasy'],
+    description: 'En un mundo donde cazadores con habilidades mágicas deben luchar contra monstruos mortales para proteger a la humanidad, Sung Jinwoo descubre un programa secreto que le permite subir de nivel sin límites.'
+  },
+  {
+    id: 171018,
+    title: { romaji: 'Dandadan', english: 'DAN DA DAN' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx171018-2ldCj6QywuOa.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx171018-2ldCj6QywuOa.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 12,
+    startDate: { year: 2024 },
+    averageScore: 86,
+    genres: ['Action', 'Comedy', 'Sci-Fi', 'Supernatural', 'Romance'],
+    description: 'Momo Ayase cree en fantasmas pero no en alienígenas, mientras que su compañero Okarun cree en alienígenas pero no en fantasmas.'
+  },
+  {
+    id: 154587,
+    title: { romaji: 'Sousou no Frieren', english: "Frieren: Beyond Journey's End" },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-gHSraOSa0nBG.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-gHSraOSa0nBG.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 28,
+    startDate: { year: 2023 },
+    averageScore: 91,
+    genres: ['Adventure', 'Drama', 'Fantasy'],
+    description: 'Tras derrotar al Rey Demonio junto al grupo de héroes, la maga elfa Frieren emprende un nuevo viaje para comprender mejor a los humanos y el paso del tiempo.'
+  },
+  {
+    id: 21,
+    title: { romaji: 'ONE PIECE', english: 'One Piece' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg' },
+    format: 'TV',
+    status: 'RELEASING',
+    episodes: 1122,
+    startDate: { year: 1999 },
+    averageScore: 88,
+    genres: ['Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy'],
+    description: 'Monkey D. Luffy se lanza al mar en busca del legendario tesoro One Piece para convertirse en el Rey de los Piratas.'
+  },
+  {
+    id: 113415,
+    title: { romaji: 'Jujutsu Kaisen', english: 'JUJUTSU KAISEN' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pEFseh.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pEFseh.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 24,
+    startDate: { year: 2020 },
+    averageScore: 85,
+    genres: ['Action', 'Drama', 'Supernatural'],
+    description: 'Yuji Itadori traga un talismán maldito para salvar a sus amigos y pasa a compartir su cuerpo con Ryomen Sukuna, el Rey de las Maldiciones.'
+  },
+  {
+    id: 101922,
+    title: { romaji: 'Kimetsu no Yaiba', english: 'Demon Slayer: Kimetsu no Yaiba' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-WBsBl0ClmgYL.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-WBsBl0ClmgYL.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 26,
+    startDate: { year: 2019 },
+    averageScore: 83,
+    genres: ['Action', 'Adventure', 'Drama', 'Fantasy', 'Supernatural'],
+    description: 'Tanjiro Kamado busca una cura para su hermana Nezuko, quien fue transformada en demonio tras el ataque a su familia.'
+  },
+  {
+    id: 127230,
+    title: { romaji: 'Chainsaw Man', english: 'Chainsaw Man' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-NuHM32a3VJsb.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-NuHM32a3VJsb.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 12,
+    startDate: { year: 2022 },
+    averageScore: 84,
+    genres: ['Action', 'Comedy', 'Drama', 'Horror', 'Supernatural'],
+    description: 'Denji renace como Chainsaw Man tras fusionarse con su mascota demonio Pochita.'
+  },
+  {
+    id: 21355,
+    title: { romaji: 'Re:Zero kara Hajimeru Isekai Seikatsu', english: 'Re:ZERO -Starting Life in Another World-' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21355-wRVUrGxpvI1G.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21355-wRVUrGxpvI1G.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 25,
+    startDate: { year: 2016 },
+    averageScore: 81,
+    genres: ['Action', 'Adventure', 'Drama', 'Fantasy', 'Psychological', 'Romance', 'Thriller'],
+    description: 'Subaru Natsuki es transportado a otro mundo donde descubre que tiene el poder de regresar de la muerte.'
+  },
+  {
+    id: 161645,
+    title: { romaji: 'Kusuriya no Hitorigoto', english: 'The Apothecary Diaries' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx161645-7I8C27292t7f.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx161645-7I8C27292t7f.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 24,
+    startDate: { year: 2023 },
+    averageScore: 88,
+    genres: ['Drama', 'Mystery', 'Romance', 'Slice of Life'],
+    description: 'Maomao, una joven boticaria apasionada por los venenos y las medicinas, resuelve misterios en la corte imperial.'
+  },
+  {
+    id: 108465,
+    title: { romaji: 'Mushoku Tensei: Isekai Ittara Honki Dasu', english: 'Mushoku Tensei: Jobless Reincarnation' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-B9S9zC68e32j.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-B9S9zC68e32j.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 11,
+    startDate: { year: 2021 },
+    averageScore: 82,
+    genres: ['Adventure', 'Drama', 'Ecchi', 'Fantasy'],
+    description: 'Un hombre sin rumbo reencarna en un mundo de espada y magia como Rudeus Greyrat, decidido a vivir su nueva vida al máximo.'
+  },
+  {
+    id: 137822,
+    title: { romaji: 'Blue Lock', english: 'BLUE LOCK' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx137822-4dVWMSHLpGf8.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx137822-4dVWMSHLpGf8.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 24,
+    startDate: { year: 2022 },
+    averageScore: 81,
+    genres: ['Action', 'Drama', 'Sports', 'Thriller'],
+    description: 'Trescientos jóvenes delanteros compiten en el proyecto Blue Lock para crear al mejor goleador egoísta de Japón.'
+  },
+  {
+    id: 9253,
+    title: { romaji: 'Steins;Gate', english: 'Steins;Gate' },
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9253-7pdcVzQSkKxT.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx9253-7pdcVzQSkKxT.jpg' },
+    format: 'TV',
+    status: 'FINISHED',
+    episodes: 24,
+    startDate: { year: 2011 },
+    averageScore: 89,
+    genres: ['Drama', 'Psychological', 'Sci-Fi', 'Thriller'],
+    description: 'Un grupo de amigos descubre accidentalmente cómo enviar mensajes de texto al pasado, alterando las líneas temporales.'
+  },
+  {
+    id: 115138,
+    title: { romaji: 'Ane wa Yanmama Junyuu-chuu', english: 'My Big Sister Is Breastfeeding' },
+    synonyms: ['Gishi wa Yanmama Junyuu-chuu', 'My Big Sister Is Breastfeeding'],
+    coverImage: { extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx115138-U4q5N5G5yP7r.jpg', large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx115138-U4q5N5G5yP7r.jpg' },
+    format: 'OVA',
+    status: 'FINISHED',
+    isAdult: true,
+    episodes: 2,
+    startDate: { year: 2020 },
+    averageScore: 71,
+    genres: ['Hentai', 'Romance'],
+    description: 'OVA completo disponible en servidores directos.'
+  }
+];
+
+function scheduleDirectorySearch(term: string, page = 1, immediate = false): void {
+  if (filterChangeDebounceTimer) {
+    clearTimeout(filterChangeDebounceTimer);
+    filterChangeDebounceTimer = null;
+  }
+  if (immediate) {
+    void realizarBusqueda(term, page);
+    return;
+  }
+  filterChangeDebounceTimer = setTimeout(() => {
+    filterChangeDebounceTimer = null;
+    void realizarBusqueda(term, page);
+  }, 110);
+}
+
 export function onSearchDirectoryFilterChange(key: keyof SearchDirectoryFilters, value: string): void {
   (searchDirectoryFilters as any)[key] = value;
   searchDirectoryFilters.page = 1;
@@ -459,7 +645,7 @@ export function onSearchDirectoryFilterChange(key: keyof SearchDirectoryFilters,
   const input = document.getElementById('input-busqueda') as HTMLInputElement | null;
   const term = input?.value?.trim() || '';
   if (shouldRunSearchForCurrentState(term)) {
-    void realizarBusqueda(term, 1);
+    scheduleDirectorySearch(term, 1);
   } else {
     renderDefaultSearchPrompt();
   }
@@ -474,13 +660,17 @@ export function selectQuickSearchGenre(genreId: string): void {
   const input = document.getElementById('input-busqueda') as HTMLInputElement | null;
   const term = input?.value?.trim() || '';
   if (shouldRunSearchForCurrentState(term)) {
-    void realizarBusqueda(term, 1);
+    scheduleDirectorySearch(term, 1);
   } else {
     renderDefaultSearchPrompt();
   }
 }
 
 export function resetSearchFilters(): void {
+  if (filterChangeDebounceTimer) {
+    clearTimeout(filterChangeDebounceTimer);
+    filterChangeDebounceTimer = null;
+  }
   searchDirectoryFilters = createDefaultDirectoryFilters();
   syncSearchFilterControlsUI();
 
@@ -498,7 +688,7 @@ export function cambiarPaginaBusqueda(page: number): void {
   searchDirectoryFilters.page = targetPage;
   const input = document.getElementById('input-busqueda') as HTMLInputElement | null;
   const term = input?.value?.trim() || '';
-  void realizarBusqueda(term, targetPage);
+  scheduleDirectorySearch(term, targetPage, true);
   const screen = document.getElementById('pantalla-busqueda');
   if (screen) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -514,7 +704,7 @@ export function setSearchFilter(type: string, el: HTMLElement | null): void {
   const input = document.getElementById('input-busqueda') as HTMLInputElement | null;
   const term = input?.value?.trim() || '';
   if (shouldRunSearchForCurrentState(term)) {
-    void realizarBusqueda(term, 1);
+    scheduleDirectorySearch(term, 1);
   } else {
     renderDefaultSearchPrompt();
   }
@@ -526,7 +716,7 @@ export function quickSearch(query: string): void {
     input.value = query;
     searchDirectoryFilters.page = 1;
     if (state.searchDebounceTimer) clearTimeout(state.searchDebounceTimer);
-    void realizarBusqueda(query, 1);
+    scheduleDirectorySearch(query, 1, true);
   }
 }
 
@@ -540,7 +730,90 @@ export function onSearchInput(val: string): void {
   state.searchDebounceTimer = setTimeout(() => {
     searchDirectoryFilters.page = 1;
     void realizarBusqueda(clean, 1);
-  }, 350);
+  }, 300);
+}
+
+function buildFallbackAnimeDirectoryResults(
+  cleanVars: Record<string, any>,
+  letter = '',
+  effectiveSearch = ''
+): { items: any[]; pageInfo: SearchPageMeta } {
+  const poolMap = new Map<number | string, any>();
+  const homeCached = CacheManager.get('home_catalog_v2');
+  for (const list of [homeCached?.trending?.media, homeCached?.popular?.media, homeCached?.releasing?.media]) {
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        if (item?.id) poolMap.set(item.id, item);
+      }
+    }
+  }
+  for (const cachedVal of animeDirectoryMemCache.values()) {
+    for (const item of cachedVal.items || []) {
+      if (item?.id && !poolMap.has(item.id)) poolMap.set(item.id, item);
+    }
+  }
+  for (const item of FALLBACK_ANIME_DIRECTORY_CATALOG) {
+    if (item?.id && !poolMap.has(item.id)) poolMap.set(item.id, item);
+  }
+
+  let allPool = Array.from(poolMap.values());
+
+  if (cleanVars.isAdult === true) {
+    const adultItems = allPool.filter(
+      (m) => m.isAdult === true || (Array.isArray(m.genres) && m.genres.some((g: string) => /hentai|ecchi/i.test(g)))
+    );
+    if (adultItems.length > 0) allPool = adultItems;
+  } else {
+    allPool = allPool.filter((m) => !m.isAdult);
+  }
+
+  if (effectiveSearch) {
+    const q = effectiveSearch.toLowerCase();
+    const bySearch = allPool.filter((m) => {
+      const r = String(m.title?.romaji || '').toLowerCase();
+      const e = String(m.title?.english || '').toLowerCase();
+      return r.includes(q) || e.includes(q);
+    });
+    if (bySearch.length > 0) allPool = bySearch;
+  }
+
+  if (Array.isArray(cleanVars.genre_in) && cleanVars.genre_in.length > 0) {
+    const targetGenre = String(cleanVars.genre_in[0]).toLowerCase();
+    const byGenre = allPool.filter(
+      (m) => Array.isArray(m.genres) && m.genres.some((g: string) => String(g).toLowerCase() === targetGenre)
+    );
+    if (byGenre.length > 0) allPool = byGenre;
+  }
+
+  if (Array.isArray(cleanVars.format_in) && cleanVars.format_in.length > 0) {
+    const fmts = new Set(cleanVars.format_in.map((f: string) => String(f).toUpperCase()));
+    const byFmt = allPool.filter((m) => fmts.has(String(m.format || 'TV').toUpperCase()));
+    if (byFmt.length > 0) allPool = byFmt;
+  }
+
+  if (cleanVars.status) {
+    const byStatus = allPool.filter((m) => String(m.status || '').toUpperCase() === String(cleanVars.status).toUpperCase());
+    if (byStatus.length > 0) allPool = byStatus;
+  }
+
+  if (letter) {
+    const byLetter = filterMediaByLetter(allPool, letter);
+    if (byLetter.length > 0) allPool = byLetter;
+  }
+
+  if (allPool.length === 0) {
+    allPool = FALLBACK_ANIME_DIRECTORY_CATALOG.filter((m) => !m.isAdult);
+  }
+
+  return {
+    items: allPool,
+    pageInfo: {
+      currentPage: 1,
+      lastPage: 1,
+      hasNextPage: false,
+      total: allPool.length
+    }
+  };
 }
 
 async function fetchAniListAnimeDirectory(
@@ -588,7 +861,10 @@ async function fetchAniListAnimeDirectory(
           sort: $sort
         ) {
           id
+          idMal
           title { romaji english native }
+          synonyms
+          isAdult
           coverImage { extraLarge large color }
           bannerImage
           format
@@ -611,19 +887,81 @@ async function fetchAniListAnimeDirectory(
     }
   }
 
+  const cacheKey = `dir_anime_v4_${JSON.stringify(cleanVars)}_${letter}`;
+  const memHit = animeDirectoryMemCache.get(cacheKey);
+  if (memHit && memHit.items.length > 0) return memHit;
+  const storageHit = CacheManager.get(cacheKey);
+  if (storageHit && Array.isArray(storageHit.items) && storageHit.items.length > 0) {
+    animeDirectoryMemCache.set(cacheKey, storageHit);
+    return storageHit;
+  }
+
   const runQuery = async (vars: Record<string, any>) => {
-    const r = await fetch(ANILIST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ query: gql, variables: vars })
-    });
-    if (!r.ok) return null;
-    const j = await r.json();
-    return j?.data?.Page || null;
+    const bodyPayload = JSON.stringify({ query: gql, variables: vars });
+    // Try server proxy first (benefits from server-side 5-min cache and avoids client CORS/429)
+    try {
+      const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(ANILIST_URL)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: bodyPayload
+      });
+      if (proxyRes.ok) {
+        const pj = await proxyRes.json();
+        if (pj?.data?.Page) return pj.data.Page;
+      }
+    } catch {
+      // try direct below
+    }
+
+    try {
+      const r = await fetch(ANILIST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: bodyPayload
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j?.data?.Page || null;
+    } catch {
+      return null;
+    }
   };
 
-  const pageData = await runQuery(cleanVars);
+  let pageData = await runQuery(cleanVars);
   let rawMedia: any[] = pageData?.media || [];
+
+  // Progressive filter relaxation if multiple strict filters yielded 0 items on AniList
+  if (rawMedia.length === 0 && !effectiveSearch) {
+    const hasSecondaryConstraints = Boolean(
+      cleanVars.season ||
+        cleanVars.seasonYear ||
+        cleanVars.startDate_greater ||
+        cleanVars.status ||
+        (cleanVars.tag_in && cleanVars.genre_in) ||
+        (Array.isArray(cleanVars.tag_in) && cleanVars.tag_in.length > 1)
+    );
+    if (hasSecondaryConstraints) {
+      const relaxedVars: Record<string, any> = {
+        page: 1,
+        perPage: cleanVars.perPage || 24,
+        isAdult: Boolean(cleanVars.isAdult),
+        sort: cleanVars.sort || ['POPULARITY_DESC']
+      };
+      if (cleanVars.genre_in) relaxedVars.genre_in = cleanVars.genre_in;
+      else if (Array.isArray(cleanVars.tag_in) && cleanVars.tag_in.length > 0) {
+        relaxedVars.tag_in = [cleanVars.tag_in[0]];
+      }
+      if (cleanVars.format_in) relaxedVars.format_in = cleanVars.format_in;
+      if (cleanVars.countryOfOrigin) relaxedVars.countryOfOrigin = cleanVars.countryOfOrigin;
+
+      const relaxedPage = await runQuery(relaxedVars);
+      if (relaxedPage?.media?.length > 0) {
+        pageData = relaxedPage;
+        rawMedia = relaxedPage.media;
+      }
+    }
+  }
+
   let filtered = letter ? filterMediaByLetter(rawMedia, letter) : rawMedia;
 
   if (letter && !effectiveSearch && filtered.length < 6 && (cleanVars.page || 1) === 1) {
@@ -637,19 +975,87 @@ async function fetchAniListAnimeDirectory(
         filtered.push(item);
       }
     }
+    if (filtered.length === 0 && rawMedia.length > 0) {
+      filtered = rawMedia;
+    }
+  }
+
+  if (effectiveSearch || cleanVars.isAdult === true) {
+    try {
+      const hlaUrl = buildHentaiLaCatalogUrl({
+        page: Number(cleanVars.page || 1),
+        search: effectiveSearch,
+        order: 'popular'
+      });
+      const hlaRes = await fetch(`/api/proxy?url=${encodeURIComponent(hlaUrl)}&probe=1`);
+      if (hlaRes.ok) {
+        const hlaJson = await hlaRes.json().catch(() => null);
+        const { items: hlaItems } = parseHentaiLaCatalogData(hlaJson);
+        if (hlaItems.length > 0) {
+          const compactTitle = (s: string) => normalizeSlugText(s).replace(/-/g, '');
+          for (const hla of hlaItems) {
+            const hlaCompact = compactTitle(hla.title);
+            const existing = filtered.find((m: any) => {
+              if (m.idMal && hla.malId && Number(m.idMal) === Number(hla.malId)) return true;
+              const rComp = compactTitle(m.title?.romaji || '');
+              const eComp = compactTitle(m.title?.english || '');
+              return Boolean(hlaCompact && (rComp === hlaCompact || eComp === hlaCompact));
+            });
+            if (existing) {
+              existing.hentailaSlug = hla.slug;
+              existing.hentailaId = hla.mediaId;
+              if (hla.synopsis) {
+                existing.description = hla.synopsis;
+              }
+            } else if (cleanVars.isAdult === true || effectiveSearch.length >= 3) {
+              filtered.push({
+                id: hla.id,
+                idMal: hla.malId || undefined,
+                hentailaId: hla.mediaId,
+                hentailaSlug: hla.slug,
+                title: { romaji: hla.title, english: hla.title },
+                isAdult: true,
+                coverImage: { extraLarge: hla.cover, large: hla.cover },
+                bannerImage: hla.backdrop || hla.cover,
+                format: hla.category || 'OVA',
+                status: hla.status,
+                episodes: hla.episodesCount,
+                genres: hla.genres,
+                description: hla.synopsis || 'Disponible en HentaiLA VIP HD (Sub Español).'
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore optional HentaiLA catalog enrichment error
+    }
+  }
+
+  if (filtered.length === 0 && !effectiveSearch) {
+    return buildFallbackAnimeDirectoryResults(cleanVars, letter, effectiveSearch);
   }
 
   const pInfo = pageData?.pageInfo || {};
-  return {
+  const result = {
     items: filtered,
     pageInfo: {
       currentPage: Number(pInfo.currentPage || cleanVars.page || 1),
       lastPage: Number(pInfo.lastPage || 1),
       hasNextPage: Boolean(pInfo.hasNextPage),
-      total: Number(pInfo.total || filtered.length)
+      total: Math.max(Number(pInfo.total || 0), filtered.length)
     }
   };
+
+  if (filtered.length > 0) {
+    animeDirectoryMemCache.set(cacheKey, result);
+    CacheManager.set(cacheKey, result);
+  }
+
+  return result;
 }
+
+export { HENTAILA_GENRES, type HentaiLaCatalogItem };
 
 function renderSearchPagination(pageInfo: SearchPageMeta | null): void {
   const bar = document.getElementById('search-pagination-bar');
@@ -705,12 +1111,13 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
     (searchMediaTypeFilter === 'ALL' && !hasAnimeOnlyFilter);
 
   try {
+    const animeVars = mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'ANIME');
     const animePromise = includeAnime
       ? fetchAniListAnimeDirectory(
-          mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'ANIME'),
+          animeVars,
           filtersForQuery.letter,
           effectiveSearch
-        ).catch(() => ({ items: [], pageInfo: { currentPage: page, lastPage: 1, hasNextPage: false, total: 0 } }))
+        ).catch(() => buildFallbackAnimeDirectoryResults(animeVars, filtersForQuery.letter, effectiveSearch))
       : Promise.resolve({ items: [], pageInfo: { currentPage: page, lastPage: 1, hasNextPage: false, total: 0 } });
 
     const mangaPromise = includeManga

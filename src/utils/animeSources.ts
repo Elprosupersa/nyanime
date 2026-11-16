@@ -67,6 +67,8 @@ export function isBlockedOrUnsafeStreamHost(url: string, serverName = ''): boole
 }
 
 const SERVER_RELIABILITY_SCORES: Record<string, number> = {
+  vip: 136,
+  dotanborito: 136,
   desu: 128,
   desuv: 126,
   desuka: 125,
@@ -212,13 +214,15 @@ export function extractBestSearchQuery(romaji?: string | null, english?: string 
 export function buildAnimeSearchQueries(
   romaji?: string | null,
   english?: string | null,
-  seasonTitle?: string | null
+  seasonTitle?: string | null,
+  synonyms?: ReadonlyArray<string | null | undefined> | null
 ): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   const pushQuery = (q: string) => {
     const cleaned = q.replace(/\s+/g, ' ').trim();
     if (!cleaned || cleaned.length < 2) return;
+    if (/[^\x00-\x7F\u00C0-\u024F]/.test(cleaned) && !/[a-zA-Z]{2,}/.test(cleaned)) return;
     const key = cleaned.toLowerCase();
     if (!seen.has(key)) {
       seen.add(key);
@@ -226,7 +230,10 @@ export function buildAnimeSearchQueries(
     }
   };
 
-  for (const raw of [romaji, english, seasonTitle]) {
+  const primaryInputs = [romaji, english, seasonTitle];
+  const extraInputs = Array.isArray(synonyms) ? synonyms : [];
+
+  for (const raw of [...primaryInputs, ...extraInputs]) {
     if (!raw || !raw.trim()) continue;
     const base = cleanSingleSearchQuery(raw);
     if (!base) continue;
@@ -246,7 +253,7 @@ export function buildAnimeSearchQueries(
     }
   }
 
-  return out.slice(0, 4);
+  return out.slice(0, synonyms && synonyms.length > 0 ? 6 : 4);
 }
 
 export function parseAnimeAv1CatalogLinks(html: string): string[] {
@@ -292,7 +299,7 @@ const SLUG_STOPWORDS = new Set([
 ]);
 
 const SLUG_META_SUFFIXES = new Set([
-  'tv', 'latino', 'audio', 'sub', 'esp', 'espanol', 'castellano', 'hd', 'uncensored'
+  'tv', 'latino', 'audio', 'sub', 'esp', 'espanol', 'castellano', 'hd', 'uncensored', 'ova', 'ona', 'movie', 'pelicula', 'film', 'special'
 ]);
 
 function getExpectedSeasonTokens(seasonNum: number): Set<string> {
@@ -312,7 +319,8 @@ function getExpectedSeasonTokens(seasonNum: number): Set<string> {
 export function pickBestSlugMatch(
   foundSlugs: string[],
   targets: string[],
-  seasonNum = 1
+  seasonNum = 1,
+  formatHint = ''
 ): string | null {
   if (!foundSlugs || foundSlugs.length === 0) return null;
   const cleanTargets = (targets || []).filter((t): t is string => Boolean(t && t.trim()));
@@ -329,7 +337,9 @@ export function pickBestSlugMatch(
             ? new RegExp(`(${seasonNum}th|season-${seasonNum}|-s${seasonNum}$|-${seasonNum}$)`, 'i')
             : null;
 
-  const wantsMovie = cleanTargets.some((t) => /\b(movie|pelicula|film|ova|special|gaiden)\b/i.test(t));
+  const wantsMovie =
+    /^(OVA|MOVIE|ONA|SPECIAL)$/i.test(String(formatHint || '').trim()) ||
+    cleanTargets.some((t) => /\b(movie|pelicula|film|ova|special|gaiden)\b/i.test(t));
   const usesNumberedSeasonTitle = cleanTargets.some((t) =>
     /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t)
   );
@@ -363,10 +373,10 @@ export function pickBestSlugMatch(
 
     const parts = norm
       .split('-')
-      .filter((tok) => tok.length >= 2 && !['season', 'the', 'part', 'cour', 'movie', 'tv'].includes(tok));
+      .filter((tok) => (tok.length >= 2 || tok === '0') && !['season', 'the', 'part', 'cour', 'movie', 'tv'].includes(tok));
     const allTokens = new Set<string>(parts);
     const sigTokens = new Set<string>(
-      parts.filter((tok) => !SLUG_STOPWORDS.has(tok) && !/^\d+(?:st|nd|rd|th)?$/.test(tok))
+      parts.filter((tok) => !SLUG_STOPWORDS.has(tok) && (!/^\d+(?:st|nd|rd|th)?$/.test(tok) || tok === '0'))
     );
     if (sigTokens.size === 0) {
       for (const p of parts) sigTokens.add(p);
@@ -398,7 +408,7 @@ export function pickBestSlugMatch(
       let matchedCount = 0;
       const sigMatched = new Set<string>();
 
-      const strippedSlug = slug.replace(/-tv$/i, '');
+      const strippedSlug = slug.replace(/-(?:tv|ova|ona|movie|pelicula|film|special)$/i, '');
       const isExact =
         pt.exactSlugs.has(slug) ||
         (seasonNum === 1 && pt.exactSlugs.has(strippedSlug));
@@ -407,11 +417,20 @@ export function pickBestSlugMatch(
         score += 45;
       }
 
-      for (const st of slugTokens) {
+      for (let i = 0; i < slugTokens.length; i++) {
+        const st = slugTokens[i];
+        const nextSt = i + 1 < slugTokens.length ? slugTokens[i + 1] : '';
+        const joinedPair = nextSt ? `${st}${nextSt}` : '';
+
         if (pt.allTokens.has(st)) {
           score += pt.sigTokens.has(st) ? 14 : 6;
           matchedCount++;
           if (pt.sigTokens.has(st)) sigMatched.add(st);
+        } else if (joinedPair && pt.allTokens.has(joinedPair)) {
+          score += pt.sigTokens.has(joinedPair) ? 22 : 12;
+          matchedCount += 2;
+          if (pt.sigTokens.has(joinedPair)) sigMatched.add(joinedPair);
+          i++; // consume nextSt as part of compound match
         } else if (pt.compounds.has(st)) {
           score += 24;
           matchedCount += 2;
@@ -419,7 +438,8 @@ export function pickBestSlugMatch(
           if (pt.sigTokens.has(pair[0])) sigMatched.add(pair[0]);
           if (pt.sigTokens.has(pair[1])) sigMatched.add(pair[1]);
         } else if (SLUG_META_SUFFIXES.has(st)) {
-          if (st === 'tv' && seasonNum === 1) score += 4;
+          if (st === 'tv' && seasonNum === 1 && !wantsMovie) score += 4;
+          else if (wantsMovie && ['ova', 'ona', 'movie', 'pelicula', 'film', 'special'].includes(st)) score += 10;
         } else if (seasonNum > 1 && expectedSeasonTokens.has(st)) {
           score += 8;
         } else if (st.length >= 1) {
@@ -431,7 +451,13 @@ export function pickBestSlugMatch(
         continue;
       }
 
-      if (!pt.allTokens.has(firstTok) && !pt.compounds.has(firstTok) && extraTokens >= 2) {
+      const firstPair = slugTokens.length >= 2 ? `${slugTokens[0]}${slugTokens[1]}` : '';
+      if (
+        !pt.allTokens.has(firstTok) &&
+        !pt.compounds.has(firstTok) &&
+        (!firstPair || !pt.allTokens.has(firstPair)) &&
+        extraTokens >= 2
+      ) {
         continue;
       }
 
@@ -705,11 +731,13 @@ function normalizePortalServerName(rawLabel: string, decodedUrl: string): string
     .trim();
   if (!cleaned) return inferServerNameFromUrl(decodedUrl);
   const low = cleaned.toLowerCase();
+  if (low === 'vip' || low.includes('dotanborito')) return 'VIP';
   if (low.includes('mp4upload')) return 'MP4Upload';
-  if (low.includes('streamwish') || low.includes('dhcplay')) return 'StreamWish';
+  if (low.includes('yourupload')) return 'YourUpload';
+  if (low.includes('streamwish') || low.includes('dhcplay') || low.includes('ghbrisk')) return 'StreamWish';
   if (low.includes('filemoon')) return 'Filemoon';
   if (low.includes('uqload')) return 'Uqload';
-  if (low.includes('vidhide') || low.includes('filelions')) return 'Vidhide';
+  if (low.includes('vidhide') || low.includes('filelions') || low.includes('ryderjet')) return 'Vidhide';
   if (low.includes('lulu')) return 'LuluStream';
   if (low.includes('dood')) return 'Doodstream';
   if (low.includes('mixdrop')) return 'MixDrop';
@@ -831,13 +859,14 @@ export function parsePortalDownloadUrls(
 
 export function inferServerNameFromUrl(url: string): string {
   const u = String(url || '').toLowerCase();
+  if (u.includes('dotanborito')) return 'VIP';
   if (u.includes('mp4upload')) return 'MP4Upload';
   if (u.includes('zilla-networks')) return 'HLS';
   if (u.includes('voe.sx')) return 'VOE';
   if (u.includes('mega.nz')) return 'Mega';
-  if (u.includes('streamwish') || u.includes('flaswish') || u.includes('dhcplay')) return 'StreamWish';
+  if (u.includes('streamwish') || u.includes('flaswish') || u.includes('dhcplay') || u.includes('ghbrisk')) return 'StreamWish';
   if (u.includes('filemoon') || u.includes('byse')) return 'Filemoon';
-  if (u.includes('movearnpre') || u.includes('filelions')) return 'Vidhide';
+  if (u.includes('movearnpre') || u.includes('filelions') || u.includes('ryderjet') || u.includes('vidhide')) return 'Vidhide';
   if (u.includes('uqload')) return 'Uqload';
   if (u.includes('luluvdo')) return 'LuluStream';
   if (u.includes('ok.ru')) return 'Okru';
@@ -1009,3 +1038,596 @@ export function extractEpisodeDetailsMap(anizipJson: unknown): Record<number, Ep
   }
   return result;
 }
+
+export interface ArchiveOrgDocEntry {
+  identifier?: string;
+  title?: string | string[];
+  downloads?: number;
+}
+
+export function selectBestArchiveOrgDocs(
+  docs: ReadonlyArray<ArchiveOrgDocEntry>,
+  targets: ReadonlyArray<string>,
+  episodeNum = 1,
+  isMovie = false
+): string[] {
+  if (!Array.isArray(docs) || docs.length === 0) return [];
+  const cleanTargets = (targets || []).filter((t): t is string => Boolean(t && t.trim()));
+  if (cleanTargets.length === 0) return [];
+
+  const targetTokenSets = cleanTargets.map((t) => {
+    const norm = normalizeSlugText(t);
+    const parts = norm.split('-').filter((tok) => tok.length >= 2 && !SLUG_STOPWORDS.has(tok));
+    return new Set(parts.length > 0 ? parts : norm.split('-').filter(Boolean));
+  });
+
+  const ep = Math.max(1, Number(episodeNum || 1));
+  const epPad = ep < 10 ? `0${ep}` : String(ep);
+  const epExactRx = new RegExp(
+    `(?:^|[-_\\s]|ep(?:isode|isodio)?[-_\\s]*)(?:${ep}|${epPad})(?:$|[-_\\s]|v\\d|\\d{3,4}p)`,
+    'i'
+  );
+  const anyEpRx = /(?:^|[-_\s]|ep(?:isode|isodio)?[-_\s]*)0*([1-9]\d?)(?:$|[-_\s]|v\d|\d{3,4}p)/gi;
+
+  const scored: Array<{ id: string; score: number }> = [];
+
+  for (const doc of docs) {
+    const id = String(doc?.identifier || '').trim();
+    if (!id || /^(youtube-|twitch-)/i.test(id)) continue;
+    const rawTitle = Array.isArray(doc?.title) ? doc.title.join(' ') : String(doc?.title || '');
+    const combinedNorm = normalizeSlugText(`${id} ${rawTitle}`);
+    const docTokens = new Set(combinedNorm.split('-').filter(Boolean));
+
+    let bestTokenScore = -999;
+    for (const tSet of targetTokenSets) {
+      if (tSet.size === 0) continue;
+      let matched = 0;
+      for (const tok of tSet) {
+        if (docTokens.has(tok)) matched++;
+      }
+      const ratio = matched / tSet.size;
+      if (matched === 0 || (tSet.size >= 2 && ratio < 0.5)) continue;
+      const s = matched * 20 + Math.round(ratio * 30);
+      if (s > bestTokenScore) bestTokenScore = s;
+    }
+
+    if (bestTokenScore < 0) continue;
+
+    let score = bestTokenScore;
+    const hay = `${id} ${rawTitle}`;
+    if (/\b(review|reaction|amv|trailer|ost|soundtrack|opening|ending)\b/i.test(hay)) {
+      score -= 80;
+    }
+
+    if (!isMovie) {
+      if (epExactRx.test(id) || epExactRx.test(rawTitle)) {
+        score += 55;
+      } else {
+        const foundEps: number[] = [];
+        let m: RegExpExecArray | null;
+        anyEpRx.lastIndex = 0;
+        while ((m = anyEpRx.exec(hay)) !== null) {
+          const n = parseInt(m[1], 10);
+          if (Number.isFinite(n) && n > 0 && n < 100 && n < 1900) {
+            foundEps.push(n);
+          }
+        }
+        if (foundEps.length > 0 && !foundEps.includes(ep)) {
+          score -= 65;
+        }
+      }
+    }
+
+    if (/\b(sub|espanol|spanish|latino|uncensored|sin-censura|1080p|720p)\b/i.test(hay)) {
+      score += 10;
+    }
+
+    if (score > 0) {
+      scored.push({ id, score });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 3).map((x) => x.id);
+}
+
+export function extractArchiveOrgSourcesFromMetadata(
+  identifier: string,
+  metaJson: unknown,
+  episodeNum = 1,
+  providerLabel = 'Archive HD'
+): AnimeSourceCandidate[] {
+  const id = String(identifier || '').trim();
+  if (!id || !metaJson || typeof metaJson !== 'object') return [];
+  const files = (metaJson as { files?: Array<Record<string, unknown>> }).files;
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  const ep = Math.max(1, Number(episodeNum || 1));
+  const epPad = ep < 10 ? `0${ep}` : String(ep);
+  const epFileRx = new RegExp(`(?:^|[-_\\s]|ep(?:isode|isodio)?[-_\\s]*)(?:${ep}|${epPad})(?:\\.|[-_\\s])`, 'i');
+
+  const videoFiles = files.filter((f) => {
+    const name = String(f?.name || '');
+    if (!/\.(mp4|webm|ogv)$/i.test(name)) return false;
+    if (/ia_thumb|\.thumbs\//i.test(name)) return false;
+    const size = Number(f?.size || 0);
+    if (size > 0 && size < 1_000_000) return false;
+    return true;
+  });
+
+  if (videoFiles.length === 0) return [];
+
+  const scoredFiles = videoFiles.map((f) => {
+    const name = String(f.name || '');
+    const fmt = String(f.format || '');
+    let fScore = 50;
+    if (/\.mp4$/i.test(name)) fScore += 30;
+    if (/h\.?264|mpeg4/i.test(fmt)) fScore += 15;
+    if (epFileRx.test(name)) fScore += 45;
+    if (!name.includes('/')) fScore += 5;
+    return { name, score: fScore };
+  });
+
+  scoredFiles.sort((a, b) => b.score - a.score);
+  const bestFile = scoredFiles[0];
+  if (!bestFile) return [];
+
+  const encodedPath = bestFile.name
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  const directMp4Url = `https://archive.org/download/${encodeURIComponent(id)}/${encodedPath}`;
+  const embedUrl = `https://archive.org/embed/${encodeURIComponent(id)}`;
+  const isLat = /latino|espanol|castellano/i.test(`${id} ${bestFile.name}`);
+  const lang: 'SUB' | 'LATINO' = isLat ? 'LATINO' : 'SUB';
+
+  return [
+    {
+      providerId: 'archive_org',
+      providerName: `${providerLabel} (Direct MP4)`,
+      serverName: 'Archive Direct',
+      url: directMp4Url,
+      language: lang,
+      quality: '1080p',
+      type: 'mp4',
+      direct: true,
+      score: 126,
+      status: 'AVAILABLE'
+    },
+    {
+      providerId: 'archive_org',
+      providerName: `${providerLabel} (Embed)`,
+      serverName: 'Archive Embed',
+      url: embedUrl,
+      language: lang,
+      quality: '1080p',
+      type: 'embed',
+      direct: false,
+      score: 105,
+      status: 'AVAILABLE'
+    }
+  ];
+}
+
+export function isArchiveOrgSpanishMetadata(identifier: string, metaJson: unknown): boolean {
+  const id = String(identifier || '').trim();
+  if (!metaJson || typeof metaJson !== 'object') return false;
+  const meta = (metaJson as { metadata?: Record<string, unknown>; files?: Array<Record<string, unknown>> }).metadata || {};
+  const files = (metaJson as { files?: Array<Record<string, unknown>> }).files || [];
+
+  const flattenVal = (v: unknown): string => {
+    if (Array.isArray(v)) return v.map((x) => String(x || '')).join(' ');
+    return String(v || '');
+  };
+
+  const langField = flattenVal(meta.language).toLowerCase().trim();
+  const titleField = flattenVal(meta.title);
+  const descField = flattenVal(meta.description);
+  const subjField = flattenVal(meta.subject);
+  const fileNames = files.map((f) => String(f?.name || '')).join(' ');
+
+  const fullText = `${id} ${titleField} ${descField} ${subjField} ${fileNames}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (/\b(spa|es|esp|spanish|espanol|castellano|latino)\b/i.test(langField)) {
+    return true;
+  }
+
+  if (/\b(sub[\s._-]*esp|espanol|spanish|audio[\s._-]*latino|castellano|latino)\b/i.test(fullText)) {
+    return true;
+  }
+
+  return false;
+}
+
+const HENTAIJK_RESERVED_SLUGS = new Set([
+  'img',
+  'buscar',
+  'dash',
+  'usuario',
+  'pagina',
+  'directorio',
+  'letra',
+  'genero',
+  'assets',
+  'jkplayer',
+  'ajax',
+  'horario',
+  'top',
+  'historial',
+  'terminos',
+  'privacidad',
+  'contacto'
+]);
+
+export function parseHentaiJkSearchSlugs(html: string): string[] {
+  if (!html) return [];
+  const slugs = new Set<string>();
+  const rx = /href=["'](?:https?:\/\/(?:www\.)?hentaijk\.com)?\/([a-z0-9-]+)\/["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(html)) !== null) {
+    const slug = String(m[1] || '').toLowerCase().trim();
+    if (!slug || HENTAIJK_RESERVED_SLUGS.has(slug)) continue;
+    slugs.add(slug);
+  }
+  return Array.from(slugs);
+}
+
+export function parseJkPlayerDirectM3u8(html: string): string | null {
+  if (!html) return null;
+  const atobRx = /atob\(\s*['"]([A-Za-z0-9+/=]{16,})['"]\s*\)/gi;
+  let atobMatch: RegExpExecArray | null;
+  while ((atobMatch = atobRx.exec(html)) !== null) {
+    const decoded = unescapeJsonSlashes(decodeBase64Safe(atobMatch[1]));
+    if (/^https?:\/\/[^\s"']+\.m3u8(?:\?[^\s"']*)?$/i.test(decoded)) {
+      return decoded;
+    }
+  }
+  const m1 = html.match(/url\s*:\s*["'](https?:\/\/[^"']+\.m3u8(?:\?[^"']*)?)["']/i);
+  if (m1?.[1]) return unescapeJsonSlashes(m1[1]);
+  const m2 = html.match(/<source[^>]+src=["'](https?:\/\/[^"']+\.m3u8(?:\?[^"']*)?)["']/i);
+  if (m2?.[1]) return unescapeJsonSlashes(m2[1]);
+  const m3 = html.match(/["'](https?:\/\/[^"'\s]+\.m3u8(?:\?[^"'\s]*)?)["']/i);
+  if (m3?.[1]) return unescapeJsonSlashes(m3[1]);
+  return null;
+}
+
+export function resolveDotanboritoDirectM3u8(embedOrPlayUrl: string): string | null {
+  const raw = String(embedOrPlayUrl || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^https?:\/\/(?:cdn\.)?dotanborito\.net\/(?:play|m3u8)\/([a-f0-9]{32})(?:[/?#]|$)/i);
+  if (match?.[1]) {
+    return `https://cdn.dotanborito.net/m3u8/${match[1].toLowerCase()}`;
+  }
+  return null;
+}
+
+export const HENTAILA_CDN_URL = 'https://cdn.hentaila.com';
+
+export interface HentaiLaMediaImages {
+  cover: string;
+  thumbnail: string;
+  backdrop: string;
+}
+
+export function buildHentaiLaMediaImages(mediaId: number | string): HentaiLaMediaImages {
+  const cleanId = String(mediaId ?? '').trim();
+  if (!cleanId) {
+    return { cover: '', thumbnail: '', backdrop: '' };
+  }
+  return {
+    cover: `${HENTAILA_CDN_URL}/covers/${encodeURIComponent(cleanId)}.jpg`,
+    thumbnail: `${HENTAILA_CDN_URL}/thumbnails/${encodeURIComponent(cleanId)}.jpg`,
+    backdrop: `${HENTAILA_CDN_URL}/backdrops/${encodeURIComponent(cleanId)}.jpg`
+  };
+}
+
+export function resolveDevalue(dataArray: unknown[], index: unknown, seen: Set<number> = new Set()): any {
+  if (!Array.isArray(dataArray)) return index;
+  if (typeof index === 'number' && index >= 0 && index < dataArray.length) {
+    if (seen.has(index)) return null;
+    const val = dataArray[index];
+    if (val === null || typeof val !== 'object') return val;
+    if (Array.isArray(val)) {
+      if (val.length === 2 && val[0] === 'Date' && typeof val[1] === 'string') {
+        return val[1];
+      }
+      const nextSeen = new Set(seen);
+      nextSeen.add(index);
+      return val.map((subIndex) => resolveDevalue(dataArray, subIndex, nextSeen));
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(index);
+    const resolvedObj: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      resolvedObj[k] = resolveDevalue(dataArray, v, nextSeen);
+    }
+    return resolvedObj;
+  }
+  return index;
+}
+
+function extractSvelteKitNodeRoot(json: unknown): any {
+  if (!json || typeof json !== 'object') return null;
+  const nodes = (json as { nodes?: Array<{ data?: unknown[] } | null> }).nodes;
+  if (!Array.isArray(nodes) || nodes.length === 0) return null;
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const dArr = nodes[i]?.data;
+    if (Array.isArray(dArr) && dArr.length > 0) {
+      return resolveDevalue(dArr, 0);
+    }
+  }
+  return null;
+}
+
+export interface HentaiLaCatalogItem {
+  id: string;
+  mediaId: number;
+  slug: string;
+  title: string;
+  synopsis: string;
+  category: string;
+  status: 'RELEASING' | 'FINISHED';
+  episodesCount: number;
+  malId?: number | null;
+  genres: string[];
+  cover: string;
+  thumbnail: string;
+  backdrop: string;
+}
+
+export function parseHentaiLaCatalogData(json: unknown): {
+  items: HentaiLaCatalogItem[];
+  total: number;
+} {
+  const root = extractSvelteKitNodeRoot(json);
+  if (!root || typeof root !== 'object') return { items: [], total: 0 };
+  const rawResults = Array.isArray(root.results)
+    ? root.results
+    : Array.isArray(root.results?.data)
+      ? root.results.data
+      : Array.isArray(root.media)
+        ? root.media
+        : [];
+  const items: HentaiLaCatalogItem[] = [];
+  for (const r of rawResults) {
+    if (!r || typeof r !== 'object') continue;
+    const mediaId = Number(r.id || 0);
+    const slug = String(r.slug || '').trim().toLowerCase();
+    const title = String(r.title || '').trim();
+    if (!mediaId || !slug || !title) continue;
+    const imgs = buildHentaiLaMediaImages(mediaId);
+    const genres = Array.isArray(r.genres)
+      ? r.genres
+          .map((g: any) => String(g?.name || g || '').trim())
+          .filter(Boolean)
+      : ['Hentai'];
+    if (!genres.some((g: string) => /hentai/i.test(g))) {
+      genres.unshift('Hentai');
+    }
+    items.push({
+      id: `hla_${mediaId}`,
+      mediaId,
+      slug,
+      title,
+      synopsis: String(r.synopsis || '').replace(/\r\n/g, '\n').trim(),
+      category: String(r.category?.name || 'OVA').toUpperCase(),
+      status: Number(r.status) === 1 ? 'RELEASING' : 'FINISHED',
+      episodesCount: Math.max(1, Number(r.episodesCount || (Array.isArray(r.episodes) ? r.episodes.length : 2))),
+      malId: r.malId ? Number(r.malId) : null,
+      genres,
+      cover: imgs.cover,
+      thumbnail: imgs.thumbnail,
+      backdrop: imgs.backdrop
+    });
+  }
+  return {
+    items,
+    total: Number(root.total || items.length)
+  };
+}
+
+export function parseHentaiLaHubData(json: unknown): {
+  featured: HentaiLaCatalogItem[];
+  latestEpisodes: Array<{
+    id: number;
+    number: number;
+    createdAt: string;
+    mediaId: number;
+    slug: string;
+    title: string;
+    cover: string;
+    thumbnail: string;
+  }>;
+  latestMedia: HentaiLaCatalogItem[];
+} {
+  const root = extractSvelteKitNodeRoot(json);
+  if (!root || typeof root !== 'object') {
+    return { featured: [], latestEpisodes: [], latestMedia: [] };
+  }
+  const mapMediaList = (arr: unknown): HentaiLaCatalogItem[] => {
+    if (!Array.isArray(arr)) return [];
+    return parseHentaiLaCatalogData({ nodes: [{ data: [{ results: arr }] }] }).items;
+  };
+  const latestEpisodes = Array.isArray(root.latestEpisodes)
+    ? root.latestEpisodes
+        .map((ep: any) => {
+          const mediaId = Number(ep?.media?.id || ep?.mediaId || 0);
+          const slug = String(ep?.media?.slug || '').trim().toLowerCase();
+          const title = String(ep?.media?.title || '').trim();
+          if (!mediaId || !slug) return null;
+          const imgs = buildHentaiLaMediaImages(mediaId);
+          return {
+            id: Number(ep.id || 0),
+            number: Math.max(1, Number(ep.number || 1)),
+            createdAt: String(ep.createdAt || ''),
+            mediaId,
+            slug,
+            title,
+            cover: imgs.cover,
+            thumbnail: imgs.thumbnail
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => Boolean(x))
+    : [];
+
+  return {
+    featured: mapMediaList(root.featured),
+    latestEpisodes,
+    latestMedia: mapMediaList(root.latestMedia)
+  };
+}
+
+export function parseHentaiLaMediaDetail(json: unknown): HentaiLaCatalogItem | null {
+  const root = extractSvelteKitNodeRoot(json);
+  const media = root?.media;
+  if (!media || typeof media !== 'object') return null;
+  const parsed = parseHentaiLaCatalogData({ nodes: [{ data: [{ results: [media] }] }] });
+  return parsed.items[0] || null;
+}
+
+export function parseHentaiLaEpisodeSources(payload: unknown): AnimeSourceCandidate[] {
+  if (!payload) return [];
+  const results: AnimeSourceCandidate[] = [];
+
+  const pushEntry = (rawServer: string, rawUrlInput: string, lang: 'SUB' | 'LATINO' = 'SUB') => {
+    const cleanServerRaw = String(rawServer || '').trim();
+    if (!rawUrlInput || /^(mediafire|1fichier|fireload)$/i.test(cleanServerRaw)) return;
+    const rawUrl = normalizeKnownEmbedUrl(rawUrlInput);
+    if (!rawUrl) return;
+    const serverName = normalizePortalServerName(cleanServerRaw, rawUrl);
+    if (isBlockedOrUnsafeStreamHost(rawUrl, serverName)) return;
+    const isVip = serverName.toUpperCase() === 'VIP' || rawUrl.includes('dotanborito.net');
+    const score = isVip ? 150 : getServerBaseScore(serverName) + 14;
+    results.push({
+      providerId: 'hentaila',
+      providerName: isVip ? 'HentaiLA (VIP)' : `HentaiLA (${serverName})`,
+      serverName: isVip ? 'VIP' : serverName,
+      url: rawUrl,
+      language: lang,
+      quality: '1080p',
+      type: 'embed',
+      direct: false,
+      score,
+      status: 'AVAILABLE'
+    });
+  };
+
+  if (typeof payload === 'object') {
+    const root = (payload as any).nodes ? extractSvelteKitNodeRoot(payload) : payload;
+    if (root && typeof root === 'object') {
+      for (const bucketKey of ['embeds', 'downloads'] as const) {
+        const bucket = (root as any)[bucketKey];
+        if (!bucket || typeof bucket !== 'object') continue;
+        for (const [langKey, arr] of Object.entries(bucket)) {
+          if (!Array.isArray(arr)) continue;
+          const lang: 'SUB' | 'LATINO' = /dub|lat/i.test(langKey) ? 'LATINO' : 'SUB';
+          for (const item of arr) {
+            if (item && typeof item === 'object') {
+              pushEntry(String((item as any).server || ''), String((item as any).url || ''), lang);
+            }
+          }
+        }
+      }
+    }
+    return results;
+  }
+
+  if (typeof payload === 'string') {
+    const html = payload;
+    const embStr = extractBalancedJsObject(html, 'embeds:');
+    const dlStr = extractBalancedJsObject(html, 'downloads:');
+    const extractFromStr = (sourceStr: string | null) => {
+      if (!sourceStr) return;
+      const itemRegex = /\{\s*server:\s*["']([^"']+)["']\s*,\s*url:\s*["']([^"']+)["']\s*\}/g;
+      let m: RegExpExecArray | null;
+      while ((m = itemRegex.exec(sourceStr)) !== null) {
+        pushEntry(m[1], m[2], 'SUB');
+      }
+    };
+    extractFromStr(embStr);
+    extractFromStr(dlStr);
+
+    if (results.length === 0) {
+      const iframeMatch = html.match(/<iframe[^>]+src=["'](https?:\/\/cdn\.dotanborito\.net\/play\/[a-f0-9]{32})["']/i);
+      if (iframeMatch?.[1]) {
+        pushEntry('VIP', iframeMatch[1], 'SUB');
+      }
+    }
+  }
+
+  return results;
+}
+
+export function parseHentaiJkEpisodeSources(html: string): AnimeSourceCandidate[] {
+  if (!html) return [];
+  const results: AnimeSourceCandidate[] = [];
+
+  const srvMatch = html.match(/var\s+servers\s*=\s*(\[[\s\S]*?\])\s*;/i);
+  if (srvMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(srvMatch[1]) as Array<{ server?: string; remote?: string }>;
+      for (const item of parsed) {
+        const rawServer = String(item?.server || '').trim();
+        const rawRemote = String(item?.remote || '').trim();
+        if (!rawRemote || /^mediafire$/i.test(rawServer) || /^streamtape$/i.test(rawServer)) continue;
+        const decoded = normalizeKnownEmbedUrl(decodeBase64Safe(rawRemote) || rawRemote);
+        if (!decoded) continue;
+        const serverName = normalizePortalServerName(rawServer, decoded);
+        if (isBlockedOrUnsafeStreamHost(decoded, serverName)) continue;
+        results.push({
+          providerId: 'hentaijk',
+          providerName: `HentaiJK (${serverName})`,
+          serverName,
+          url: decoded,
+          language: 'SUB',
+          quality: '1080p',
+          type: 'embed',
+          direct: false,
+          score: getServerBaseScore(serverName) + 14,
+          status: 'AVAILABLE'
+        });
+      }
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+
+  const desuMatch = html.match(/video\[0\]\s*=\s*.*?src=["']([^"']+)["']/i);
+  const desuvMatch = html.match(/video\[1\]\s*=\s*.*?src=["']([^"']+)["']/i);
+  if (desuMatch?.[1] && !isBlockedOrUnsafeStreamHost(desuMatch[1], 'Desu')) {
+    results.push({
+      providerId: 'hentaijk',
+      providerName: 'HentaiJK (Desu)',
+      serverName: 'Desu',
+      url: unescapeJsonSlashes(desuMatch[1]),
+      language: 'SUB',
+      quality: '1080p',
+      type: 'embed',
+      direct: false,
+      score: 132,
+      status: 'AVAILABLE'
+    });
+  }
+  if (desuvMatch?.[1] && !isBlockedOrUnsafeStreamHost(desuvMatch[1], 'Desuv')) {
+    results.push({
+      providerId: 'hentaijk',
+      providerName: 'HentaiJK (Desuv)',
+      serverName: 'Desuv',
+      url: unescapeJsonSlashes(desuvMatch[1]),
+      language: 'SUB',
+      quality: '1080p',
+      type: 'embed',
+      direct: false,
+      score: 130,
+      status: 'AVAILABLE'
+    });
+  }
+
+  return results;
+}
+
+
+

@@ -16,6 +16,28 @@ export const ALLOWED_PROXY_DOMAINS: readonly string[] = [
   '*.jkanime.net',
   'jkanime.one',
   '*.jkanime.one',
+  'hentaijk.com',
+  '*.hentaijk.com',
+  'hentaila.com',
+  '*.hentaila.com',
+  'dotanborito.net',
+  '*.dotanborito.net',
+  'ghbrisk.com',
+  '*.ghbrisk.com',
+  'ryderjet.com',
+  '*.ryderjet.com',
+  'fireload.com',
+  '*.fireload.com',
+  'jkdesa.com',
+  '*.jkdesa.com',
+  'playmudos.com',
+  '*.playmudos.com',
+  'streamhgapi.com',
+  '*.streamhgapi.com',
+  'vidhidevip.com',
+  '*.vidhidevip.com',
+  'bysekoze.com',
+  '*.bysekoze.com',
   'ww1.henaojara.net',
   '*.henaojara.net',
   'animejara.com',
@@ -87,7 +109,9 @@ export const ALLOWED_PROXY_DOMAINS: readonly string[] = [
   '*.wp.com',
   '*.blogspot.com',
   '*.googleusercontent.com',
-  'api.dicebear.com'
+  'api.dicebear.com',
+  'archive.org',
+  '*.archive.org'
 ];
 
 export function resolveVideoStreamReferer(targetUrl: URL): string {
@@ -102,6 +126,29 @@ export function resolveVideoStreamReferer(targetUrl: URL): string {
     host.endsWith('.vidcache.net')
   ) {
     return 'https://www.yourupload.com/';
+  }
+  if (host === 'dotanborito.net' || host.endsWith('.dotanborito.net')) {
+    return 'https://cdn.dotanborito.net/';
+  }
+  if (host === 'hentaila.com' || host.endsWith('.hentaila.com')) {
+    return 'https://hentaila.com/';
+  }
+  if (
+    host === 'hentaijk.com' ||
+    host.endsWith('.hentaijk.com') ||
+    host === 'playmudos.com' ||
+    host.endsWith('.playmudos.com')
+  ) {
+    return 'https://hentaijk.com/';
+  }
+  if (host === 'ghbrisk.com' || host.endsWith('.ghbrisk.com')) {
+    return 'https://ghbrisk.com/';
+  }
+  if (host === 'ryderjet.com' || host.endsWith('.ryderjet.com')) {
+    return 'https://ryderjet.com/';
+  }
+  if (host === 'archive.org' || host.endsWith('.archive.org')) {
+    return 'https://archive.org/';
   }
   return targetUrl.origin + '/';
 }

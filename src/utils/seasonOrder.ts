@@ -1,6 +1,10 @@
 export interface AniListMediaNode {
   id: number;
+  idMal?: number | null;
   title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
+  synonyms?: string[] | null;
+  isAdult?: boolean | null;
+  averageScore?: number | null;
   format?: string | null;
   status?: string | null;
   episodes?: number | null;
@@ -35,6 +39,7 @@ export interface OrganizedSeasonEntry {
   status: string;
   totalEpisodes: number;
   isUpcoming: boolean;
+  nextAiringEpisode?: { episode?: number | null; timeUntilAiring?: number | null } | null;
   sortDateKey: number;
   coverImage: string;
   bannerImage: string;
@@ -67,9 +72,21 @@ export function computeAvailableEpisodes(node: AniListMediaNode | null | undefin
   if (node.status === 'NOT_YET_RELEASED') {
     return { totalEpisodes: 0, isUpcoming: true };
   }
-  if (node.status === 'RELEASING' && node.nextAiringEpisode?.episode) {
+  if (node.status === 'RELEASING') {
+    if (node.nextAiringEpisode?.episode) {
+      return {
+        totalEpisodes: Math.max(0, Number(node.nextAiringEpisode.episode) - 1),
+        isUpcoming: false
+      };
+    }
+    if (node.episodes && Number(node.episodes) > 0) {
+      return {
+        totalEpisodes: Math.max(1, Number(node.episodes)),
+        isUpcoming: false
+      };
+    }
     return {
-      totalEpisodes: Math.max(0, Number(node.nextAiringEpisode.episode) - 1),
+      totalEpisodes: 1,
       isUpcoming: false
     };
   }
@@ -136,7 +153,41 @@ export function extractGraphFromMediaRoots(roots: AniListMediaNode[]): {
     nodesById.set(node.id, {
       ...existing,
       ...node,
-      title: node.title?.english || node.title?.romaji ? { ...existing.title, ...node.title } : existing.title,
+      idMal: node.idMal ?? existing.idMal,
+      status:
+        (existing.status === 'RELEASING' || existing.status === 'FINISHED') &&
+        (!node.status || node.status === 'NOT_YET_RELEASED')
+          ? existing.status
+          : (node.status || existing.status),
+      format: node.format || existing.format,
+      episodes: node.episodes ?? existing.episodes,
+      nextAiringEpisode:
+        node.nextAiringEpisode?.episode
+          ? node.nextAiringEpisode
+          : existing.nextAiringEpisode,
+      startDate:
+        node.startDate?.year
+          ? node.startDate
+          : existing.startDate,
+      seasonYear: node.seasonYear ?? existing.seasonYear,
+      averageScore: node.averageScore ?? existing.averageScore,
+      genres:
+        Array.isArray(node.genres) && node.genres.length > 0
+          ? node.genres
+          : existing.genres,
+      synonyms:
+        Array.isArray(node.synonyms) && node.synonyms.length > 0
+          ? node.synonyms
+          : existing.synonyms,
+      isAdult: node.isAdult ?? existing.isAdult,
+      title:
+        node.title?.english || node.title?.romaji
+          ? {
+              romaji: node.title?.romaji || existing.title?.romaji,
+              english: node.title?.english || existing.title?.english,
+              native: node.title?.native || existing.title?.native
+            }
+          : existing.title,
       coverImage: node.coverImage?.extraLarge || node.coverImage?.large ? node.coverImage : existing.coverImage,
       bannerImage: node.bannerImage || existing.bannerImage,
       description: node.description || existing.description,
@@ -426,6 +477,7 @@ export function organizeAnimeFranchise(
       status: String(node.status || 'FINISHED'),
       totalEpisodes,
       isUpcoming,
+      nextAiringEpisode: node.nextAiringEpisode || null,
       sortDateKey: getDateSortKey(node),
       coverImage: node.coverImage?.extraLarge || node.coverImage?.large || '',
       bannerImage: node.bannerImage || node.coverImage?.extraLarge || node.coverImage?.large || '',

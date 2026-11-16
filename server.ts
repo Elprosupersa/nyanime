@@ -22,6 +22,8 @@ const DIST_DIR = path.resolve(__dirname, 'dist');
 const apiRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
 const imgRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
 const videoRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
+const proxyResponseCache = new Map<string, { buffer: Buffer; contentType: string; expiresAt: number }>();
+const PROXY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -202,6 +204,7 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
     }
 
     let bodyData: Uint8Array | undefined;
+    let bodyText = '';
     if (req.method === 'POST') {
       const buf = await new Promise<Buffer>((resolve, reject) => {
         const chunks: Buffer[] = [];
@@ -218,6 +221,17 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
         req.on('error', reject);
       });
       bodyData = new Uint8Array(buf);
+      bodyText = buf.toString('utf8');
+    }
+
+    const cacheKey = `${req.method || 'GET'}::${targetUrl.toString()}::${bodyText}`;
+    const cachedEntry = proxyResponseCache.get(cacheKey);
+    if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
+      res.setHeader('Content-Type', cachedEntry.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=120');
+      res.statusCode = 200;
+      res.end(cachedEntry.buffer);
+      return;
     }
 
     const controller = new AbortController();
@@ -232,14 +246,37 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
 
     const payload = await readUpstreamWithLimit(upstream, MAX_API_PROXY_BYTES);
     const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+    if (upstream.status === 200 && payload.byteLength > 0 && payload.byteLength < 512_000) {
+      if (proxyResponseCache.size > 400) {
+        const firstKey = proxyResponseCache.keys().next().value;
+        if (firstKey) proxyResponseCache.delete(firstKey);
+      }
+      proxyResponseCache.set(cacheKey, {
+        buffer: payload,
+        contentType,
+        expiresAt: Date.now() + PROXY_CACHE_TTL_MS
+      });
+    }
+
+    const isProbe = parsed.searchParams.get('probe') === '1';
+    res.setHeader('X-Upstream-Status', String(upstream.status));
+    if (isProbe && upstream.status >= 400) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.statusCode = 200;
+      res.end('');
+      return;
+    }
+
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=120');
     res.statusCode = upstream.status;
     res.end(payload);
   } catch (err) {
-    res.statusCode = 502;
+    const isProbe = Boolean(req.url && req.url.includes('probe=1'));
+    res.setHeader('X-Upstream-Status', '502');
+    res.statusCode = isProbe ? 200 : 502;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+    res.end(isProbe ? '' : JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
   }
 }
 
@@ -391,10 +428,13 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
     }
 
     const rawCt = (upstream.headers.get('content-type') || '').toLowerCase();
+    const lowerPath = targetUrl.pathname.toLowerCase();
+    const lowerHost = targetUrl.hostname.toLowerCase();
     const isHlsManifest =
       rawCt.includes('mpegurl') ||
       rawCt.includes('x-mpegurl') ||
-      targetUrl.pathname.toLowerCase().endsWith('.m3u8');
+      lowerPath.endsWith('.m3u8') ||
+      lowerPath.includes('/m3u8/');
 
     if (isHlsManifest && req.method !== 'HEAD') {
       const manifestBuf = await readUpstreamWithLimit(upstream, MAX_API_PROXY_BYTES);
@@ -406,7 +446,12 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
       return;
     }
 
-    if (rawCt.includes('text/html') || rawCt.includes('application/xhtml')) {
+    const isDisguisedVideoSegment =
+      ((lowerHost === 'dotanborito.net' || lowerHost.endsWith('.dotanborito.net')) && lowerPath.includes('/segs/')) ||
+      lowerHost === 'playmudos.com' ||
+      lowerHost.endsWith('.playmudos.com');
+
+    if (!isDisguisedVideoSegment && (rawCt.includes('text/html') || rawCt.includes('application/xhtml'))) {
       res.statusCode = 502;
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.end('Upstream returned HTML error page instead of video stream');
@@ -415,9 +460,9 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
 
     const mime = rawCt.includes('video/')
       ? rawCt
-      : targetUrl.pathname.endsWith('.webm')
+      : lowerPath.endsWith('.webm')
         ? 'video/webm'
-        : targetUrl.pathname.endsWith('.ts')
+        : lowerPath.endsWith('.ts')
           ? 'video/mp2t'
           : 'video/mp4';
     res.setHeader('Content-Type', mime);

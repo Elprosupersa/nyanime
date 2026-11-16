@@ -409,3 +409,76 @@ export function filterMediaByLetter<T extends { title?: { romaji?: string | null
     return cleanR.startsWith(target) || cleanE.startsWith(target);
   });
 }
+
+export interface HentaiLaGenreEntry {
+  id: number;
+  name: string;
+  slug: string;
+}
+
+export const HENTAILA_GENRES: readonly HentaiLaGenreEntry[] = [
+  { id: 1, name: '3D', slug: '3d' },
+  { id: 2, name: 'Ahegao', slug: 'ahegao' },
+  { id: 3, name: 'Anal', slug: 'anal' },
+  { id: 4, name: 'Casadas', slug: 'casadas' },
+  { id: 5, name: 'Chikan', slug: 'chikan' },
+  { id: 6, name: 'Ecchi', slug: 'ecchi' },
+  { id: 7, name: 'Enfermeras', slug: 'enfermeras' },
+  { id: 8, name: 'Escolares', slug: 'escolares' },
+  { id: 9, name: 'Futanari', slug: 'futanari' },
+  { id: 10, name: 'Gore', slug: 'gore' },
+  { id: 11, name: 'Hardcore', slug: 'hardcore' },
+  { id: 12, name: 'Harem', slug: 'harem' },
+  { id: 13, name: 'Incesto', slug: 'incesto' },
+  { id: 14, name: 'Juegos Sexuales', slug: 'juegos-sexuales' },
+  { id: 15, name: 'Suspenso', slug: 'suspenso' },
+  { id: 16, name: 'Milfs', slug: 'milfs' },
+  { id: 17, name: 'Maids', slug: 'maids' },
+  { id: 18, name: 'Netorare', slug: 'netorare' },
+  { id: 19, name: 'Ninfomanía', slug: 'ninfomania' },
+  { id: 20, name: 'Ninjas', slug: 'ninjas' },
+  { id: 21, name: 'Orgías', slug: 'orgias' },
+  { id: 22, name: 'Romance', slug: 'romance' },
+  { id: 23, name: 'Shota', slug: 'shota' },
+  { id: 24, name: 'Softcore', slug: 'softcore' },
+  { id: 25, name: 'Succubus', slug: 'succubus' },
+  { id: 26, name: 'Teacher', slug: 'teacher' },
+  { id: 27, name: 'Tentáculos', slug: 'tentaculos' },
+  { id: 28, name: 'Tetonas', slug: 'tetonas' },
+  { id: 29, name: 'Vanilla', slug: 'vanilla' },
+  { id: 30, name: 'Violación', slug: 'violacion' },
+  { id: 31, name: 'Vírgenes', slug: 'virgenes' },
+  { id: 32, name: 'Yaoi', slug: 'yaoi' },
+  { id: 33, name: 'Yuri', slug: 'yuri' },
+  { id: 34, name: 'Bondage', slug: 'bondage' },
+  { id: 35, name: 'Elfas', slug: 'elfas' },
+  { id: 36, name: 'Petit', slug: 'petit' },
+  { id: 37, name: 'Threesome', slug: 'threesome' },
+  { id: 38, name: 'Paizuri', slug: 'paizuri' },
+  { id: 39, name: 'Gal', slug: 'gal' },
+  { id: 40, name: 'Oyakodon', slug: 'oyakodon' }
+];
+
+export interface HentaiLaCatalogQueryOptions {
+  page?: number;
+  search?: string;
+  uncensored?: boolean;
+  genreId?: number | string;
+  order?: 'popular' | 'recent' | '';
+  year?: number | string;
+}
+
+export function buildHentaiLaCatalogUrl(options: HentaiLaCatalogQueryOptions = {}): string {
+  const params = new URLSearchParams();
+  const page = Math.max(1, Number(options.page || 1));
+  if (page > 1) params.set('page', String(page));
+  if (options.search && options.search.trim()) params.set('search', options.search.trim());
+  if (options.uncensored) params.set('uncensored', 'true');
+  if (options.genreId) params.set('genres', String(options.genreId));
+  if (options.order) params.set('order', options.order);
+  if (options.year && /^\d{4}$/.test(String(options.year))) params.set('years', String(options.year));
+
+  const qs = params.toString();
+  return `https://hentaila.com/catalogo/__data.json${qs ? `?${qs}` : ''}`;
+}
+

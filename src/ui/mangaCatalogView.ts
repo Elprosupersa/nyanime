@@ -2058,13 +2058,27 @@ export const AniListMangaService = {
     `;
 
     try {
-      const resp = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query })
-      });
-      if (!resp.ok) throw new Error('AniList GraphQL failed');
-      const json = await resp.json();
+      const bodyStr = JSON.stringify({ query });
+      let json: any = null;
+      try {
+        const pResp = await fetch(`/api/proxy?url=${encodeURIComponent('https://graphql.anilist.co')}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: bodyStr
+        });
+        if (pResp.ok) json = await pResp.json();
+      } catch {
+        // try direct below
+      }
+      if (!json?.data?.Page) {
+        const resp = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: bodyStr
+        });
+        if (!resp.ok) throw new Error('AniList GraphQL failed');
+        json = await resp.json();
+      }
       const raw = json?.data?.Page?.media || [];
 
       const list = raw.map((m: any) => {
@@ -2132,13 +2146,27 @@ export const AniListMangaService = {
       }
     `;
     try {
-      const resp = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: gql, variables: { search: q } })
-      });
-      if (!resp.ok) throw new Error('AniList search failed');
-      const json = await resp.json();
+      const bodyStr = JSON.stringify({ query: gql, variables: { search: q } });
+      let json: any = null;
+      try {
+        const pResp = await fetch(`/api/proxy?url=${encodeURIComponent('https://graphql.anilist.co')}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: bodyStr
+        });
+        if (pResp.ok) json = await pResp.json();
+      } catch {
+        // try direct below
+      }
+      if (!json?.data?.Page) {
+        const resp = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: bodyStr
+        });
+        if (!resp.ok) throw new Error('AniList search failed');
+        json = await resp.json();
+      }
       const raw = json?.data?.Page?.media || [];
 
       return raw.map((m: any) => {
@@ -2173,6 +2201,8 @@ export const AniListMangaService = {
       return await MangaDex.search(query, limit);
     }
   },
+
+  directoryCache: new Map<string, { items: any[]; pageInfo: { currentPage: number; lastPage: number; hasNextPage: boolean; total: number } }>(),
 
   async searchDirectory(
     variables: Record<string, any>,
@@ -2255,6 +2285,10 @@ export const AniListMangaService = {
       }
     }
 
+    const cacheKey = `dir_manga_v4_${JSON.stringify(cleanVars)}_${letter}`;
+    const cachedHit = this.directoryCache.get(cacheKey);
+    if (cachedHit && cachedHit.items.length > 0) return cachedHit;
+
     const normalizeRaw = (raw: any[]) =>
       raw.map((m: any) => {
         let flag = '🇯🇵 Manga';
@@ -2286,27 +2320,88 @@ export const AniListMangaService = {
         });
       });
 
+    const runMangaDirQuery = async (vars: Record<string, any>) => {
+      const bodyStr = JSON.stringify({ query: gql, variables: vars });
+      try {
+        const pResp = await fetch(`/api/proxy?url=${encodeURIComponent('https://graphql.anilist.co')}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: bodyStr
+        });
+        if (pResp.ok) {
+          const pj = await pResp.json();
+          if (pj?.data?.Page) return pj.data.Page;
+        }
+      } catch {
+        // try direct below
+      }
+      try {
+        const resp = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: bodyStr
+        });
+        if (!resp.ok) return null;
+        const json = await resp.json();
+        return json?.data?.Page || null;
+      } catch {
+        return null;
+      }
+    };
+
     try {
-      const resp = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: gql, variables: cleanVars })
-      });
-      if (!resp.ok) throw new Error('AniList manga directory search failed');
-      const json = await resp.json();
-      const pageData = json?.data?.Page;
-      const raw = pageData?.media || [];
+      let pageData = await runMangaDirQuery(cleanVars);
+      let raw = pageData?.media || [];
+
+      if (raw.length === 0 && !cleanVars.search) {
+        const hasExtraConstraints = Boolean(
+          cleanVars.startDate_greater ||
+            cleanVars.status ||
+            (cleanVars.tag_in && cleanVars.genre_in) ||
+            (Array.isArray(cleanVars.tag_in) && cleanVars.tag_in.length > 0)
+        );
+        if (hasExtraConstraints) {
+          const relaxedVars: Record<string, any> = {
+            page: 1,
+            perPage: cleanVars.perPage || 24,
+            isAdult: Boolean(cleanVars.isAdult),
+            sort: cleanVars.sort || ['POPULARITY_DESC']
+          };
+          if (cleanVars.genre_in) relaxedVars.genre_in = cleanVars.genre_in;
+          if (cleanVars.countryOfOrigin) relaxedVars.countryOfOrigin = cleanVars.countryOfOrigin;
+          const relaxedPage = await runMangaDirQuery(relaxedVars);
+          if (relaxedPage?.media?.length > 0) {
+            pageData = relaxedPage;
+            raw = relaxedPage.media;
+          }
+        }
+      }
+
       let items = normalizeRaw(raw);
       if (letter) {
         const cleanTarget = letter.trim().toUpperCase().slice(0, 1);
-        items = items.filter((it: any) => {
+        const byLetter = items.filter((it: any) => {
           const r = String(it.rawTitleObj?.romaji || it.title || '').replace(/^[^a-zA-Z0-9]+/, '').toUpperCase();
           const e = String(it.rawTitleObj?.english || it.title || '').replace(/^[^a-zA-Z0-9]+/, '').toUpperCase();
           return r.startsWith(cleanTarget) || e.startsWith(cleanTarget);
         });
+        if (byLetter.length > 0) items = byLetter;
       }
+
+      if (items.length === 0) {
+        const cachedPool: any[] = [];
+        for (const k of Object.keys(this.cache)) {
+          if (Array.isArray(this.cache[k])) cachedPool.push(...this.cache[k]);
+        }
+        if (cachedPool.length > 0) {
+          items = cachedPool.slice(0, 18);
+        } else {
+          items = await MangaDex.getCatalog('popular', 18).catch(() => []);
+        }
+      }
+
       const pInfo = pageData?.pageInfo || {};
-      return {
+      const out = {
         items,
         pageInfo: {
           currentPage: Number(pInfo.currentPage || cleanVars.page || 1),
@@ -2315,10 +2410,15 @@ export const AniListMangaService = {
           total: Number(pInfo.total || items.length)
         }
       };
+      if (items.length > 0) {
+        this.directoryCache.set(cacheKey, out);
+      }
+      return out;
     } catch {
+      const fallbackItems = await MangaDex.getCatalog('popular', 18).catch(() => []);
       return {
-        items: [],
-        pageInfo: { currentPage: 1, lastPage: 1, hasNextPage: false, total: 0 }
+        items: fallbackItems,
+        pageInfo: { currentPage: 1, lastPage: 1, hasNextPage: false, total: fallbackItems.length }
       };
     }
   }

@@ -220,5 +220,61 @@ describe('seasonOrder — Crunchyroll Franchise Ordering', () => {
     expect(fromS2.seasons[1].english).toBe('Blue Box Season 2');
     expect(fromS2.initialIndex).toBe(1);
   });
+
+  it('preserves nextAiringEpisode on RELEASING sequel seasons (e.g. Black Clover Season 2) when depth-2 relation edges omit nextAiringEpisode', () => {
+    const blackCloverS2Root: AniListMediaNode = {
+      id: 195604,
+      title: { romaji: 'Black Clover 2nd Season', english: 'Black Clover Season 2' },
+      format: 'TV',
+      status: 'RELEASING',
+      episodes: null,
+      nextAiringEpisode: { episode: 8, timeUntilAiring: 496529 },
+      startDate: { year: 2026, month: 10, day: 3 },
+      relations: {
+        edges: [
+          {
+            relationType: 'PREQUEL',
+            node: {
+              id: 97940,
+              title: { romaji: 'Black Clover', english: 'Black Clover' },
+              format: 'TV',
+              status: 'FINISHED',
+              episodes: 170,
+              startDate: { year: 2017, month: 10, day: 3 },
+              relations: {
+                edges: [
+                  {
+                    relationType: 'SEQUEL',
+                    // Depth-2 relation node returned by AniList omits nextAiringEpisode (null)
+                    node: {
+                      id: 195604,
+                      title: { romaji: 'Black Clover 2nd Season', english: 'Black Clover Season 2' },
+                      format: 'TV',
+                      status: 'RELEASING',
+                      episodes: null,
+                      nextAiringEpisode: null,
+                      startDate: { year: 2026, month: 10, day: 3 }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    };
+
+    const organized = organizeAnimeFranchise([blackCloverS2Root], 195604);
+    expect(organized.seasons.map((s) => s.id)).toEqual([97940, 195604]);
+    expect(organized.initialIndex).toBe(1);
+
+    const s2 = organized.seasons[1];
+    expect(s2.shortTag).toBe('T2');
+    expect(s2.totalEpisodes).toBe(7);
+    expect(s2.episodeLabel).toBe('7 Episodios');
+    expect(s2.isUpcoming).toBe(false);
+    expect(s2.nextAiringEpisode?.episode).toBe(8);
+  });
 });
+
 

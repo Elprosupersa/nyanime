@@ -143,7 +143,11 @@ export function iniciarOContinuarAnime(): void {
   nWin.abrirReproductor?.(targetEp);
 }
 
-export async function abrirDetalle(anime: any, onLoadedCallback?: () => void): Promise<void> {
+export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => void): Promise<void> {
+  const anime =
+    typeof animeInput === 'number' || typeof animeInput === 'string'
+      ? { id: Number(animeInput), title: { romaji: '', english: '' } }
+      : animeInput || {};
   state.anime = anime;
   nWin.Store?.setActiveAnime?.(anime);
   state.temporadaActualIdx = 0;
@@ -189,7 +193,10 @@ export async function abrirDetalle(anime: any, onLoadedCallback?: () => void): P
 
 const ANILIST_CORE_FIELDS = `
   id
+  idMal
   title { romaji english native }
+  synonyms
+  isAdult
   coverImage { extraLarge large }
   bannerImage
   description(asHtml: false)
@@ -245,23 +252,99 @@ const ANILIST_FRONTIER_BATCH_QUERY = `
   }
 `;
 
-export async function resolverTemporadasAnime(anime: any): Promise<void> {
-  const cacheKey = `anime_franchise_v3_${anime.id}`;
-  let cachedOrganized = CacheManager.get(cacheKey);
+async function postAniListResilient(bodyObj: Record<string, any>): Promise<any> {
+  const payload = JSON.stringify(bodyObj);
+  try {
+    const res = await fetch(ANILIST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: payload
+    });
+    if (res.ok) return await res.json();
+  } catch {
+    // fallback to proxy below
+  }
+  const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(ANILIST_URL)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: payload
+  });
+  if (!proxyRes.ok) throw new Error('AniList request failed');
+  return await proxyRes.json();
+}
 
-  if (!cachedOrganized || !Array.isArray(cachedOrganized.seasons) || cachedOrganized.seasons.length === 0) {
+export async function resolverTemporadasAnime(anime: any): Promise<void> {
+  const cacheKey = `anime_franchise_v4_${anime.id}`;
+  let cachedOrganized = CacheManager.get(cacheKey);
+  const hasStaleReleasingZero =
+    Array.isArray(cachedOrganized?.seasons) &&
+    cachedOrganized.seasons.some((s: any) => s && s.status === 'RELEASING' && Number(s.totalEpisodes || 0) <= 0);
+
+  if (
+    !cachedOrganized ||
+    !Array.isArray(cachedOrganized.seasons) ||
+    cachedOrganized.seasons.length === 0 ||
+    hasStaleReleasingZero
+  ) {
     let primaryMedia = anime;
     const collectedRoots: any[] = [];
 
     try {
-      const res = await fetch(ANILIST_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: ANILIST_FRANCHISE_QUERY, variables: { id: anime.id } })
-      });
-      const data = await res.json();
-      primaryMedia = data?.data?.Media || anime;
-      if (primaryMedia) collectedRoots.push(primaryMedia);
+      const numericId = Number(anime?.id);
+      if (Number.isFinite(numericId) && numericId > 0) {
+        const data = await postAniListResilient({ query: ANILIST_FRANCHISE_QUERY, variables: { id: numericId } });
+        primaryMedia = data?.data?.Media || anime;
+      } else if (anime?.hentailaSlug && nWin.NyAnimeVideoSources?.parseHentaiLaMediaDetail) {
+        try {
+          const hlaMediaUrl = `https://hentaila.com/media/${encodeURIComponent(String(anime.hentailaSlug))}/__data.json`;
+          const hlaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(hlaMediaUrl)}&probe=1`, {}, 3500);
+          if (hlaRes.ok) {
+            const hlaJson = await hlaRes.json().catch(() => null);
+            const detail = nWin.NyAnimeVideoSources.parseHentaiLaMediaDetail(hlaJson);
+            if (detail) {
+              primaryMedia = {
+                ...anime,
+                episodes: detail.episodesCount || anime.episodes || 2,
+                description: detail.synopsis || anime.description,
+                genres: detail.genres?.length ? detail.genres : anime.genres,
+                idMal: detail.malId || anime.idMal,
+                status: detail.status || anime.status || 'FINISHED',
+                format: detail.category || anime.format || 'OVA',
+                coverImage: { extraLarge: detail.cover, large: detail.cover },
+                bannerImage: detail.backdrop || detail.cover
+              };
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (primaryMedia) {
+        if (anime?.hentailaSlug && !primaryMedia.hentailaSlug) {
+          primaryMedia.hentailaSlug = anime.hentailaSlug;
+        }
+        collectedRoots.push(primaryMedia);
+        if (state.anime && String(state.anime.id) === String(anime.id)) {
+          if (primaryMedia.title && (!state.anime.title?.romaji && !state.anime.title?.english)) {
+            state.anime.title = primaryMedia.title;
+          }
+          if (primaryMedia.format && !state.anime.format) state.anime.format = primaryMedia.format;
+          if (primaryMedia.episodes && !state.anime.episodes) state.anime.episodes = primaryMedia.episodes;
+          if (primaryMedia.nextAiringEpisode && !state.anime.nextAiringEpisode) {
+            state.anime.nextAiringEpisode = primaryMedia.nextAiringEpisode;
+          }
+          if (primaryMedia.coverImage && !state.anime.coverImage) state.anime.coverImage = primaryMedia.coverImage;
+          if (Array.isArray(primaryMedia.synonyms) && primaryMedia.synonyms.length > 0) {
+            state.anime.synonyms = primaryMedia.synonyms;
+          }
+          if (primaryMedia.idMal) state.anime.idMal = primaryMedia.idMal;
+          if (primaryMedia.isAdult !== undefined) state.anime.isAdult = primaryMedia.isAdult;
+          if (primaryMedia.hentailaSlug) state.anime.hentailaSlug = primaryMedia.hentailaSlug;
+          if (primaryMedia.description && (!state.anime.description || String(anime.id).startsWith('hla_'))) {
+            state.anime.description = primaryMedia.description;
+          }
+        }
+      }
 
       const expandedIds = new Set<number | string>();
       if (primaryMedia?.id) expandedIds.add(primaryMedia.id);
@@ -278,7 +361,9 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
             const t = edge?.node;
             if (!t || !t.id || !allowedExpandRels.has(rel)) continue;
             if (!validExpandFmts.has(String(t.format || '').toUpperCase())) continue;
-            if (t.relations?.edges) {
+            const needsReleasingRefresh =
+              t.status === 'RELEASING' && !t.nextAiringEpisode?.episode && !expandedIds.has(t.id);
+            if (t.relations?.edges && !needsReleasingRefresh) {
               expandedIds.add(t.id);
               walk(t);
             } else if (!expandedIds.has(t.id)) {
@@ -294,12 +379,10 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
         const frontier = collectFrontierIds();
         if (frontier.length === 0) break;
         frontier.forEach((fid) => expandedIds.add(fid));
-        const batchRes = await fetch(ANILIST_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ query: ANILIST_FRONTIER_BATCH_QUERY, variables: { ids: frontier } })
+        const batchJson = await postAniListResilient({
+          query: ANILIST_FRONTIER_BATCH_QUERY,
+          variables: { ids: frontier }
         });
-        const batchJson = await batchRes.json();
         const batchMedia = batchJson?.data?.Page?.media || [];
         if (batchMedia.length === 0) break;
         collectedRoots.push(...batchMedia);

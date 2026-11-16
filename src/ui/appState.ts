@@ -399,18 +399,14 @@ export async function nativeFetchText(
     if (customHeaders['X-Requested-With']) proxyHeaders['x-custom-requested-with'] = customHeaders['X-Requested-With'];
     const fetchOpt: RequestInit = { method, headers: proxyHeaders };
     if (method === 'POST' && postData) fetchOpt.body = postData;
-    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(url)}`, fetchOpt, timeoutMs);
-    if (res.ok) return await res.text();
+    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(url)}&probe=1`, fetchOpt, timeoutMs);
+    const upStatus = Number(res.headers.get('x-upstream-status') || '200');
+    if (res.ok && upStatus < 400) {
+      const txt = await res.text();
+      if (txt) return txt;
+    }
   } catch {
     // fallback direct
-  }
-  try {
-    const fetchOpt: RequestInit = { method, headers: customHeaders };
-    if (method === 'POST' && postData) fetchOpt.body = postData;
-    const res = await fetchWithTimeout(url, fetchOpt, timeoutMs);
-    if (res.ok) return await res.text();
-  } catch {
-    // ignore
   }
   return null;
 }
@@ -421,9 +417,13 @@ export async function nativeFetchHtml(
   timeoutMs = 4500
 ): Promise<string | null> {
   try {
-    const localProxy = `/api/proxy?url=${encodeURIComponent(url)}`;
+    const localProxy = `/api/proxy?url=${encodeURIComponent(url)}&probe=1`;
     const res = await fetchWithTimeout(localProxy, { headers }, timeoutMs);
-    if (res.ok) return await res.text();
+    const upStatus = Number(res.headers.get('x-upstream-status') || '200');
+    if (res.ok && upStatus < 400) {
+      const html = await res.text();
+      return html && html.trim() ? html : null;
+    }
   } catch {
     // ignore
   }

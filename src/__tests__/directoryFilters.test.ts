@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  HENTAILA_GENRES,
   JKANIME_FILTER_CONFIG,
   JKANIME_GENRES,
   JKANIME_QUICK_GENRE_IDS,
+  buildHentaiLaCatalogUrl,
   buildJKAnimeDirectoryUrl,
   countActiveDirectoryFilters,
   createDefaultDirectoryFilters,
@@ -229,4 +231,23 @@ describe('JKAnime Directory Filters & Search Mapping', () => {
       'Frieren: Beyond Journey’s End'
     ]);
   });
+
+  it('contains all 40 official HentaiLA genres and builds valid SvelteKit __data.json catalog URLs', () => {
+    expect(HENTAILA_GENRES).toHaveLength(40);
+    expect(HENTAILA_GENRES[0]).toEqual({ id: 1, name: '3D', slug: '3d' });
+    expect(HENTAILA_GENRES[39]).toEqual({ id: 40, name: 'Oyakodon', slug: 'oyakodon' });
+
+    expect(buildHentaiLaCatalogUrl({})).toBe('https://hentaila.com/catalogo/__data.json');
+    expect(
+      buildHentaiLaCatalogUrl({
+        page: 2,
+        search: 'cinderella',
+        uncensored: true,
+        genreId: 16,
+        order: 'popular',
+        year: 2025
+      })
+    ).toBe('https://hentaila.com/catalogo/__data.json?page=2&search=cinderella&uncensored=true&genres=16&order=popular&years=2025');
+  });
 });
+

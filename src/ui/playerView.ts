@@ -19,6 +19,18 @@ import {
   cargarAniZipMappingAsync,
   renderDetalleEpisodios
 } from './animeDetailView.ts';
+import {
+  extractArchiveOrgSourcesFromMetadata,
+  isArchiveOrgSpanishMetadata,
+  parseHentaiJkEpisodeSources,
+  parseHentaiJkSearchSlugs,
+  parseHentaiLaCatalogData,
+  parseHentaiLaEpisodeSources,
+  parseJkPlayerDirectM3u8,
+  pickBestSlugMatch,
+  resolveDotanboritoDirectM3u8,
+  selectBestArchiveOrgDocs
+} from '../utils/animeSources.ts';
 
 export interface NormalizedSourceInput {
   providerId: string;
@@ -73,11 +85,16 @@ export class NormalizedSource {
 export interface EpisodeResolveContext {
   imdbId?: string;
   tmdbId?: number | string;
+  malId?: number | string;
   slug: string;
   season: number;
   episode: number;
   seasonId: number | string;
   isMovie: boolean;
+  format?: string;
+  isAdult?: boolean;
+  hentailaSlug?: string;
+  synonyms?: string[];
   romaji: string;
   english: string;
   seasonTitle: string;
@@ -102,9 +119,14 @@ export function generateSlugCandidates(
   return Array.from(candidates);
 }
 
-function buildSearchQueriesForCtx(romaji: string, english: string, seasonTitle: string): string[] {
+function buildSearchQueriesForCtx(
+  romaji: string,
+  english: string,
+  seasonTitle: string,
+  synonyms?: string[]
+): string[] {
   if (nWin.NyAnimeVideoSources?.buildAnimeSearchQueries) {
-    return nWin.NyAnimeVideoSources.buildAnimeSearchQueries(romaji, english, seasonTitle);
+    return nWin.NyAnimeVideoSources.buildAnimeSearchQueries(romaji, english, seasonTitle, synonyms);
   }
   const qRomaji = nWin.NyAnimeVideoSources?.extractBestSearchQuery
     ? nWin.NyAnimeVideoSources.extractBestSearchQuery(romaji, '', '')
@@ -112,7 +134,13 @@ function buildSearchQueriesForCtx(romaji: string, english: string, seasonTitle: 
   const qEnglish = nWin.NyAnimeVideoSources?.extractBestSearchQuery
     ? nWin.NyAnimeVideoSources.extractBestSearchQuery('', english, '')
     : (english || '');
-  return Array.from(new Set([qRomaji, qEnglish, seasonTitle].filter(Boolean))).slice(0, 3);
+  return Array.from(new Set([qRomaji, qEnglish, seasonTitle, ...(synonyms || [])].filter(Boolean))).slice(0, 5);
+}
+
+function buildTargetTitlesForCtx(ctx: EpisodeResolveContext): string[] {
+  return [ctx.seasonTitle, ctx.romaji, ctx.english, ...(ctx.synonyms || [])].filter(
+    (t): t is string => Boolean(t && t.trim())
+  );
 }
 
 class AnimeAV1SourceProvider {
@@ -122,7 +150,7 @@ class AnimeAV1SourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -130,7 +158,8 @@ class AnimeAV1SourceProvider {
     try {
       let matchedSlug = this.slugCache.get(slugKey) || null;
       if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle);
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
+        const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
           const catHtml = await nativeFetchHtml(`https://animeav1.com/catalogo?search=${encodeURIComponent(q)}`, {}, 4500);
           if (catHtml && nWin.NyAnimeVideoSources?.parseAnimeAv1CatalogLinks) {
@@ -138,8 +167,9 @@ class AnimeAV1SourceProvider {
             if (foundSlugs.length > 0) {
               matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
                 foundSlugs,
-                [seasonTitle, romaji, english].filter(Boolean),
-                sNum
+                targets,
+                sNum,
+                format || ''
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -167,7 +197,7 @@ class TioAnimeSourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -175,7 +205,8 @@ class TioAnimeSourceProvider {
     try {
       let matchedSlug = this.slugCache.get(slugKey) || null;
       if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle);
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
+        const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
           const dirHtml = await nativeFetchHtml(`https://tioanime.com/directorio?q=${encodeURIComponent(q)}`, {}, 4500);
           if (dirHtml && nWin.NyAnimeVideoSources?.parseTioAnimeDirectoryLinks) {
@@ -183,8 +214,9 @@ class TioAnimeSourceProvider {
             if (foundSlugs.length > 0) {
               matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
                 foundSlugs,
-                [seasonTitle, romaji, english].filter(Boolean),
-                sNum
+                targets,
+                sNum,
+                format || ''
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -212,7 +244,7 @@ class TVAnimeSourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -220,7 +252,8 @@ class TVAnimeSourceProvider {
     try {
       let matchedSlug = this.slugCache.get(slugKey) || null;
       if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle);
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
+        const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
           const dirHtml = await nativeFetchHtml(`https://tvanime.tv/directorio?q=${encodeURIComponent(q)}`, {}, 4500);
           if (dirHtml && nWin.NyAnimeVideoSources?.parseTvAnimeDirectoryLinks) {
@@ -228,8 +261,9 @@ class TVAnimeSourceProvider {
             if (foundSlugs.length > 0) {
               matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
                 foundSlugs,
-                [seasonTitle, romaji, english].filter(Boolean),
-                sNum
+                targets,
+                sNum,
+                format || ''
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -261,8 +295,9 @@ async function fetchPortalOptSources(
   timeoutMs = 3200
 ): Promise<NormalizedSource[]> {
   try {
-    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(episodeUrl)}`, {}, timeoutMs).catch(() => null);
-    if (!res || !res.ok) return [];
+    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(episodeUrl)}&probe=1`, {}, timeoutMs).catch(() => null);
+    const upStatus = Number(res?.headers.get('x-upstream-status') || res?.status || 500);
+    if (!res || !res.ok || upStatus >= 400) return [];
     const epHtml = await res.text();
     if (!epHtml || epHtml.includes('Just a moment') || epHtml.includes('cf-chl')) return [];
 
@@ -273,7 +308,7 @@ async function fetchPortalOptSources(
     let sources: NormalizedSourceInput[] = [];
     if (data.encryptId) {
       const optRes = await fetchWithTimeout(
-        `/api/proxy?url=${encodeURIComponent(postAjaxUrl)}`,
+        `/api/proxy?url=${encodeURIComponent(postAjaxUrl)}&probe=1`,
         {
           method: 'POST',
           headers: {
@@ -284,7 +319,8 @@ async function fetchPortalOptSources(
         },
         timeoutMs
       ).catch(() => null);
-      if (optRes && optRes.ok) {
+      const optUpStatus = Number(optRes?.headers.get('x-upstream-status') || optRes?.status || 500);
+      if (optRes && optRes.ok && optUpStatus < 400) {
         const optHtml = await optRes.text();
         if (nWin.NyAnimeVideoSources?.parseHexOptServerList) {
           sources = nWin.NyAnimeVideoSources.parseHexOptServerList(optHtml, providerId, providerLabel, 'SUB');
@@ -389,13 +425,14 @@ class JKAnimeSourceProvider {
       for (const slug of candidates) {
         if (Date.now() < this.cfBlockedUntil) return [];
         const targetUrl = `https://jkanime.net/${slug}/${ep}/`;
-        const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}`, {}, 2200).catch(() => null);
+        const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, 2200).catch(() => null);
         if (!res) continue;
-        if (res.status === 403 || res.status === 429) {
+        const upStatus = Number(res.headers.get('x-upstream-status') || res.status);
+        if (upStatus === 403 || upStatus === 429) {
           this.cfBlockedUntil = Date.now() + 5 * 60 * 1000;
           return [];
         }
-        if (!res.ok) continue;
+        if (!res.ok || upStatus >= 400) continue;
         const html = await res.text();
         if (!html || html.includes('Just a moment') || html.includes('cf-chl')) {
           this.cfBlockedUntil = Date.now() + 5 * 60 * 1000;
@@ -529,41 +566,283 @@ class HenaoJaraSourceProvider {
   }
 }
 
-class MultiEmbedProvider {
-  id = 'multiembed';
-  name = 'MultiEmbed HD';
-  languages = ['LATINO', 'SUB', 'MULTI'];
+class HentaiJKSourceProvider {
+  id = 'hentaijk';
+  name = 'HentaiJK Español';
+  languages = ['SUB'];
+  slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { tmdbId, imdbId, season, episode, isMovie } = ctx;
-    const targetId = tmdbId || imdbId;
-    if (!targetId) return [];
-    const param = tmdbId ? `${targetId}&tmdb=1` : targetId;
-    const url = isMovie
-      ? `https://multiembed.mov/?video_id=${param}`
-      : `https://multiembed.mov/?video_id=${param}&s=${season}&e=${episode}`;
-    return [
-      new NormalizedSource({ providerId: this.id, providerName: 'MultiEmbed (Multi)', serverName: 'MultiEmbed', url, language: 'MULTI', quality: '1080p', score: 74 })
-    ];
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    const ep = Math.max(1, Number(episode || 1));
+    const sNum = Math.max(1, Number(season || 1));
+    const slugKey = String(seasonId || seasonTitle || romaji || english);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 4);
+    const targets = buildTargetTitlesForCtx(ctx);
+
+    try {
+      const cachedSlug = this.slugCache.get(slugKey) || null;
+      const trySlug = async (slug: string): Promise<NormalizedSource[]> => {
+        if (!slug) return [];
+        const epHtml = await nativeFetchHtml(`https://hentaijk.com/${slug}/${ep}/`, {}, 3500);
+        if (!epHtml) return [];
+        const parsed = parseHentaiJkEpisodeSources(epHtml);
+        return parsed.map((s) => new NormalizedSource(s));
+      };
+
+      if (cachedSlug) {
+        const fromCache = await trySlug(cachedSlug);
+        if (fromCache.length > 0) return fromCache;
+      }
+
+      for (const slug of candidates) {
+        if (!slug || slug === cachedSlug) continue;
+        const out = await trySlug(slug);
+        if (out.length > 0) {
+          this.slugCache.set(slugKey, slug);
+          return out;
+        }
+      }
+
+      const rawQueries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
+      const searchTerms = new Set<string>();
+      for (const q of rawQueries) {
+        const underscored = q
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, ' ')
+          .trim()
+          .replace(/\s+/g, '_');
+        if (underscored.length >= 3) searchTerms.add(underscored);
+        const words = underscored.split('_').filter((w) => w.length >= 3);
+        if (words.length >= 2) {
+          searchTerms.add(`${words[0]}_${words[1]}`);
+        }
+        if (words[0] && words[0].length >= 4) {
+          searchTerms.add(words[0]);
+        }
+      }
+
+      for (const term of Array.from(searchTerms).slice(0, 4)) {
+        const sHtml = await nativeFetchHtml(`https://hentaijk.com/buscar/${encodeURIComponent(term)}/`, {}, 3500);
+        if (!sHtml) continue;
+        const foundSlugs = parseHentaiJkSearchSlugs(sHtml);
+        if (foundSlugs.length === 0) continue;
+        const matched = pickBestSlugMatch(foundSlugs, targets, sNum, format || 'OVA');
+        if (matched) {
+          const out = await trySlug(matched);
+          if (out.length > 0) {
+            this.slugCache.set(slugKey, matched);
+            return out;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [];
   }
 }
 
-class VidSrcMeProvider {
-  id = 'vidsrc_me';
-  name = 'VidSrc Fast CDN';
+class HentaiLASourceProvider {
+  id = 'hentaila';
+  name = 'HentaiLA VIP HD';
   languages = ['SUB'];
+  slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { tmdbId, imdbId, season, episode, isMovie } = ctx;
-    const id = tmdbId || imdbId;
-    if (!id) return [];
-    const url = isMovie
-      ? `https://vidsrcme.ru/embed/movie?tmdb=${id}`
-      : `https://vidsrcme.ru/embed/tv?tmdb=${id}&season=${season}&episode=${episode}`;
-    return [
-      new NormalizedSource({ providerId: this.id, providerName: 'VidSrc CDN', serverName: 'VidSrc', url, language: 'SUB', quality: '1080p', score: 70 })
-    ];
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, hentailaSlug } = ctx;
+    const ep = Math.max(1, Number(episode || 1));
+    const sNum = Math.max(1, Number(season || 1));
+    const slugKey = String(seasonId || seasonTitle || romaji || english);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 3);
+    const targets = buildTargetTitlesForCtx(ctx);
+
+    const trySlug = async (slug: string): Promise<NormalizedSource[]> => {
+      if (!slug) return [];
+      try {
+        const dataUrl = `https://hentaila.com/media/${slug}/${ep}/__data.json`;
+        const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(dataUrl)}&probe=1`, {}, 3200).catch(() => null);
+        const upStatus = Number(res?.headers.get('x-upstream-status') || res?.status || 500);
+        if (res && res.ok && upStatus < 400) {
+          const json = await res.json().catch(() => null);
+          if (json) {
+            const parsed = parseHentaiLaEpisodeSources(json);
+            if (parsed.length > 0) return parsed.map((s) => new NormalizedSource(s));
+          }
+        }
+      } catch {
+        // fallback to HTML /ver/{slug}-{ep} below
+      }
+
+      try {
+        const verHtml = await nativeFetchHtml(`https://hentaila.com/ver/${slug}-${ep}`, {}, 3200);
+        if (verHtml) {
+          const parsed = parseHentaiLaEpisodeSources(verHtml);
+          if (parsed.length > 0) return parsed.map((s) => new NormalizedSource(s));
+        }
+      } catch {
+        // ignore
+      }
+      return [];
+    };
+
+    try {
+      const initialSlug = hentailaSlug || this.slugCache.get(slugKey) || null;
+      if (initialSlug) {
+        const fromInitial = await trySlug(initialSlug);
+        if (fromInitial.length > 0) {
+          this.slugCache.set(slugKey, initialSlug);
+          return fromInitial;
+        }
+      }
+
+      for (const slug of candidates) {
+        if (!slug || slug === initialSlug) continue;
+        const out = await trySlug(slug);
+        if (out.length > 0) {
+          this.slugCache.set(slugKey, slug);
+          return out;
+        }
+      }
+
+      const rawQueries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
+      const searchQueries = new Set<string>();
+      for (const q of rawQueries) {
+        if (q.trim().length >= 2) searchQueries.add(q.trim());
+        const words = q.trim().split(/\s+/).filter((w) => w.length >= 3);
+        if (words.length >= 2) {
+          searchQueries.add(`${words[0]} ${words[1]}`);
+        }
+        if (words[0] && words[0].length >= 4) {
+          searchQueries.add(words[0]);
+        }
+      }
+
+      for (const q of Array.from(searchQueries).slice(0, 4)) {
+        const catUrl = `https://hentaila.com/catalogo/__data.json?search=${encodeURIComponent(q)}`;
+        const catRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(catUrl)}&probe=1`, {}, 3200).catch(() => null);
+        const upStatus = Number(catRes?.headers.get('x-upstream-status') || catRes?.status || 500);
+        if (!catRes || !catRes.ok || upStatus >= 400) continue;
+        const catJson = await catRes.json().catch(() => null);
+        if (!catJson) continue;
+        const { items } = parseHentaiLaCatalogData(catJson);
+        if (items.length === 0) continue;
+        const foundSlugs = items.map((item) => item.slug);
+        const matched = pickBestSlugMatch(foundSlugs, targets, sNum, format || 'OVA');
+        if (matched) {
+          const out = await trySlug(matched);
+          if (out.length > 0) {
+            this.slugCache.set(slugKey, matched);
+            return out;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [];
   }
+}
+
+class InternetArchiveAnimeProvider {
+  id = 'archive_org';
+  name = 'Archive.org Direct Stream';
+  languages = ['SUB', 'LATINO'];
+  docCache = new Map<string, string[]>();
+
+  async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
+    const { romaji, english, seasonTitle, synonyms, episode, isMovie, seasonId } = ctx;
+    const ep = Math.max(1, Number(episode || 1));
+    const targets = buildTargetTitlesForCtx(ctx);
+    if (targets.length === 0) return [];
+
+    const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms).slice(0, 3);
+    const cacheKey = `${seasonId || romaji || english}::ep${ep}`;
+
+    try {
+      let bestDocIds = this.docCache.get(cacheKey) || [];
+      if (bestDocIds.length === 0) {
+        const allDocs: Array<{ identifier?: string; title?: string | string[]; downloads?: number }> = [];
+        for (const q of queries) {
+          const cleanQ = q.replace(/[()"']/g, ' ').replace(/\s+/g, ' ').trim();
+          if (!cleanQ) continue;
+          const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(`title:(${cleanQ}) AND mediatype:(movies)`)}&fl[]=identifier,title,downloads&sort[]=downloads+desc&rows=15&output=json`;
+          const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(searchUrl)}`, {}, 3800).catch(() => null);
+          if (!res || !res.ok) continue;
+          const json = await res.json().catch(() => null);
+          const docs = json?.response?.docs;
+          if (Array.isArray(docs) && docs.length > 0) {
+            allDocs.push(...docs);
+            const matched = selectBestArchiveOrgDocs(allDocs, targets, ep, isMovie);
+            if (matched.length > 0) {
+              bestDocIds = matched;
+              break;
+            }
+          }
+        }
+        if (bestDocIds.length > 0) {
+          this.docCache.set(cacheKey, bestDocIds);
+        }
+      }
+
+      if (bestDocIds.length === 0) return [];
+
+      const out: NormalizedSource[] = [];
+      for (const docId of bestDocIds.slice(0, 3)) {
+        const metaUrl = `https://archive.org/metadata/${encodeURIComponent(docId)}`;
+        const metaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(metaUrl)}`, {}, 3800).catch(() => null);
+        if (!metaRes || !metaRes.ok) continue;
+        const metaJson = await metaRes.json().catch(() => null);
+        if (!metaJson) continue;
+        // Strictly enforce Spanish metadata on Archive.org items so English-only releases never masquerade as Sub Español
+        if (!isArchiveOrgSpanishMetadata(docId, metaJson)) continue;
+        const extracted = extractArchiveOrgSourcesFromMetadata(docId, metaJson, ep, 'Archive Español HD');
+        if (extracted.length > 0) {
+          for (const item of extracted) {
+            out.push(new NormalizedSource(item));
+          }
+          break;
+        }
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+}
+
+export function ensureGuaranteedEpisodeSources(
+  ctx: EpisodeResolveContext,
+  existing: NormalizedSource[]
+): NormalizedSource[] {
+  const list = Array.isArray(existing) ? [...existing] : [];
+  // Whenever any Spanish provider (JKAnime, AnimeAV1, TVAnime, HenaoJara, TioAnime, HentaiJK, Archive Español)
+  // has resolved Spanish servers, return them directly without injecting English-only mirrors!
+  if (list.length > 0) {
+    return list;
+  }
+
+  const ep = Math.max(1, Number(ctx.episode || 1));
+  const sNum = Math.max(1, Number(ctx.season || 1));
+  const rawId = String(ctx.seasonId || '').replace(/^jk_/, '').trim();
+  const numericAniId = Number.isFinite(Number(rawId)) && Number(rawId) > 0 ? Number(rawId) : 21;
+  const fallbackTargetId = ctx.tmdbId || ctx.imdbId || ctx.malId || numericAniId;
+
+  list.push(
+    new NormalizedSource({
+      providerId: 'multiembed',
+      providerName: 'MultiEmbed (Multi)',
+      serverName: 'MultiEmbed',
+      url: ctx.isMovie
+        ? `https://multiembed.mov/?video_id=${fallbackTargetId}&tmdb=1`
+        : `https://multiembed.mov/?video_id=${fallbackTargetId}&tmdb=1&s=${sNum}&e=${ep}`,
+      language: 'MULTI',
+      quality: '1080p',
+      score: 45
+    })
+  );
+
+  return list;
 }
 
 interface ExtractedStream {
@@ -583,6 +862,19 @@ export const StreamExtractor = {
     if (!url) return null;
     if (this.cache.has(url)) return this.cache.get(url) || null;
 
+    if (url.includes('dotanborito.net')) {
+      const m3u8Url = resolveDotanboritoDirectM3u8(url);
+      if (m3u8Url) {
+        const out: ExtractedStream = {
+          type: 'hls',
+          streamUrl: this.wrapProxy(m3u8Url),
+          rawDirectUrl: m3u8Url
+        };
+        this.cache.set(url, out);
+        return out;
+      }
+    }
+
     if (/\.(mp4|webm)(\?|$)/i.test(url)) {
       const out: ExtractedStream = { type: 'mp4', streamUrl: this.wrapProxy(url), rawDirectUrl: url };
       this.cache.set(url, out);
@@ -590,7 +882,12 @@ export const StreamExtractor = {
     }
 
     if (/\.m3u8(\?|$)/i.test(url)) {
-      const out: ExtractedStream = { type: 'hls', streamUrl: url, rawDirectUrl: url };
+      const needsProxy = url.includes('dotanborito.net') || url.includes('playmudos.com');
+      const out: ExtractedStream = {
+        type: 'hls',
+        streamUrl: needsProxy ? this.wrapProxy(url) : url,
+        rawDirectUrl: url
+      };
       this.cache.set(url, out);
       return out;
     }
@@ -629,7 +926,33 @@ export const StreamExtractor = {
       return null;
     }
 
-    if (url.includes('flaswish.com') || url.includes('streamwish.') || url.includes('sfastwish.com')) {
+    if (url.includes('/jkplayer/um')) {
+      try {
+        const html = await nativeFetchHtml(url, {}, 6500);
+        const m3u8Url = html ? parseJkPlayerDirectM3u8(html) : null;
+        if (m3u8Url) {
+          const out: ExtractedStream = {
+            type: 'hls',
+            streamUrl: m3u8Url.includes('playmudos.com') ? this.wrapProxy(m3u8Url) : m3u8Url,
+            rawDirectUrl: m3u8Url
+          };
+          this.cache.set(url, out);
+          return out;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (
+      url.includes('flaswish.com') ||
+      url.includes('streamwish.') ||
+      url.includes('sfastwish.com') ||
+      url.includes('streamhgapi.com') ||
+      url.includes('ghbrisk.com') ||
+      url.includes('ryderjet.com') ||
+      url.includes('vidhidevip.com')
+    ) {
       try {
         const normWish = url.replace('sfastwish.com', 'flaswish.com');
         const html = await nativeFetchHtml(normWish, {}, 6500);
@@ -652,13 +975,14 @@ export const StreamExtractor = {
 
 export class SmartVideoSourceManager {
   providers = [
+    new HentaiLASourceProvider(),
     new JKAnimeSourceProvider(),
     new AnimeAV1SourceProvider(),
     new TVAnimeSourceProvider(),
     new HenaoJaraSourceProvider(),
     new TioAnimeSourceProvider(),
-    new MultiEmbedProvider(),
-    new VidSrcMeProvider()
+    new HentaiJKSourceProvider(),
+    new InternetArchiveAnimeProvider()
   ];
   failedSourcesInSession = new Set<string>();
   rawEpisodeCache = new Map<string, NormalizedSource[]>();
@@ -681,11 +1005,14 @@ export class SmartVideoSourceManager {
         this.providers.map((p) =>
           Promise.race([
             p.resolve(ctx).catch(() => []),
-            new Promise<NormalizedSource[]>((resolve) => setTimeout(() => resolve([]), 5500))
+            new Promise<NormalizedSource[]>((resolve) => setTimeout(() => resolve([]), 6500))
           ])
         )
       );
-      const flat = results.flat().filter((s) => s && s.url);
+      const flat = ensureGuaranteedEpisodeSources(
+        ctx,
+        results.flat().filter((s) => s && s.url)
+      );
       if (flat.length > 0) {
         this.rawEpisodeCache.set(key, flat);
       }
@@ -1105,13 +1432,18 @@ export function renderPlayerServersBar(): void {
       const sLower = String(src.serverName || src.providerName || '').toLowerCase();
       const isNativeClean =
         src.direct ||
+        uLower.includes('dotanborito.net') ||
         uLower.includes('mp4upload.com') ||
         uLower.includes('yourupload.com') ||
         uLower.includes('flaswish.com') ||
         uLower.includes('streamwish.') ||
         uLower.includes('sfastwish.com') ||
+        uLower.includes('ghbrisk.com') ||
+        uLower.includes('ryderjet.com') ||
+        uLower.includes('streamhgapi.com') ||
         /\.(mp4|webm|m3u8)(\?|$)/i.test(uLower) ||
-        sLower.includes('desu');
+        sLower.includes('desu') ||
+        sLower.includes('vip');
       const cleanBadge = isNativeClean && !isFailed
         ? '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 Sin Anuncios</span>'
         : '';
@@ -1198,16 +1530,42 @@ export async function resolverContextoEpisodio(epNum: number): Promise<EpisodeRe
   const mapping = await cargarAniZipMappingAsync(animeId);
   const imdbId = mapping?.mappings?.imdb_id;
   const tmdbId = mapping?.mappings?.themoviedb_id || mapping?.mappings?.thetvdb_id;
-  const isMovie = currentSeason.totalEpisodes === 1 || currentSeason.format === 'MOVIE';
+  const malId = mapping?.mappings?.mal_id || state.anime?.idMal || undefined;
+  const format = String(currentSeason.format || state.anime?.format || 'TV');
+  const isMovie = currentSeason.totalEpisodes === 1 || format === 'MOVIE';
   const epInfo = mapping?.episodes?.[epNum] || {};
   const season = Number(currentSeason.seasonNumber || epInfo.seasonNumber || 1);
-  const episode = Number(epInfo.episodeNumber || epNum);
+  const episode = Math.max(1, Number(epNum || 1));
   const romaji = currentSeason.romaji || currentSeason.title || state.anime?.title?.romaji || '';
   const english = currentSeason.english || currentSeason.title || state.anime?.title?.english || '';
   const seasonTitle = currentSeason.title || romaji || english;
+  const synonyms = Array.isArray(state.anime?.synonyms)
+    ? state.anime.synonyms.filter((s: unknown): s is string => typeof s === 'string' && Boolean(s.trim()))
+    : [];
+  const isAdult = Boolean(
+    state.anime?.isAdult ||
+      (Array.isArray(state.anime?.genres) && state.anime.genres.some((g: string) => /hentai/i.test(g)))
+  );
+  const hentailaSlug = String(state.anime?.hentailaSlug || currentSeason.hentailaSlug || '').trim() || undefined;
   const slug = (romaji || english).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-  return { imdbId, tmdbId, slug, season, episode, seasonId: animeId, isMovie, romaji, english, seasonTitle };
+  return {
+    imdbId,
+    tmdbId,
+    malId,
+    slug,
+    season,
+    episode,
+    seasonId: animeId,
+    isMovie,
+    format,
+    isAdult,
+    hentailaSlug,
+    synonyms,
+    romaji,
+    english,
+    seasonTitle
+  };
 }
 
 export async function resolverYReproducirFuente(): Promise<void> {
@@ -1351,9 +1709,15 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     fuente.url.includes('yourupload.com');
   const canTryNativeExtract =
     isDirectMp4Host ||
+    fuente.url.includes('dotanborito.net') ||
+    fuente.url.includes('/jkplayer/um') ||
     fuente.url.includes('flaswish.com') ||
     fuente.url.includes('streamwish.') ||
-    fuente.url.includes('sfastwish.com');
+    fuente.url.includes('sfastwish.com') ||
+    fuente.url.includes('ghbrisk.com') ||
+    fuente.url.includes('ryderjet.com') ||
+    fuente.url.includes('streamhgapi.com') ||
+    fuente.url.includes('vidhidevip.com');
 
   if (canTryNativeExtract) {
     try {

@@ -22,7 +22,20 @@ import {
   isBlockedOrUnsafeStreamHost,
   rankAndDeduplicateSources,
   formatAiringCountdown,
-  extractEpisodeDetailsMap
+  extractEpisodeDetailsMap,
+  selectBestArchiveOrgDocs,
+  extractArchiveOrgSourcesFromMetadata,
+  isArchiveOrgSpanishMetadata,
+  parseHentaiJkSearchSlugs,
+  parseHentaiJkEpisodeSources,
+  parseJkPlayerDirectM3u8,
+  resolveDotanboritoDirectM3u8,
+  buildHentaiLaMediaImages,
+  resolveDevalue,
+  parseHentaiLaCatalogData,
+  parseHentaiLaHubData,
+  parseHentaiLaMediaDetail,
+  parseHentaiLaEpisodeSources
 } from '../utils/animeSources.ts';
 
 describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
@@ -429,5 +442,277 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
     expect(pickBestSlugMatch(['monster-musume-no-iru-nichijou'], ['Monster'], 1)).toBeNull();
     expect(pickBestSlugMatch(['bleach-sennen-kessen-hen'], ['Bleach'], 1)).toBeNull();
   });
+
+  it('resolves OVAs, Movies, synonyms, and Internet Archive direct MP4 + embed streams (e.g. Ane wa Yanmama Junyuu-chuu)', () => {
+    const queries = buildAnimeSearchQueries(
+      'Ane wa Yanmama Junyuu-chuu',
+      'Ane wa Yanmama Junyuu-chuu',
+      'Ane wa Yanmama Junyuu-chuu',
+      ['Gishi wa Yanmama Junyuu-chuu', 'My Big Sister Is Breastfeeding']
+    );
+    expect(queries).toContain('Ane wa Yanmama Junyuu-chuu');
+    expect(queries).toContain('Gishi wa Yanmama Junyuu-chuu');
+    expect(queries).toContain('My Big Sister Is Breastfeeding');
+
+    // When formatHint is OVA or MOVIE, slugs ending with -ova or -pelicula must be matched instead of rejected
+    expect(
+      pickBestSlugMatch(
+        ['ane-wa-yanmama-junyuu-chuu-ova'],
+        ['Ane wa Yanmama Junyuu-chuu'],
+        1,
+        'OVA'
+      )
+    ).toBe('ane-wa-yanmama-junyuu-chuu-ova');
+
+    expect(
+      pickBestSlugMatch(
+        ['jujutsu-kaisen-0-movie', 'jujutsu-kaisen'],
+        ['Jujutsu Kaisen 0'],
+        1,
+        'MOVIE'
+      )
+    ).toBe('jujutsu-kaisen-0-movie');
+
+    const archiveDocs = [
+      { identifier: 'ane-wa-yanmama-junyuu-chuu-1_202602', title: 'Ane Wa Yanmama Junyuu Chuu 1' },
+      { identifier: 'ane-wa-yanmama-junyuu-chuu-2_202602', title: 'Ane Wa Yanmama Junyuu Chuu 2' },
+      { identifier: 'unrelated-podcast-episode-1', title: 'Unrelated Podcast Episode 1' }
+    ];
+
+    const ep1Docs = selectBestArchiveOrgDocs(archiveDocs, ['Ane wa Yanmama Junyuu-chuu'], 1);
+    expect(ep1Docs[0]).toBe('ane-wa-yanmama-junyuu-chuu-1_202602');
+
+    const ep2Docs = selectBestArchiveOrgDocs(archiveDocs, ['Ane wa Yanmama Junyuu-chuu'], 2);
+    expect(ep2Docs[0]).toBe('ane-wa-yanmama-junyuu-chuu-2_202602');
+
+    const ep1Sources = extractArchiveOrgSourcesFromMetadata(
+      'ane-wa-yanmama-junyuu-chuu-1_202602',
+      {
+        files: [
+          { name: 'ane-wa-yanmama-junyuu-chuu-1.mp4', format: 'MPEG4', size: '73500000' },
+          { name: 'ane-wa-yanmama-junyuu-chuu-1.thumbs/ane-wa-yanmama-junyuu-chuu-1_000001.jpg', format: 'Thumbnail' }
+        ]
+      },
+      1,
+      'SUB'
+    );
+    expect(ep1Sources).toHaveLength(2);
+    expect(ep1Sources[0].direct).toBe(true);
+    expect(ep1Sources[0].type).toBe('mp4');
+    expect(ep1Sources[0].url).toBe(
+      'https://archive.org/download/ane-wa-yanmama-junyuu-chuu-1_202602/ane-wa-yanmama-junyuu-chuu-1.mp4'
+    );
+    expect(ep1Sources[1].type).toBe('embed');
+    expect(ep1Sources[1].url).toBe('https://archive.org/embed/ane-wa-yanmama-junyuu-chuu-1_202602');
+
+    // English-only Archive.org metadata must be rejected by isArchiveOrgSpanishMetadata so English subs never masquerade as Sub Español
+    expect(
+      isArchiveOrgSpanishMetadata('ane-wa-yanmama-junyuu-chuu-1_202602', {
+        metadata: { language: 'eng', title: 'Ane Wa Yanmama Junyuu Chuu 1' },
+        files: [{ name: 'ane-wa-yanmama-junyuu-chuu-1.mp4' }]
+      })
+    ).toBe(false);
+
+    expect(
+      isArchiveOrgSpanishMetadata('ane-wa-yanmama-sub-espanol-1', {
+        metadata: { language: 'spa', title: 'Ane wa Yanmama Junyuu-chuu Sub Español' },
+        files: [{ name: 'ane-wa-yanmama-1-sub-esp.mp4' }]
+      })
+    ).toBe(true);
+
+    // HentaiJK Spanish search & episode parser for Ane wa Yanmama Junyuu-chuu
+    const hjkSearchHtml = `
+      <a href="https://hentaijk.com/img/">img</a>
+      <a href="https://hentaijk.com/buscar/">buscar</a>
+      <a href="https://hentaijk.com/ane-wa-yanmama-junyuu-chuu/">Ane wa Yanmama Junyuu-chuu</a>
+      <a href="https://hentaijk.com/pagina/">pagina</a>
+    `;
+    const hjkSlugs = parseHentaiJkSearchSlugs(hjkSearchHtml);
+    expect(hjkSlugs).toEqual(['ane-wa-yanmama-junyuu-chuu']);
+
+    const b64Mp4 = Buffer.from('https://www.mp4upload.com/embed-kgi8fsxx2ru3.html').toString('base64');
+    const b64Mega = Buffer.from('https://mega.nz/embed/9DFh1KbJ#-qM4AXsnLu52OUCBye6MRnx08FC8N1DkilAUdOLpkvo').toString('base64');
+    const b64Wish = Buffer.from('https://streamhgapi.com/e/qbk3zelnqd6k').toString('base64');
+    const b64Voe = Buffer.from('https://voe.sx/e/1wsuzfeu68hg').toString('base64');
+    const hjkEpHtml = `
+      <script>
+        var video = [];
+        video[0] = '<iframe src="https://hentaijk.com/jkplayer/um?e=TEST123" allowfullscreen></iframe>';
+        video[1] = '<iframe src="https://hentaijk.com/jkplayer/umv?e=TEST456" allowfullscreen></iframe>';
+        var servers = [
+          {"remote":"${b64Mp4}","server":"Mp4upload","lang":1},
+          {"remote":"${b64Mega}","server":"Mega","lang":1},
+          {"remote":"${b64Wish}","server":"Streamwish","lang":1},
+          {"remote":"${b64Voe}","server":"VOE","lang":1},
+          {"remote":"dGVzdA==","server":"Mediafire","lang":1}
+        ];
+      </script>
+    `;
+    const hjkSources = parseHentaiJkEpisodeSources(hjkEpHtml);
+    expect(hjkSources.map((s) => s.providerName)).toEqual([
+      'HentaiJK (MP4Upload)',
+      'HentaiJK (Mega)',
+      'HentaiJK (StreamWish)',
+      'HentaiJK (Desu)',
+      'HentaiJK (Desuv)'
+    ]);
+    const rankedHjk = rankAndDeduplicateSources(hjkSources, 'SUB');
+    expect(rankedHjk[0].providerName).toBe('HentaiJK (MP4Upload)');
+    expect(rankedHjk[0].language).toBe('SUB');
+
+    const jkPlayerHtml = `<script>var player = new Clappr.Player({ source: 'https://asuka.playmudos.com/stream.m3u8?st=abc&e=123' });</script>`;
+    expect(parseJkPlayerDirectM3u8(jkPlayerHtml)).toBe('https://asuka.playmudos.com/stream.m3u8?st=abc&e=123');
+
+    const b64Playmudos = Buffer.from('https://nika.playmudos.com/hls/master.m3u8?token=xyz').toString('base64');
+    const jkAtobHtml = `<script>var u = atob('${b64Playmudos}');</script>`;
+    expect(parseJkPlayerDirectM3u8(jkAtobHtml)).toBe('https://nika.playmudos.com/hls/master.m3u8?token=xyz');
+  });
+
+  it('resolves HentaiLA SvelteKit Devalue graphs, deterministic CDN images, VIP Dotanborito HLS, and episode servers', () => {
+    // 1. Deterministic CDN image URLs
+    const imgs = buildHentaiLaMediaImages(627);
+    expect(imgs).toEqual({
+      cover: 'https://cdn.hentaila.com/covers/627.jpg',
+      thumbnail: 'https://cdn.hentaila.com/thumbnails/627.jpg',
+      backdrop: 'https://cdn.hentaila.com/backdrops/627.jpg'
+    });
+
+    // 2. Dotanborito VIP direct HLS transformation
+    expect(resolveDotanboritoDirectM3u8('https://cdn.dotanborito.net/play/199bb684e1f6fe3c3732b75f7dccf8d0')).toBe(
+      'https://cdn.dotanborito.net/m3u8/199bb684e1f6fe3c3732b75f7dccf8d0'
+    );
+    expect(resolveDotanboritoDirectM3u8('https://cdn.dotanborito.net/play/invalid-short')).toBeNull();
+
+    // 3. Compound token matching between "Ane wa Yanmama Junyuu-chuu" and HentaiLA slug "ane-wa-yan-mama-junyuu-chuu"
+    expect(
+      pickBestSlugMatch(
+        ['ane-jiyoku-tsukushi-neesan-no-shitagi', 'ane-wa-yan-mama-junyuu-chuu'],
+        ['Ane wa Yanmama Junyuu-chuu', 'My Big Sister Is Breastfeeding'],
+        1,
+        'OVA'
+      )
+    ).toBe('ane-wa-yan-mama-junyuu-chuu');
+
+    // 4. SvelteKit Devalue resolver & Catalog / Hub / Media / Episode parsing
+    const svelteCatalogJson = {
+      type: 'data',
+      nodes: [
+        null,
+        null,
+        {
+          type: 'data',
+          data: [
+            { results: 1, total: 9 },
+            [2],
+            {
+              id: 3,
+              title: 4,
+              synopsis: 5,
+              slug: 6,
+              status: 7,
+              episodesCount: 7,
+              malId: 8
+            },
+            '627',
+            'Ane wa Yan Mama Junyuu Chuu',
+            'Sinopsis en español desde HentaiLA.',
+            'ane-wa-yan-mama-junyuu-chuu',
+            2,
+            41261,
+            1
+          ]
+        }
+      ]
+    };
+
+    const catParsed = parseHentaiLaCatalogData(svelteCatalogJson);
+    expect(catParsed.total).toBe(1);
+    expect(catParsed.items).toHaveLength(1);
+    expect(catParsed.items[0]).toMatchObject({
+      id: 'hla_627',
+      mediaId: 627,
+      slug: 'ane-wa-yan-mama-junyuu-chuu',
+      title: 'Ane wa Yan Mama Junyuu Chuu',
+      episodesCount: 2,
+      malId: 41261,
+      cover: 'https://cdn.hentaila.com/covers/627.jpg',
+      backdrop: 'https://cdn.hentaila.com/backdrops/627.jpg'
+    });
+
+    const svelteHubJson = {
+      nodes: [
+        {
+          data: [
+            { featured: 1, latestEpisodes: 3, latestMedia: 1 },
+            [2],
+            { id: 1148, slug: 'shachiku-cinderella', title: 'Shachiku Cinderella', synopsis: 'Destacado', status: 2 },
+            [4],
+            {
+              id: 3194,
+              number: 6,
+              createdAt: '2026-11-15',
+              media: { id: 1232, slug: 'mouse-cursor', title: 'Mouse Cursor' }
+            }
+          ]
+        }
+      ]
+    };
+    const hubParsed = parseHentaiLaHubData(svelteHubJson);
+    expect(hubParsed.featured).toHaveLength(1);
+    expect(hubParsed.featured[0].cover).toBe('https://cdn.hentaila.com/covers/1148.jpg');
+    expect(hubParsed.latestEpisodes).toHaveLength(1);
+    expect(hubParsed.latestEpisodes[0].thumbnail).toBe('https://cdn.hentaila.com/thumbnails/1232.jpg');
+
+    const svelteEpisodeJson = {
+      nodes: [
+        {
+          data: [
+            { embeds: 1, downloads: 10 },
+            { SUB: 2 },
+            [3, 6, 9],
+            { server: 4, url: 5 },
+            'VIP',
+            'https://cdn.dotanborito.net/play/199bb684e1f6fe3c3732b75f7dccf8d0',
+            { server: 7, url: 8 },
+            'YourUpload',
+            'https://www.yourupload.com/embed/j6CQJhGv57yU',
+            { server: 'Netu', url: 'https://hqq.ac/e/blocked' },
+            { SUB: 11 },
+            [12, 13],
+            { server: 'MP4Upload', url: 'https://www.mp4upload.com/uemy12kknyvj' },
+            { server: '1Fichier', url: 'https://1fichier.com/?blocked' }
+          ]
+        }
+      ]
+    };
+
+    const epSources = parseHentaiLaEpisodeSources(svelteEpisodeJson);
+    expect(epSources.map((s) => s.providerName)).toEqual([
+      'HentaiLA (VIP)',
+      'HentaiLA (YourUpload)',
+      'HentaiLA (MP4Upload)'
+    ]);
+    expect(epSources[0].score).toBe(150);
+    expect(epSources[2].url).toBe('https://www.mp4upload.com/embed-uemy12kknyvj.html');
+
+    const ranked = rankAndDeduplicateSources(epSources, 'SUB');
+    expect(ranked[0].providerName).toBe('HentaiLA (VIP)');
+
+    const detail = parseHentaiLaMediaDetail({
+      nodes: [
+        {
+          data: [
+            { media: 1 },
+            { id: 627, slug: 'ane-wa-yan-mama-junyuu-chuu', title: 'Ane wa Yan Mama Junyuu Chuu', episodesCount: 2 }
+          ]
+        }
+      ]
+    });
+    expect(detail?.slug).toBe('ane-wa-yan-mama-junyuu-chuu');
+    expect(resolveDevalue([{ a: 1 }, 'valor'], 0)).toEqual({ a: 'valor' });
+  });
 });
+
+
+
 
