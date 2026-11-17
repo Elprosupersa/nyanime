@@ -1,8 +1,20 @@
 import { registerSW } from 'virtual:pwa-register';
+import {
+  findMismatchedServiceWorkers,
+  isDevServiceWorkerScript,
+  shouldAllowSwTriggeredReload,
+  trySafeReload
+} from './utils/pwaReloadGuard.ts';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
+interface ToastActionOptions {
+  label: string;
+  onClick: () => void;
+  durationMs?: number;
 }
 
 interface PWAWindow extends Window {
@@ -11,12 +23,14 @@ interface PWAWindow extends Window {
     isInstalled: () => boolean;
     isIOS: () => boolean;
     isOnline: () => boolean;
+    hasUpdateReady: () => boolean;
     install: () => Promise<boolean>;
+    applyUpdate: () => Promise<void>;
     openInstallModal: () => void;
     closeInstallModal: () => void;
     refreshUI: () => void;
   };
-  showToast?: (msg: string) => void;
+  showToast?: (msg: string, opts?: ToastActionOptions) => void;
 }
 
 const pwaWin = window as unknown as PWAWindow;
@@ -29,13 +43,59 @@ let isInstalledState =
 const ua = window.navigator.userAgent.toLowerCase();
 const isIOSDevice = /iphone|ipad|ipod/.test(ua);
 let isOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let updateReadyState = false;
+let userRequestedUpdate = false;
 
-registerSW({
+async function cleanupMismatchedRegistrations(swUrl: string): Promise<void> {
+  if (!('serviceWorker' in navigator) || typeof navigator.serviceWorker.getRegistrations !== 'function') {
+    return;
+  }
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    const mismatched = findMismatchedServiceWorkers(regs, isDevServiceWorkerScript(swUrl));
+    await Promise.all(mismatched.map((reg) => reg.unregister().catch(() => false)));
+  } catch {
+    // Ignore SW inspection errors in restricted webviews
+  }
+}
+
+const updateSW = registerSW({
   immediate: true,
+  onNeedRefresh() {
+    updateReadyState = true;
+    pwaWin.showToast?.('Nueva versión disponible', {
+      label: 'Actualizar',
+      durationMs: 9000,
+      onClick: () => {
+        void applyPWAUpdate();
+      }
+    });
+  },
+  onNeedReload() {
+    if (!shouldAllowSwTriggeredReload({ userRequested: userRequestedUpdate })) {
+      return;
+    }
+    trySafeReload(window.sessionStorage, () => {
+      window.location.reload();
+    });
+  },
   onOfflineReady() {
     pwaWin.showToast?.('NyAnime listo para abrirse rápido como App');
+  },
+  onRegisteredSW(swUrl) {
+    void cleanupMismatchedRegistrations(swUrl);
   }
 });
+
+async function applyPWAUpdate(): Promise<void> {
+  userRequestedUpdate = true;
+  updateReadyState = false;
+  try {
+    await updateSW(true);
+  } catch {
+    userRequestedUpdate = false;
+  }
+}
 
 function refreshPWAInstallUI() {
   const headerBtn = document.getElementById('btn-install-pwa-header');
@@ -132,7 +192,9 @@ pwaWin.NyAnimePWA = {
   isInstalled: () => isInstalledState,
   isIOS: () => isIOSDevice,
   isOnline: () => isOnlineState,
+  hasUpdateReady: () => updateReadyState,
   install: promptNativeInstall,
+  applyUpdate: applyPWAUpdate,
   openInstallModal: openPWAInstallModal,
   closeInstallModal: closePWAInstallModal,
   refreshUI: refreshPWAInstallUI

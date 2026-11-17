@@ -441,103 +441,186 @@ function nyanimeServerProxyPlugin() {
   };
 }
 
-export default defineConfig({
-  plugins: [
-    nyanimeServerProxyPlugin(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
-      manifest: {
-        id: '/',
-        name: 'NyAnime TV',
-        short_name: 'NyAnime',
-        description: 'Streaming de Anime HD, Calendario de Emisión y Lector de Manga/Manhwa.',
-        theme_color: '#050507',
-        background_color: '#050507',
-        display: 'standalone',
-        orientation: 'portrait',
-        start_url: '/',
-        scope: '/',
-        icons: [
-          {
-            src: '/pwa-192x192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any'
-          },
-          {
-            src: '/pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any'
-          },
-          {
-            src: '/pwa-maskable-512x512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable'
-          }
-        ]
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        globIgnores: ['assets/aistudio/**', 'assets/aistudio/**/*', 'legacy_archive/**', 'legacy_archive/**/*'],
-        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
-      },
-      devOptions: {
-        enabled: true,
-        type: 'module'
+function nyanimeNoHmrReloadPlugin() {
+  const inertViteClient = `import "/@vite/env";
+const sheetsMap = new Map();
+if ("document" in globalThis) {
+  document.querySelectorAll("style[data-vite-dev-id]").forEach((el) => {
+    sheetsMap.set(el.getAttribute("data-vite-dev-id"), el);
+  });
+}
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.setAttribute("data-vite-dev-id", id);
+    style.textContent = content;
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement("afterend", style);
+    }
+    lastInsertedStyle = style;
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    invalidate() {},
+    decline() {},
+    on() {},
+    off() {},
+    send() {},
+    get data() { return {}; }
+  };
+}
+export function injectQuery(url) {
+  return url;
+}
+export const ErrorOverlay = typeof HTMLElement !== "undefined" ? class ErrorOverlay extends HTMLElement {} : class ErrorOverlay {};
+`;
+  return {
+    name: 'nyanime-no-hmr-reload',
+    enforce: 'post',
+    configureServer(server) {
+      server.middlewares.use('/@vite/client', (_req, res) => {
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.end(inertViteClient);
+      });
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        if (!ctx?.server) return html;
+        return html.replace(/<script id="vite-plugin-pwa:register-dev-sw"[\s\S]*?<\/script>/i, '');
       }
-    })
-  ],
-  build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
-            return 'firebase-vendor';
+    }
+  };
+}
+
+export default defineConfig(({ command }) => {
+  const isBuild = command === 'build';
+  return {
+    plugins: [
+      nyanimeServerProxyPlugin(),
+      VitePWA({
+        registerType: 'prompt',
+        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        manifest: {
+          id: '/',
+          name: 'NyAnime TV',
+          short_name: 'NyAnime',
+          description: 'Streaming de Anime HD, Calendario de Emisión y Lector de Manga/Manhwa.',
+          theme_color: '#050507',
+          background_color: '#050507',
+          display: 'standalone',
+          orientation: 'portrait',
+          start_url: '/',
+          scope: '/',
+          icons: [
+            {
+              src: '/pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: '/pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any'
+            },
+            {
+              src: '/pwa-maskable-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable'
+            }
+          ]
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globIgnores: ['assets/aistudio/**', 'assets/aistudio/**/*', 'legacy_archive/**', 'legacy_archive/**/*'],
+          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+          cleanupOutdatedCaches: true,
+          navigateFallback: isBuild ? 'index.html' : null,
+          navigateFallbackDenylist: [/^\/api\//],
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365
+                },
+                cacheableResponse: {
+                  statuses: [0, 200]
+                }
+              }
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'gstatic-fonts-cache',
+                expiration: {
+                  maxEntries: 10,
+                  maxAgeSeconds: 60 * 60 * 24 * 365
+                },
+                cacheableResponse: {
+                  statuses: [0, 200]
+                }
+              }
+            }
+          ]
+        },
+        devOptions: {
+          enabled: true,
+          type: 'module',
+          suppressWarnings: true
+        }
+      }),
+      nyanimeNoHmrReloadPlugin()
+    ],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+              return 'firebase-vendor';
+            }
           }
         }
       }
+    },
+    server: {
+      port: 3000,
+      host: '0.0.0.0',
+      hmr: false
+    },
+    preview: {
+      port: 3000,
+      host: '0.0.0.0'
     }
-  },
-  server: {
-    port: 3000,
-    host: '0.0.0.0'
-  },
-  preview: {
-    port: 3000,
-    host: '0.0.0.0'
-  }
+  };
 });
