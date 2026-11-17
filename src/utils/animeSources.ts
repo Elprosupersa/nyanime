@@ -1470,7 +1470,18 @@ export function parseHentaiLaHubData(json: unknown): {
             thumbnail: imgs.thumbnail
           };
         })
-        .filter((x): x is NonNullable<typeof x> => Boolean(x))
+        .filter(
+          (x: any): x is {
+            id: number;
+            number: number;
+            createdAt: string;
+            mediaId: number;
+            slug: string;
+            title: string;
+            cover: string;
+            thumbnail: string;
+          } => Boolean(x)
+        )
     : [];
 
   return {

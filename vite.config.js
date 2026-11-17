@@ -355,10 +355,13 @@ function nyanimeServerProxyPlugin() {
         }
 
         const rawCt = (upstream.headers.get('content-type') || '').toLowerCase();
+        const lowerPath = safeUrl.pathname.toLowerCase();
+        const lowerHost = safeUrl.hostname.toLowerCase();
         const isHlsManifest =
           rawCt.includes('mpegurl') ||
           rawCt.includes('x-mpegurl') ||
-          safeUrl.pathname.toLowerCase().endsWith('.m3u8');
+          lowerPath.endsWith('.m3u8') ||
+          lowerPath.includes('/m3u8/');
 
         if (isHlsManifest && req.method !== 'HEAD') {
           const buf = Buffer.from(await upstream.arrayBuffer());
@@ -375,7 +378,12 @@ function nyanimeServerProxyPlugin() {
           return;
         }
 
-        if (rawCt.includes('text/html') || rawCt.includes('application/xhtml')) {
+        const isDisguisedVideoSegment =
+          ((lowerHost === 'dotanborito.net' || lowerHost.endsWith('.dotanborito.net')) && lowerPath.includes('/segs/')) ||
+          lowerHost === 'playmudos.com' ||
+          lowerHost.endsWith('.playmudos.com');
+
+        if (!isDisguisedVideoSegment && (rawCt.includes('text/html') || rawCt.includes('application/xhtml'))) {
           res.statusCode = 502;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.end('Upstream returned HTML error page instead of video stream');
@@ -384,9 +392,9 @@ function nyanimeServerProxyPlugin() {
 
         const mime = rawCt.includes('video/')
           ? rawCt
-          : safeUrl.pathname.endsWith('.webm')
+          : lowerPath.endsWith('.webm')
             ? 'video/webm'
-            : safeUrl.pathname.endsWith('.ts')
+            : lowerPath.endsWith('.ts')
               ? 'video/mp2t'
               : 'video/mp4';
         res.setHeader('Content-Type', mime);
