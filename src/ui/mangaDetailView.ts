@@ -1,4 +1,5 @@
 import {
+  CustomListsManager,
   DownloadManager,
   MangaFavoritesManager,
   MangaReadStateManager,
@@ -12,6 +13,7 @@ import {
   toFastImgUrl,
   uiHooks
 } from './appState.ts';
+import { sanitizeUserScore } from '../utils/libraryEnhancements.ts';
 import {
   FallbackMangaProvider,
   MangaDex,
@@ -126,6 +128,60 @@ export function updateMangaFavoriteButton(mangaId: number | string): void {
     btnGrid.style.color = isFav ? 'var(--primary)' : '#fff';
     btnGrid.style.borderColor = isFav ? 'rgba(255, 26, 64, 0.4)' : 'rgba(255, 255, 255, 0.08)';
   }
+
+  renderMangaPersonalPanel(mangaId);
+}
+
+export function renderMangaPersonalPanel(mangaId: number | string): void {
+  const panel = document.getElementById('manga-det-personal-panel');
+  if (!panel) return;
+  const entry = MangaFavoritesManager.getEntry(mangaId);
+  const allLists = CustomListsManager.getAll();
+  const idStr = escHtml(String(mangaId));
+  const userScore = sanitizeUserScore(entry?.userScore);
+  const userReview = String(entry?.userReview || '').trim();
+  const userNotes = String(entry?.userNotes || '').trim();
+  const activeCustomIds = new Set<string>(Array.isArray(entry?.customListIds) ? entry.customListIds : []);
+
+  const listsChipsHtml = allLists
+    .map((l) => {
+      const checked = activeCustomIds.has(l.id);
+      return `
+        <button type="button"
+                class="det-custom-list-chip ${checked ? 'active' : ''}"
+                style="${checked ? `border-color:${escHtml(l.color)}; color:${escHtml(l.color)}; background:rgba(255,255,255,0.08);` : ''}"
+                onclick="toggleItemCustomList('manga', '${escHtml(l.id)}')">
+          <span>${escHtml(l.icon)}</span>
+          <span>${escHtml(l.name)}</span>
+          ${checked ? '<span aria-hidden="true">✓</span>' : ''}
+        </button>
+      `;
+    })
+    .join('');
+
+  panel.innerHTML = `
+    <div class="det-personal-row">
+      <button type="button" class="det-personal-score-btn ${userScore ? 'has-score' : ''}" onclick="abrirModalResenaPersonal('manga', '${idStr}')">
+        <span>${userScore ? `⭐ ${userScore}/10` : '☆ Calificar 1–10'}</span>
+        <span>·</span>
+        <span>${userReview || userNotes ? 'Editar reseña / nota' : 'Reseña y nota privada'}</span>
+      </button>
+      <button type="button" class="det-custom-list-add-btn" onclick="abrirModalNuevaLista()">+ Colección</button>
+    </div>
+    ${
+      userReview || userNotes
+        ? `<div class="det-personal-snippets">
+            ${userReview ? `<div class="det-personal-snippet"><strong>Reseña:</strong> "${escHtml(userReview)}"</div>` : ''}
+            ${userNotes ? `<div class="det-personal-snippet"><strong>Nota privada:</strong> ${escHtml(userNotes)}</div>` : ''}
+           </div>`
+        : ''
+    }
+    ${
+      allLists.length > 0
+        ? `<div class="det-custom-lists-row" aria-label="Listas personalizadas">${listsChipsHtml}</div>`
+        : ''
+    }
+  `;
 }
 
 export function toggleMangaFavoritoActual(): void {

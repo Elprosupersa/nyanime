@@ -9,6 +9,7 @@ import {
   cambiarTab,
   escHtml,
   generarPortadaSVG,
+  nWin,
   safeImg,
   showToast,
   state,
@@ -16,6 +17,7 @@ import {
 } from './appState.ts';
 import { computeProgressPercent, formatPlaybackTime } from '../utils/playerResume.ts';
 import { ANIME_LIST_CATEGORIES, countWatchedForAnime, getCategoryMeta } from '../utils/profileStats.ts';
+import { rankSmartCandidates, selectSmartRecommendationSeeds } from '../utils/libraryEnhancements.ts';
 import { AniListMangaService } from './mangaCatalogView.ts';
 import {
   HENTAILA_GENRES,
@@ -38,7 +40,7 @@ import {
 } from '../utils/animeSources.ts';
 
 export async function cargarCatalogoHome(): Promise<void> {
-  const cacheKey = 'home_catalog_v2';
+  const cacheKey = 'home_catalog_v3';
   const cached = CacheManager.get(cacheKey);
   if (cached) {
     renderHomeContent(cached);
@@ -59,15 +61,17 @@ export async function cargarCatalogoHome(): Promise<void> {
     }
     fragment AnimeData on Media {
       id
+      idMal
       title { romaji english native }
       coverImage { extraLarge large color }
       bannerImage
       episodes
       format
       status
+      averageScore
       genres
       description
-      nextAiringEpisode { episode timeUntilAiring }
+      nextAiringEpisode { episode timeUntilAiring airingAt }
     }
   `;
 
@@ -84,6 +88,7 @@ export async function cargarCatalogoHome(): Promise<void> {
     }
   } catch (err) {
     console.error('Error al cargar catálogo:', err);
+    void renderSmartRecommendations();
   }
 }
 
@@ -94,6 +99,151 @@ export function renderHomeContent(data: any): void {
   }
   if (data.popular?.media) renderHScroll('lista-populares', data.popular.media);
   if (data.releasing?.media) renderHScroll('lista-emision', data.releasing.media);
+  void renderSmartRecommendations();
+}
+
+export async function renderSmartRecommendations(): Promise<void> {
+  const secBecause = document.getElementById('section-reco-because');
+  const titleBecause = document.getElementById('reco-because-title');
+  const listBecause = document.getElementById('lista-reco-because');
+  const secLibrary = document.getElementById('section-reco-library');
+  const listLibrary = document.getElementById('lista-reco-library');
+  if (!secBecause || !listBecause || !secLibrary || !listLibrary) return;
+
+  const animes = FavoritesManager.getAll();
+  const history = HistoryManager.getAll();
+  const seeds = selectSmartRecommendationSeeds(animes, history);
+
+  if (!seeds.becauseOfAnime && seeds.topGenres.length === 0) {
+    secBecause.classList.add('hide');
+    secLibrary.classList.add('hide');
+    listBecause.innerHTML = '';
+    listLibrary.innerHTML = '';
+    return;
+  }
+
+  const poolMap = new Map<string, any>();
+  const homeCached = CacheManager.get('home_catalog_v3') || CacheManager.get('home_catalog_v2');
+  for (const lst of [homeCached?.trending?.media, homeCached?.popular?.media, homeCached?.releasing?.media]) {
+    if (Array.isArray(lst)) {
+      for (const m of lst) {
+        if (m?.id) poolMap.set(String(m.id), m);
+      }
+    }
+  }
+  for (const m of FALLBACK_ANIME_DIRECTORY_CATALOG) {
+    if (m?.id && !m.isAdult && !poolMap.has(String(m.id))) {
+      poolMap.set(String(m.id), m);
+    }
+  }
+
+  let becauseItems: any[] = [];
+  const seed = seeds.becauseOfAnime;
+  const numericSeedId = seed ? Number(seed.id) : 0;
+
+  if (seed && Number.isFinite(numericSeedId) && numericSeedId > 0) {
+    const recoCacheKey = `smart_reco_seed_v1_${numericSeedId}`;
+    let cachedRecos = CacheManager.get(recoCacheKey);
+    if (!Array.isArray(cachedRecos)) {
+      const recoQuery = `
+        query ($id: Int) {
+          Media(id: $id, type: ANIME) {
+            recommendations(perPage: 14, sort: RATING_DESC) {
+              nodes {
+                mediaRecommendation {
+                  id
+                  idMal
+                  title { romaji english native }
+                  coverImage { extraLarge large color }
+                  bannerImage
+                  episodes
+                  format
+                  status
+                  averageScore
+                  genres
+                  description
+                  nextAiringEpisode { episode timeUntilAiring airingAt }
+                }
+              }
+            }
+          }
+        }
+      `;
+      const payload = JSON.stringify({ query: recoQuery, variables: { id: numericSeedId } });
+      try {
+        let json: any = null;
+        try {
+          const pRes = await fetch(`/api/proxy?url=${encodeURIComponent(ANILIST_URL)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: payload
+          });
+          if (pRes.ok) json = await pRes.json();
+        } catch {
+          // try direct
+        }
+        if (!json?.data) {
+          const dRes = await fetch(ANILIST_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: payload
+          });
+          if (dRes.ok) json = await dRes.json();
+        }
+        const nodes = json?.data?.Media?.recommendations?.nodes || [];
+        cachedRecos = nodes
+          .map((n: any) => n?.mediaRecommendation)
+          .filter((m: any) => m && m.id && !m.isAdult);
+        if (cachedRecos.length > 0) {
+          CacheManager.set(recoCacheKey, cachedRecos);
+        }
+      } catch {
+        cachedRecos = [];
+      }
+    }
+
+    if (Array.isArray(cachedRecos) && cachedRecos.length > 0) {
+      becauseItems = cachedRecos.filter((m: any) => !seeds.excludedIds.has(String(m.id))).slice(0, 12);
+    }
+  }
+
+  if (becauseItems.length === 0) {
+    becauseItems = rankSmartCandidates(Array.from(poolMap.values()), seeds.topGenres, seeds.excludedIds, 10);
+  }
+
+  if (becauseItems.length > 0 && seed) {
+    if (titleBecause) {
+      titleBecause.textContent = `Porque viste ${seed.title}`;
+    }
+    secBecause.classList.remove('hide');
+    renderHScroll('lista-reco-because', becauseItems);
+  } else {
+    secBecause.classList.add('hide');
+    listBecause.innerHTML = '';
+  }
+
+  const excludedForLibrary = new Set<string>(seeds.excludedIds);
+  becauseItems.forEach((m) => {
+    if (m?.id) excludedForLibrary.add(String(m.id));
+  });
+  const libraryItems = rankSmartCandidates(
+    Array.from(poolMap.values()),
+    seeds.topGenres,
+    excludedForLibrary,
+    12
+  );
+  if (libraryItems.length > 0) {
+    secLibrary.classList.remove('hide');
+    renderHScroll('lista-reco-library', libraryItems);
+  } else {
+    secLibrary.classList.add('hide');
+    listLibrary.innerHTML = '';
+  }
+
+  // Keep nWin reference non-tree-shaken for optional debug hooks
+  if (nWin && !nWin.renderSmartRecommendations) {
+    nWin.renderSmartRecommendations = renderSmartRecommendations;
+  }
 }
 
 export function renderHero(anime: any): void {
@@ -742,7 +892,7 @@ function buildFallbackAnimeDirectoryResults(
   effectiveSearch = ''
 ): { items: any[]; pageInfo: SearchPageMeta } {
   const poolMap = new Map<number | string, any>();
-  const homeCached = CacheManager.get('home_catalog_v2');
+  const homeCached = CacheManager.get('home_catalog_v3') || CacheManager.get('home_catalog_v2');
   for (const list of [homeCached?.trending?.media, homeCached?.popular?.media, homeCached?.releasing?.media]) {
     if (Array.isArray(list)) {
       for (const item of list) {
@@ -873,7 +1023,7 @@ async function fetchAniListAnimeDirectory(
           format
           status
           episodes
-          nextAiringEpisode { episode timeUntilAiring }
+          nextAiringEpisode { episode timeUntilAiring airingAt }
           startDate { year month day }
           averageScore
           genres

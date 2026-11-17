@@ -3,17 +3,21 @@ import {
   type AnimeListStatus,
   AnimeWatchedManager,
   CacheManager,
+  CustomListsManager,
   DownloadManager,
   FavoritesManager,
+  MangaFavoritesManager,
   cerrarModales,
   escHtml,
   fetchWithTimeout,
+  getActiveManga,
   nWin,
   safeImg,
   showToast,
   state
 } from './appState.ts';
 import { ANIME_LIST_CATEGORIES, getCategoryMeta } from '../utils/profileStats.ts';
+import { sanitizeUserScore } from '../utils/libraryEnhancements.ts';
 import {
   buildSeasonEpisodeRanges,
   computeEpisodeSelectionByMode,
@@ -229,7 +233,7 @@ const ANILIST_CORE_FIELDS = `
   episodes
   seasonYear
   startDate { year month day }
-  nextAiringEpisode { episode timeUntilAiring }
+  nextAiringEpisode { episode timeUntilAiring airingAt }
 `;
 
 const ANILIST_FRANCHISE_QUERY = `
@@ -518,8 +522,13 @@ export function getActiveDetailAnimeEntry(): any {
       media.coverImage?.large ||
       '';
     const nextEp = Number(base.nextAiringEpisode?.episode || media.nextAiringEpisode?.episode || 0);
+    const nextAiringAt = Number(base.nextAiringEpisode?.airingAt || media.nextAiringEpisode?.airingAt || 0);
+    const malIdVal = Number(base.idMal || media.idMal || 0) || undefined;
+    const avgScoreVal = Number(base.averageScore || media.averageScore || 0) || undefined;
     return {
       id: rawId,
+      ...(malIdVal ? { idMal: malIdVal } : {}),
+      ...(avgScoreVal ? { averageScore: avgScoreVal } : {}),
       title: {
         romaji: rawTitle.romaji || rawTitle.english || 'Anime',
         english: rawTitle.english || rawTitle.romaji || 'Anime'
@@ -537,7 +546,9 @@ export function getActiveDetailAnimeEntry(): any {
         : Array.isArray(base.genres)
           ? base.genres
           : [],
-      ...(nextEp > 0 ? { nextAiringEpisode: { episode: nextEp } } : {}),
+      ...(nextEp > 0
+        ? { nextAiringEpisode: { episode: nextEp, ...(nextAiringAt > 0 ? { airingAt: nextAiringAt } : {}) } }
+        : {}),
       ...(base.hentailaSlug ? { hentailaSlug: base.hentailaSlug } : {})
     };
   }
@@ -568,9 +579,16 @@ export function getActiveDetailAnimeEntry(): any {
   const nextEp = Number(
     (sameAsBase ? base.nextAiringEpisode?.episode || media.nextAiringEpisode?.episode : 0) || 0
   );
+  const nextAiringAt = Number(
+    (sameAsBase ? base.nextAiringEpisode?.airingAt || media.nextAiringEpisode?.airingAt : 0) || 0
+  );
+  const malIdVal = Number(activeSeason.idMal || (sameAsBase ? base.idMal || media.idMal : 0) || 0) || undefined;
+  const avgScoreVal = Number(activeSeason.averageScore || (sameAsBase ? base.averageScore || media.averageScore : 0) || 0) || undefined;
 
   return {
     id: activeSeason.id,
+    ...(malIdVal ? { idMal: malIdVal } : {}),
+    ...(avgScoreVal ? { averageScore: avgScoreVal } : {}),
     title: {
       romaji: titleRomaji,
       english: titleEnglish
@@ -589,7 +607,9 @@ export function getActiveDetailAnimeEntry(): any {
         : Array.isArray(base.genres)
           ? base.genres
           : [],
-    ...(nextEp > 0 ? { nextAiringEpisode: { episode: nextEp } } : {}),
+    ...(nextEp > 0
+      ? { nextAiringEpisode: { episode: nextEp, ...(nextAiringAt > 0 ? { airingAt: nextAiringAt } : {}) } }
+      : {}),
     ...(sameAsBase && base.hentailaSlug ? { hentailaSlug: base.hentailaSlug } : {})
   };
 }
@@ -677,6 +697,84 @@ export function updateFavoriteButton(id?: number | string): void {
       }).join('')}
     </div>
   `;
+
+  renderAnimeDetailPersonalPanel(targetId);
+}
+
+export function renderAnimeDetailPersonalPanel(targetId: number | string): void {
+  const panel = document.getElementById('det-personal-panel');
+  if (!panel) return;
+  const entry = FavoritesManager.getEntry(targetId);
+  const allLists = CustomListsManager.getAll();
+  const idStr = escHtml(String(targetId));
+  const userScore = sanitizeUserScore(entry?.userScore);
+  const userReview = String(entry?.userReview || '').trim();
+  const userNotes = String(entry?.userNotes || '').trim();
+  const activeCustomIds = new Set<string>(Array.isArray(entry?.customListIds) ? entry.customListIds : []);
+
+  const listsChipsHtml = allLists
+    .map((l) => {
+      const checked = activeCustomIds.has(l.id);
+      return `
+        <button type="button"
+                class="det-custom-list-chip ${checked ? 'active' : ''}"
+                style="${checked ? `border-color:${escHtml(l.color)}; color:${escHtml(l.color)}; background:rgba(255,255,255,0.08);` : ''}"
+                onclick="toggleItemCustomList('anime', '${escHtml(l.id)}')">
+          <span>${escHtml(l.icon)}</span>
+          <span>${escHtml(l.name)}</span>
+          ${checked ? '<span aria-hidden="true">✓</span>' : ''}
+        </button>
+      `;
+    })
+    .join('');
+
+  panel.innerHTML = `
+    <div class="det-personal-row">
+      <button type="button" class="det-personal-score-btn ${userScore ? 'has-score' : ''}" onclick="abrirModalResenaPersonal('anime', '${idStr}')">
+        <span>${userScore ? `⭐ ${userScore}/10` : '☆ Calificar 1–10'}</span>
+        <span>·</span>
+        <span>${userReview || userNotes ? 'Editar reseña / nota' : 'Reseña y nota privada'}</span>
+      </button>
+      <button type="button" class="det-custom-list-add-btn" onclick="abrirModalNuevaLista()">+ Colección</button>
+    </div>
+    ${
+      userReview || userNotes
+        ? `<div class="det-personal-snippets">
+            ${userReview ? `<div class="det-personal-snippet"><strong>Reseña:</strong> "${escHtml(userReview)}"</div>` : ''}
+            ${userNotes ? `<div class="det-personal-snippet"><strong>Nota privada:</strong> ${escHtml(userNotes)}</div>` : ''}
+           </div>`
+        : ''
+    }
+    ${
+      allLists.length > 0
+        ? `<div class="det-custom-lists-row" aria-label="Listas personalizadas">${listsChipsHtml}</div>`
+        : ''
+    }
+  `;
+}
+
+export function toggleItemCustomList(kind: 'anime' | 'manga', listId: string): void {
+  if (!listId) return;
+  const listObj = CustomListsManager.getById(listId);
+  if (kind === 'anime') {
+    const entry = getActiveDetailAnimeEntry() || state.anime;
+    if (!entry?.id) return;
+    const added = FavoritesManager.toggleCustomList(entry, listId);
+    showToast(
+      added
+        ? `Añadido a "${listObj?.name || 'colección'}" ✓`
+        : `Quitado de "${listObj?.name || 'colección'}"`
+    );
+    return;
+  }
+  const activeManga = getActiveManga();
+  if (!activeManga?.id) return;
+  const added = MangaFavoritesManager.toggleCustomList(activeManga, listId);
+  showToast(
+    added
+      ? `Manga añadido a "${listObj?.name || 'colección'}" ✓`
+      : `Manga quitado de "${listObj?.name || 'colección'}"`
+  );
 }
 
 export function toggleDetalleLibraryMenu(event?: Event): void {

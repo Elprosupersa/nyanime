@@ -102,6 +102,28 @@ export function compactMangaEntry(raw: unknown): Record<string, any> | null {
   if (typeof m.mangaDexId === 'string' && m.mangaDexId) out.mangaDexId = m.mangaDexId.slice(0, 80);
   if (typeof m.keiyoushiSourceId === 'string' && m.keiyoushiSourceId) out.keiyoushiSourceId = m.keiyoushiSourceId.slice(0, 80);
   if (typeof m.keiyoushiUrl === 'string' && m.keiyoushiUrl) out.keiyoushiUrl = m.keiyoushiUrl.slice(0, 300);
+  const rawUserScore = m.userScore !== undefined && m.userScore !== null ? Math.round(Number(m.userScore)) : null;
+  if (rawUserScore !== null && Number.isFinite(rawUserScore) && rawUserScore >= 1 && rawUserScore <= 10) {
+    out.userScore = rawUserScore;
+  }
+  if (typeof m.userReview === 'string' && m.userReview.trim()) {
+    out.userReview = m.userReview.trim().slice(0, 280);
+  }
+  if (typeof m.userNotes === 'string' && m.userNotes.trim()) {
+    out.userNotes = m.userNotes.trim().slice(0, 500);
+  }
+  if (Number.isFinite(Number(m.scoreUpdatedAt)) && Number(m.scoreUpdatedAt) > 0) {
+    out.scoreUpdatedAt = Math.floor(Number(m.scoreUpdatedAt));
+  }
+  if (Array.isArray(m.customListIds) && m.customListIds.length > 0) {
+    out.customListIds = Array.from(
+      new Set(
+        m.customListIds
+          .map((x: unknown) => String(x || '').trim().slice(0, 64))
+          .filter((x: string) => /^[a-zA-Z0-9_-]+$/.test(x))
+      )
+    ).slice(0, 25);
+  }
   return out;
 }
 

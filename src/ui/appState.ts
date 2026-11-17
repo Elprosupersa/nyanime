@@ -23,9 +23,21 @@ import {
   DEFAULT_AVATAR_URL,
   isValidStoredAvatar
 } from '../utils/avatarHelpers.ts';
+import {
+  buildCustomList,
+  type CustomList,
+  sanitizeCustomListIds,
+  sanitizeShortText,
+  sanitizeUserScore,
+  toggleItemInCustomList
+} from '../utils/libraryEnhancements.ts';
+import {
+  type OAuthAccountSession,
+  type OAuthProviderId
+} from '../utils/scrobble.ts';
 
 export { generarPortadaSVG };
-export type { AnimeListStatus };
+export type { AnimeListStatus, CustomList, OAuthAccountSession, OAuthProviderId };
 
 export const ANILIST_URL = 'https://graphql.anilist.co';
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -92,6 +104,9 @@ export interface NyWindow extends Window {
   UserManager?: typeof UserManager;
   FavoritesManager?: typeof FavoritesManager;
   MangaFavoritesManager?: typeof MangaFavoritesManager;
+  CustomListsManager?: typeof CustomListsManager;
+  AppPreferencesManager?: typeof AppPreferencesManager;
+  OAuthScrobbleManager?: typeof OAuthScrobbleManager;
   HistoryManager?: typeof HistoryManager;
   MangaHistoryManager?: typeof MangaHistoryManager;
   MangaReadStateManager?: typeof MangaReadStateManager;
@@ -119,10 +134,14 @@ export interface NyWindow extends Window {
   _nyLifecycleFlushesBound?: boolean;
   _crunchyOutsideClickBound?: boolean;
   _nyPlayerKeyboardBound?: boolean;
+  _nyMangaReaderKeyBound?: boolean;
   capitulosLectorList?: any[];
   mangaUiState?: any;
   refreshOfflineMangaDetailState?: (manga?: any, rerender?: boolean) => Promise<any>;
   renderDetalleEpisodios?: () => void;
+  renderSmartRecommendations?: () => Promise<void>;
+  getActiveDetailAnimeEntry?: () => any;
+  abrirSalaWatchTogetherDesdeCodigo?: (codeArg: string) => Promise<void>;
 }
 
 export const nWin = window as unknown as NyWindow;
@@ -195,6 +214,7 @@ export interface UiHooks {
   abrirModalAuthEmail: (mode?: 'login' | 'register') => void;
   abrirModalDescargas: () => void;
   initSearchDirectoryFilters: () => void;
+  renderSmartRecommendations: () => void;
 }
 
 const noop = () => {};
@@ -229,7 +249,8 @@ export const uiHooks: UiHooks = {
   flushMangaReaderPage: noop,
   abrirModalAuthEmail: noop,
   abrirModalDescargas: noop,
-  initSearchDirectoryFilters: noop
+  initSearchDirectoryFilters: noop,
+  renderSmartRecommendations: noop
 };
 
 // Unified State Bridge (single source of truth)
@@ -714,6 +735,367 @@ export const UserManager = {
   }
 };
 
+export interface AppPreferences {
+  autoSkipIntro: boolean;
+  autoSkipOutro: boolean;
+  autoScrobble: boolean;
+  weeklySummaryPush: boolean;
+}
+
+const DEFAULT_APP_PREFS: AppPreferences = {
+  autoSkipIntro: false,
+  autoSkipOutro: false,
+  autoScrobble: true,
+  weeklySummaryPush: true
+};
+
+export const AppPreferencesManager = {
+  KEY: 'nyanime_app_prefs_v1',
+  get(): AppPreferences {
+    try {
+      const raw = JSON.parse(localStorage.getItem(this.KEY) || 'null');
+      if (raw && typeof raw === 'object') {
+        return {
+          autoSkipIntro: Boolean(raw.autoSkipIntro),
+          autoSkipOutro: Boolean(raw.autoSkipOutro),
+          autoScrobble: raw.autoScrobble !== false,
+          weeklySummaryPush: raw.weeklySummaryPush !== false
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return { ...DEFAULT_APP_PREFS };
+  },
+  save(patch: Partial<AppPreferences>, skipSync = false): AppPreferences {
+    const next = { ...this.get(), ...(patch || {}) };
+    safeStorageSetItem(this.KEY, JSON.stringify(next));
+    if (!skipSync && nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('app_prefs');
+    }
+    return next;
+  },
+  setAutoSkipIntro(enabled: boolean): void {
+    this.save({ autoSkipIntro: Boolean(enabled) });
+  },
+  setAutoSkipOutro(enabled: boolean): void {
+    this.save({ autoSkipOutro: Boolean(enabled) });
+  },
+  setAutoScrobble(enabled: boolean): void {
+    this.save({ autoScrobble: Boolean(enabled) });
+  },
+  setWeeklySummaryPush(enabled: boolean): void {
+    this.save({ weeklySummaryPush: Boolean(enabled) });
+  }
+};
+
+export const CustomListsManager = {
+  KEY: 'nyanime_custom_lists_v1',
+  getAll(): CustomList[] {
+    try {
+      const raw = JSON.parse(localStorage.getItem(this.KEY) || '[]');
+      if (!Array.isArray(raw)) return [];
+      return raw.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string');
+    } catch {
+      return [];
+    }
+  },
+  getById(id: string): CustomList | null {
+    return this.getAll().find((l) => l.id === id) || null;
+  },
+  create(nameRaw: string, opts?: { color?: string; icon?: string }): CustomList | null {
+    const built = buildCustomList(nameRaw, opts);
+    if (!built) return null;
+    const all = this.getAll();
+    const next = [built, ...all.filter((l) => l.id !== built.id)].slice(0, 30);
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(next))) {
+      showToast('Espacio local lleno · No se pudo crear la lista personalizada.');
+      return null;
+    }
+    if (nWin.firebaseSync?.saveCustomList) {
+      nWin.firebaseSync.saveCustomList(built).catch(() => {});
+    } else if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('custom_lists');
+    }
+    uiHooks.renderFavoritos();
+    uiHooks.renderProfileUI();
+    return built;
+  },
+  remove(listId: string): boolean {
+    if (!listId) return false;
+    const all = this.getAll();
+    if (!all.some((l) => l.id === listId)) return false;
+    const next = all.filter((l) => l.id !== listId);
+    safeStorageSetItem(this.KEY, JSON.stringify(next));
+
+    // Clean listId from saved anime & manga entries
+    try {
+      const favs = FavoritesManager.getAll();
+      let changedAnime = false;
+      const cleanFavs = favs.map((a) => {
+        if (Array.isArray(a.customListIds) && a.customListIds.includes(listId)) {
+          changedAnime = true;
+          return { ...a, customListIds: a.customListIds.filter((id: string) => id !== listId) };
+        }
+        return a;
+      });
+      if (changedAnime) safeStorageSetItem(FavoritesManager.KEY, JSON.stringify(cleanFavs));
+
+      const mangaFavs = MangaFavoritesManager.getAll();
+      let changedManga = false;
+      const cleanMangas = mangaFavs.map((m) => {
+        if (Array.isArray(m.customListIds) && m.customListIds.includes(listId)) {
+          changedManga = true;
+          return { ...m, customListIds: m.customListIds.filter((id: string) => id !== listId) };
+        }
+        return m;
+      });
+      if (changedManga) safeStorageSetItem(MangaFavoritesManager.KEY, JSON.stringify(cleanMangas));
+    } catch {
+      // ignore
+    }
+
+    if (nWin.firebaseSync?.deleteCustomList) {
+      nWin.firebaseSync.deleteCustomList(listId).catch(() => {});
+    } else if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('custom_lists');
+    }
+    uiHooks.renderFavoritos();
+    uiHooks.renderProfileUI();
+    return true;
+  }
+};
+
+export const OAuthScrobbleManager = {
+  KEY: 'nyanime_oauth_sessions_v1',
+  getSessions(): Partial<Record<OAuthProviderId, OAuthAccountSession>> {
+    try {
+      const raw = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch {
+      return {};
+    }
+  },
+  getSession(provider: OAuthProviderId): OAuthAccountSession | null {
+    const s = this.getSessions()[provider];
+    return s && s.accessToken ? s : null;
+  },
+  saveSession(session: OAuthAccountSession): void {
+    const all = this.getSessions();
+    all[session.provider] = session;
+    safeStorageSetItem(this.KEY, JSON.stringify(all));
+    uiHooks.renderProfileUI();
+  },
+  disconnect(provider: OAuthProviderId): void {
+    const all = this.getSessions();
+    delete all[provider];
+    safeStorageSetItem(this.KEY, JSON.stringify(all));
+    uiHooks.renderProfileUI();
+  },
+  async fetchProvidersStatus(): Promise<{
+    appUrl?: string;
+    anilist?: { configured: boolean; callbackUrl?: string };
+    mal?: { configured: boolean; callbackUrl?: string };
+  } | null> {
+    try {
+      const res = await fetchWithTimeout('/api/auth/providers/status', {}, 4500);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+  async connectPopup(provider: OAuthProviderId): Promise<OAuthAccountSession | null> {
+    const urlRes = await fetchWithTimeout(`/api/auth/${provider}/url`, {}, 6000);
+    const data = await urlRes.json().catch(() => ({}));
+    if (!urlRes.ok || !data?.url) {
+      const reason = data?.error || `Faltan credenciales OAuth de ${provider.toUpperCase()} en el servidor.`;
+      throw new Error(reason);
+    }
+
+    return await new Promise<OAuthAccountSession | null>((resolve, reject) => {
+      const w = 540;
+      const h = 680;
+      const left = Math.max(0, Math.round((window.screen.width - w) / 2));
+      const top = Math.max(0, Math.round((window.screen.height - h) / 2));
+      const popup = window.open(
+        data.url,
+        `nyanime_oauth_${provider}`,
+        `width=${w},height=${h},left=${left},top=${top},noopener=no`
+      );
+      if (!popup) {
+        reject(new Error('El navegador bloqueó la ventana emergente. Permite popups para continuar.'));
+        return;
+      }
+
+      let settled = false;
+      const cleanup = () => {
+        window.removeEventListener('message', onMsg);
+        clearInterval(pollTimer);
+        clearTimeout(timeoutTimer);
+      };
+
+      const onMsg = (ev: MessageEvent) => {
+        const msg = ev.data;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.provider !== provider) return;
+        if (msg.type === 'OAUTH_AUTH_SUCCESS' && msg.accessToken) {
+          settled = true;
+          cleanup();
+          const session: OAuthAccountSession = {
+            provider,
+            accessToken: String(msg.accessToken),
+            refreshToken: msg.refreshToken ? String(msg.refreshToken) : undefined,
+            expiresAtMs: typeof msg.expiresAtMs === 'number' ? msg.expiresAtMs : undefined,
+            username: msg.username ? String(msg.username) : provider.toUpperCase(),
+            userId: msg.userId,
+            connectedAt: Date.now()
+          };
+          this.saveSession(session);
+          resolve(session);
+        } else if (msg.type === 'OAUTH_AUTH_ERROR') {
+          settled = true;
+          cleanup();
+          reject(new Error(String(msg.error || `Error al autorizar con ${provider}`)));
+        }
+      };
+
+      window.addEventListener('message', onMsg);
+
+      const pollTimer = setInterval(() => {
+        if (!settled && popup.closed) {
+          settled = true;
+          cleanup();
+          resolve(null);
+        }
+      }, 500);
+
+      const timeoutTimer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          try { popup.close(); } catch { /* ignore */ }
+          reject(new Error('Tiempo de espera agotado para autorizar OAuth.'));
+        }
+      }, 180_000);
+    });
+  },
+  async refreshMalToken(session: OAuthAccountSession): Promise<OAuthAccountSession | null> {
+    if (!session.refreshToken) return null;
+    try {
+      const res = await fetchWithTimeout(
+        '/api/auth/mal/refresh',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: session.refreshToken })
+        },
+        6000
+      );
+      if (!res.ok) return null;
+      const refreshed = await res.json();
+      if (!refreshed?.accessToken) return null;
+      const nextSession: OAuthAccountSession = {
+        ...session,
+        accessToken: String(refreshed.accessToken),
+        refreshToken: refreshed.refreshToken ? String(refreshed.refreshToken) : session.refreshToken,
+        expiresAtMs: typeof refreshed.expiresAtMs === 'number' ? refreshed.expiresAtMs : session.expiresAtMs
+      };
+      this.saveSession(nextSession);
+      return nextSession;
+    } catch {
+      return null;
+    }
+  },
+  async scrobbleAnime(
+    animeOrId: any,
+    overrides: { status?: AnimeListStatus; progress?: number; score?: number | null; silent?: boolean } = {}
+  ): Promise<void> {
+    if (!AppPreferencesManager.get().autoScrobble) return;
+    const alSession = this.getSession('anilist');
+    const malSession = this.getSession('mal');
+    if (!alSession && !malSession) return;
+
+    const animeId = typeof animeOrId === 'object' ? animeOrId?.id : animeOrId;
+    if (!animeId) return;
+
+    const savedEntry = FavoritesManager.getEntry(animeId);
+    const animeObj = typeof animeOrId === 'object' ? { ...savedEntry, ...animeOrId } : savedEntry;
+    const status: AnimeListStatus = overrides.status || FavoritesManager.getStatus(animeId) || 'watching';
+    const watchedCount = AnimeWatchedManager.getWatchedSet(animeId).size;
+    const progress = overrides.progress !== undefined ? Math.max(0, Math.floor(overrides.progress)) : watchedCount;
+    const rawScore = overrides.score !== undefined ? overrides.score : savedEntry?.userScore ?? animeObj?.userScore;
+    const score = sanitizeUserScore(rawScore);
+    const malId = Number(animeObj?.idMal || savedEntry?.idMal || 0);
+
+    const tasks: Promise<void>[] = [];
+
+    if (alSession && Number(animeId) > 0) {
+      tasks.push(
+        (async () => {
+          const res = await fetchWithTimeout(
+            '/api/auth/anilist/scrobble',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${alSession.accessToken}`
+              },
+              body: JSON.stringify({
+                mediaId: Math.floor(Number(animeId)),
+                status,
+                progress,
+                score
+              })
+            },
+            6500
+          );
+          if (res.ok && !overrides.silent) {
+            showToast('Sincronizado con AniList ✓');
+          }
+        })().catch(() => {})
+      );
+    }
+
+    if (malSession && Number.isFinite(malId) && malId > 0) {
+      tasks.push(
+        (async () => {
+          const sendMal = (token: string) =>
+            fetchWithTimeout(
+              '/api/auth/mal/scrobble',
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  malId: Math.floor(malId),
+                  status,
+                  progress,
+                  score
+                })
+              },
+              6500
+            );
+          let res = await sendMal(malSession.accessToken);
+          if (res.status === 401 && malSession.refreshToken) {
+            const refreshed = await this.refreshMalToken(malSession);
+            if (refreshed?.accessToken) {
+              res = await sendMal(refreshed.accessToken);
+            }
+          }
+          if (res.ok && !overrides.silent) {
+            showToast('Sincronizado con MyAnimeList ✓');
+          }
+        })().catch(() => {})
+      );
+    }
+
+    await Promise.allSettled(tasks);
+  }
+};
+
 export const FavoritesManager = {
   KEY: 'nyanime_favorites_v2',
   getAll(): any[] {
@@ -729,6 +1111,10 @@ export const FavoritesManager = {
     } catch {
       return [];
     }
+  },
+  getEntry(id: number | string): any | null {
+    if (!id) return null;
+    return this.getAll().find(item => String(item.id) === String(id)) || null;
   },
   isFavorite(id: number | string): boolean {
     return this.getAll().some(item => String(item.id) === String(id));
@@ -760,6 +1146,91 @@ export const FavoritesManager = {
     }
     return counts;
   },
+  setRatingAndNotes(
+    animeOrId: any,
+    patch: { userScore?: number | null; userReview?: string; userNotes?: string }
+  ): boolean {
+    const targetId = typeof animeOrId === 'object' ? animeOrId?.id : animeOrId;
+    if (!targetId) return false;
+    const list = this.getAll();
+    let idx = list.findIndex(item => String(item.id) === String(targetId));
+    const now = Date.now();
+
+    if (idx < 0) {
+      if (typeof animeOrId !== 'object' || !animeOrId?.id) return false;
+      list.unshift(mergeAnimeFavoriteMetadata(null, animeOrId, 'plan_to_watch', now));
+      idx = 0;
+    }
+
+    const cur = { ...list[idx] };
+    if (patch.userScore !== undefined) {
+      const cleanScore = sanitizeUserScore(patch.userScore);
+      if (cleanScore === null) delete cur.userScore;
+      else cur.userScore = cleanScore;
+      cur.scoreUpdatedAt = now;
+    }
+    if (patch.userReview !== undefined) {
+      const cleanRev = sanitizeShortText(patch.userReview, 280);
+      if (!cleanRev) delete cur.userReview;
+      else cur.userReview = cleanRev;
+      cur.scoreUpdatedAt = now;
+    }
+    if (patch.userNotes !== undefined) {
+      const cleanNotes = sanitizeShortText(patch.userNotes, 500);
+      if (!cleanNotes) delete cur.userNotes;
+      else cur.userNotes = cleanNotes;
+    }
+
+    list[idx] = compactAnimeStorageEntry(cur);
+    list[idx].listStatus = normalizeAnimeListStatus(cur.listStatus, 'plan_to_watch');
+    list[idx].listUpdatedAt = cur.listUpdatedAt || now;
+
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(list))) {
+      showToast('No hay espacio local suficiente para guardar tu reseña.');
+      return false;
+    }
+    if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('favorites_rating');
+    }
+    uiHooks.updateFavoriteButton(targetId);
+    uiHooks.renderFavoritos();
+    UserManager.renderProfile();
+    uiHooks.renderSmartRecommendations();
+    void OAuthScrobbleManager.scrobbleAnime(list[idx], { silent: true });
+    return true;
+  },
+  toggleCustomList(animeOrId: any, listId: string): boolean {
+    const targetId = typeof animeOrId === 'object' ? animeOrId?.id : animeOrId;
+    if (!targetId || !listId) return false;
+    const list = this.getAll();
+    let idx = list.findIndex(item => String(item.id) === String(targetId));
+    const now = Date.now();
+
+    if (idx < 0) {
+      if (typeof animeOrId !== 'object' || !animeOrId?.id) return false;
+      list.unshift(mergeAnimeFavoriteMetadata(null, animeOrId, 'plan_to_watch', now));
+      idx = 0;
+    }
+
+    const cur = { ...list[idx] };
+    const { nextIds, added } = toggleItemInCustomList(cur.customListIds, listId);
+    cur.customListIds = sanitizeCustomListIds(nextIds);
+    list[idx] = compactAnimeStorageEntry(cur);
+    list[idx].listStatus = normalizeAnimeListStatus(cur.listStatus, 'plan_to_watch');
+    list[idx].listUpdatedAt = cur.listUpdatedAt || now;
+
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(list))) {
+      showToast('No hay espacio local suficiente.');
+      return false;
+    }
+    if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('favorites_custom_list');
+    }
+    uiHooks.updateFavoriteButton(targetId);
+    uiHooks.renderFavoritos();
+    UserManager.renderProfile();
+    return added;
+  },
   setStatus(anime: any, nextStatus: AnimeListStatus, options: { silent?: boolean; skipSync?: boolean } = {}): void {
     if (!anime?.id) return;
     const cleanStatus = normalizeAnimeListStatus(nextStatus, 'watching');
@@ -776,9 +1247,10 @@ export const FavoritesManager = {
       showToast('No hay espacio local suficiente. Libera descargas o caché e inténtalo de nuevo.');
       return;
     }
+    const savedEntry = list[idx >= 0 ? idx : 0];
     if (!options.silent) {
       const meta = getCategoryMeta(cleanStatus);
-      const title = list[idx >= 0 ? idx : 0]?.title?.english || list[idx >= 0 ? idx : 0]?.title?.romaji || 'Anime';
+      const title = savedEntry?.title?.english || savedEntry?.title?.romaji || 'Anime';
       showToast(`${title} → ${meta.label}`);
     }
     if (!options.skipSync && nWin.firebaseSync?.scheduleSync) {
@@ -787,6 +1259,10 @@ export const FavoritesManager = {
     uiHooks.updateFavoriteButton(anime.id);
     uiHooks.renderFavoritos();
     UserManager.syncWatchedStatsFromLedger(true);
+    uiHooks.renderSmartRecommendations();
+    if (!options.skipSync) {
+      void OAuthScrobbleManager.scrobbleAnime(savedEntry, { status: cleanStatus, silent: options.silent });
+    }
   },
   remove(id: number | string, options: { silent?: boolean } = {}): boolean {
     if (!id) return false;
@@ -810,6 +1286,7 @@ export const FavoritesManager = {
     uiHooks.updateFavoriteButton(id);
     uiHooks.renderFavoritos();
     UserManager.syncWatchedStatsFromLedger(true);
+    uiHooks.renderSmartRecommendations();
     return true;
   },
   autoUpdateStatusOnWatch(seasonOrAnimeId: number | string, totalEpisodes = 0): void {
@@ -834,9 +1311,11 @@ export const FavoritesManager = {
       uiHooks.updateFavoriteButton(item.id);
       uiHooks.renderFavoritos();
       UserManager.renderProfile();
+      uiHooks.renderSmartRecommendations();
       if (nWin.firebaseSync?.scheduleSync) {
         nWin.firebaseSync.scheduleSync('favorites_auto_status');
       }
+      void OAuthScrobbleManager.scrobbleAnime(list[idx], { status: nextStatus, silent: true });
     }
   },
   toggle(anime: any, defaultStatus: AnimeListStatus = 'watching'): void {
@@ -862,6 +1341,8 @@ export const FavoritesManager = {
       uiHooks.updateFavoriteButton(anime.id);
       uiHooks.renderFavoritos();
       UserManager.syncWatchedStatsFromLedger(true);
+      uiHooks.renderSmartRecommendations();
+      void OAuthScrobbleManager.scrobbleAnime(entry, { status: cleanStatus, silent: true });
     }
   },
   importList(animes: any[]): number {
@@ -904,8 +1385,89 @@ export const MangaFavoritesManager = {
       return [];
     }
   },
+  getEntry(id: number | string): any | null {
+    if (!id) return null;
+    return this.getAll().find(item => String(item.id) === String(id)) || null;
+  },
   isFavorite(id: number | string): boolean {
     return this.getAll().some(item => String(item.id) === String(id));
+  },
+  setRatingAndNotes(
+    mangaOrId: any,
+    patch: { userScore?: number | null; userReview?: string; userNotes?: string }
+  ): boolean {
+    const targetId = typeof mangaOrId === 'object' ? mangaOrId?.id : mangaOrId;
+    if (!targetId) return false;
+    const list = this.getAll();
+    let idx = list.findIndex(item => String(item.id) === String(targetId));
+    const now = Date.now();
+
+    if (idx < 0) {
+      if (typeof mangaOrId !== 'object' || !mangaOrId?.id) return false;
+      const compact = compactMangaEntry(mangaOrId) || mangaOrId;
+      list.unshift(compact);
+      idx = 0;
+    }
+
+    const cur = { ...list[idx] };
+    if (patch.userScore !== undefined) {
+      const cleanScore = sanitizeUserScore(patch.userScore);
+      if (cleanScore === null) delete cur.userScore;
+      else cur.userScore = cleanScore;
+      cur.scoreUpdatedAt = now;
+    }
+    if (patch.userReview !== undefined) {
+      const cleanRev = sanitizeShortText(patch.userReview, 280);
+      if (!cleanRev) delete cur.userReview;
+      else cur.userReview = cleanRev;
+      cur.scoreUpdatedAt = now;
+    }
+    if (patch.userNotes !== undefined) {
+      const cleanNotes = sanitizeShortText(patch.userNotes, 500);
+      if (!cleanNotes) delete cur.userNotes;
+      else cur.userNotes = cleanNotes;
+    }
+
+    list[idx] = compactMangaEntry(cur) || cur;
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(list))) {
+      showToast('No hay espacio local suficiente.');
+      return false;
+    }
+    if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('manga_rating');
+    }
+    uiHooks.updateMangaFavoriteButton(targetId);
+    UserManager.renderProfile();
+    if (state.tabActual === 'favoritos') uiHooks.renderFavoritos();
+    return true;
+  },
+  toggleCustomList(mangaOrId: any, listId: string): boolean {
+    const targetId = typeof mangaOrId === 'object' ? mangaOrId?.id : mangaOrId;
+    if (!targetId || !listId) return false;
+    const list = this.getAll();
+    let idx = list.findIndex(item => String(item.id) === String(targetId));
+    if (idx < 0) {
+      if (typeof mangaOrId !== 'object' || !mangaOrId?.id) return false;
+      const compact = compactMangaEntry(mangaOrId) || mangaOrId;
+      list.unshift(compact);
+      idx = 0;
+    }
+
+    const cur = { ...list[idx] };
+    const { nextIds, added } = toggleItemInCustomList(cur.customListIds, listId);
+    cur.customListIds = sanitizeCustomListIds(nextIds);
+    list[idx] = compactMangaEntry(cur) || cur;
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(list))) {
+      showToast('No hay espacio local suficiente.');
+      return false;
+    }
+    if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('manga_custom_list');
+    }
+    uiHooks.updateMangaFavoriteButton(targetId);
+    UserManager.renderProfile();
+    if (state.tabActual === 'favoritos') uiHooks.renderFavoritos();
+    return added;
   },
   toggle(manga: any): void {
     if (!manga) return;
@@ -977,6 +1539,13 @@ export const AnimeWatchedManager = {
       } else if (nWin.firebaseSync?.scheduleSync) {
         nWin.firebaseSync.scheduleSync('anime_watched');
       }
+      const targetAnime = FavoritesManager.getEntry(seasonId) || (String(state.anime?.id) === String(seasonId) ? state.anime : null);
+      if (targetAnime) {
+        void OAuthScrobbleManager.scrobbleAnime(targetAnime, {
+          progress: nextArr.length,
+          silent: true
+        });
+      }
     }
   },
   markUpTo(
@@ -1007,6 +1576,13 @@ export const AnimeWatchedManager = {
       } else if (nWin.firebaseSync?.scheduleSync) {
         nWin.firebaseSync.scheduleSync('anime_watched');
       }
+      const targetAnime = FavoritesManager.getEntry(seasonId) || (String(state.anime?.id) === String(seasonId) ? state.anime : null);
+      if (targetAnime) {
+        void OAuthScrobbleManager.scrobbleAnime(targetAnime, {
+          progress: nextArr.length,
+          silent: true
+        });
+      }
     }
   },
   markAll(
@@ -1033,6 +1609,13 @@ export const AnimeWatchedManager = {
       nWin.firebaseSync.updateCloudAnimeWatchedOverwrite(seasonId, nextArr).catch(() => {});
     } else if (nWin.firebaseSync?.scheduleSync) {
       nWin.firebaseSync.scheduleSync('anime_watched');
+    }
+    const targetAnime = FavoritesManager.getEntry(seasonId) || (String(state.anime?.id) === String(seasonId) ? state.anime : null);
+    if (targetAnime) {
+      void OAuthScrobbleManager.scrobbleAnime(targetAnime, {
+        progress: nextArr.length,
+        silent: true
+      });
     }
   }
 };

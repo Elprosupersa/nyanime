@@ -48,6 +48,7 @@ export const ALLOWED_PROXY_DOMAINS: readonly string[] = [
   '*.jikan.moe',
   'anilist.co',
   '*.anilist.co',
+  'api.aniskip.com',
   'myanimelist.net',
   '*.myanimelist.net',
   'animeflv.net',

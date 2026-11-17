@@ -47,7 +47,7 @@ service cloud.firestore {
 
     function isValidFavoriteAnime(data) {
       return data.keys().hasAll(['uid', 'animeId', 'title', 'coverImage', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'animeId', 'title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'listStatus', 'listUpdatedAt', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'animeId', 'title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'idMal', 'averageScore', 'listStatus', 'listUpdatedAt', 'userScore', 'userReview', 'userNotes', 'scoreUpdatedAt', 'customListIds', 'createdAt', 'updatedAt'])
         && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
         && data.animeId is int && data.animeId >= 0
         && data.title is map
@@ -56,15 +56,22 @@ service cloud.firestore {
         && (!('status' in data) || (data.status is string && data.status.size() <= 40))
         && (!('episodes' in data) || (data.episodes is int && data.episodes >= 0 && data.episodes <= 100000))
         && (!('genres' in data) || (data.genres is list && data.genres.size() <= 20))
+        && (!('idMal' in data) || (data.idMal is int && data.idMal >= 0 && data.idMal <= 10000000))
+        && (!('averageScore' in data) || (data.averageScore is int && data.averageScore >= 0 && data.averageScore <= 100))
         && (!('listStatus' in data) || data.listStatus in ['watching', 'plan_to_watch', 'completed', 'on_hold', 'dropped'])
         && (!('listUpdatedAt' in data) || (data.listUpdatedAt is int && data.listUpdatedAt >= 0))
+        && (!('userScore' in data) || (data.userScore is int && data.userScore >= 1 && data.userScore <= 10))
+        && (!('userReview' in data) || (data.userReview is string && data.userReview.size() <= 280))
+        && (!('userNotes' in data) || (data.userNotes is string && data.userNotes.size() <= 500))
+        && (!('scoreUpdatedAt' in data) || (data.scoreUpdatedAt is int && data.scoreUpdatedAt >= 0))
+        && (!('customListIds' in data) || (data.customListIds is list && data.customListIds.size() <= 25 && (data.customListIds.size() == 0 || data.customListIds[0] is string)))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
 
     function isValidFavoriteManga(data) {
       return data.keys().hasAll(['uid', 'mangaId', 'title', 'cover', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'mangaId', 'title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'mangaId', 'title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'userScore', 'userReview', 'userNotes', 'scoreUpdatedAt', 'customListIds', 'createdAt', 'updatedAt'])
         && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
         && data.mangaId is string && data.mangaId.size() >= 1 && data.mangaId.size() <= 128
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 240
@@ -74,6 +81,11 @@ service cloud.firestore {
         && (!('score' in data) || (data.score is string && data.score.size() <= 16))
         && (!('status' in data) || (data.status is string && data.status.size() <= 40))
         && (!('year' in data) || (data.year is string && data.year.size() <= 16))
+        && (!('userScore' in data) || (data.userScore is int && data.userScore >= 1 && data.userScore <= 10))
+        && (!('userReview' in data) || (data.userReview is string && data.userReview.size() <= 280))
+        && (!('userNotes' in data) || (data.userNotes is string && data.userNotes.size() <= 500))
+        && (!('scoreUpdatedAt' in data) || (data.scoreUpdatedAt is int && data.scoreUpdatedAt >= 0))
+        && (!('customListIds' in data) || (data.customListIds is list && data.customListIds.size() <= 25 && (data.customListIds.size() == 0 || data.customListIds[0] is string)))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -114,14 +126,86 @@ service cloud.firestore {
 
     function isValidUserSettings(data) {
       return data.keys().hasAll(['uid', 'scheduleReminders', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'createdAt', 'updatedAt'])
         && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
         && data.scheduleReminders is list && data.scheduleReminders.size() <= 500
         && (!('readerBg' in data) || (data.readerBg is string && data.readerBg.size() <= 32))
         && (!('readerWidth' in data) || (data.readerWidth is string && data.readerWidth.size() <= 32))
         && (!('readerMode' in data) || (data.readerMode is string && data.readerMode.size() <= 32))
+        && (!('readerBrightness' in data) || (data.readerBrightness is int && data.readerBrightness >= 45 && data.readerBrightness <= 130))
+        && (!('readerContrast' in data) || (data.readerContrast is int && data.readerContrast >= 60 && data.readerContrast <= 140))
+        && (!('readerSepia' in data) || (data.readerSepia is int && data.readerSepia >= 0 && data.readerSepia <= 70))
+        && (!('readerContinuous' in data) || data.readerContinuous is bool)
+        && (!('autoSkipIntro' in data) || data.autoSkipIntro is bool)
+        && (!('autoSkipOutro' in data) || data.autoSkipOutro is bool)
+        && (!('autoScrobble' in data) || data.autoScrobble is bool)
+        && (!('pushEnabled' in data) || data.pushEnabled is bool)
+        && (!('weeklySummaryPush' in data) || data.weeklySummaryPush is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomList(data, listId) {
+      return data.keys().hasAll(['uid', 'listId', 'name', 'color', 'icon', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'listId', 'name', 'color', 'icon', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.listId is string && data.listId.size() >= 1 && data.listId.size() <= 64 && data.listId == listId
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 48
+        && data.color is string && data.color.size() >= 1 && data.color.size() <= 24
+        && data.icon is string && data.icon.size() >= 1 && data.icon.size() <= 16
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPushSubscriptionEntry(data, subId) {
+      return data.keys().hasAll(['uid', 'subId', 'endpoint', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'subId', 'endpoint', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.subId is string && data.subId.size() >= 1 && data.subId.size() <= 128 && data.subId == subId
+        && data.endpoint is string && data.endpoint.size() >= 8 && data.endpoint.size() <= 600
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWatchRoom(data, roomId) {
+      return data.keys().hasAll(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
+        && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 32 && data.roomId == roomId
+        && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
+        && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 80
+        && data.animeId is int && data.animeId >= 0
+        && data.animeTitle is string && data.animeTitle.size() >= 1 && data.animeTitle.size() <= 240
+        && data.seasonNum is int && data.seasonNum >= 1 && data.seasonNum <= 200
+        && data.episodeNum is int && data.episodeNum >= 1 && data.episodeNum <= 10000
+        && data.playbackState in ['playing', 'paused']
+        && data.playbackTime is number && data.playbackTime >= 0 && data.playbackTime <= 86400
+        && data.updatedAtMs is int && data.updatedAtMs >= 0
+        && data.status in ['active', 'closed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWatchRoomParticipant(data, roomId, participantId) {
+      return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid && participantId == request.auth.uid
+        && data.roomId is string && data.roomId == roomId
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.avatar is string && data.avatar.size() <= 40000
+        && data.lastSeenMs is int && data.lastSeenMs >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWatchRoomMessage(data, roomId) {
+      return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'text', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'text', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.roomId is string && data.roomId == roomId
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+        && data.avatar is string && data.avatar.size() <= 40000
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 280
+        && data.createdAt is timestamp;
     }
 
     function isValidUserSuggestion(data) {
@@ -159,7 +243,7 @@ service cloud.firestore {
     // Community Episode Comments
     match /episodes/{episodeKey}/comments/{commentId} {
       allow get: if isValidId(episodeKey) && isValidId(commentId) && isSignedIn();
-      allow list: if isValidId(episodeKey) && isSignedIn();
+      allow list: if isValidId(episodeKey) && isSignedIn() && existing().episodeKey == episodeKey;
       allow create: if isValidId(episodeKey) && isValidId(commentId)
         && isSignedIn()
         && isValidEpisodeComment(incoming(), episodeKey)
@@ -168,6 +252,69 @@ service cloud.firestore {
       allow delete: if isValidId(episodeKey) && isValidId(commentId)
         && isSignedIn()
         && existing().uid == request.auth.uid;
+    }
+
+    // Real-Time Watch Together Rooms
+    match /watch_rooms/{roomId} {
+      allow get: if isValidId(roomId) && isSignedIn();
+      allow list: if isSignedIn() && existing().hostUid == request.auth.uid;
+      allow create: if isValidId(roomId)
+        && isSignedIn()
+        && isValidWatchRoom(incoming(), roomId)
+        && incoming().hostUid == request.auth.uid
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(roomId)
+        && isSignedIn()
+        && existing().status == 'active'
+        && existing().hostUid == request.auth.uid
+        && isValidWatchRoom(incoming(), roomId)
+        && incoming().roomId == existing().roomId
+        && incoming().hostUid == existing().hostUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'updatedAt']);
+      allow delete: if isValidId(roomId)
+        && isSignedIn()
+        && existing().hostUid == request.auth.uid;
+
+      match /participants/{participantId} {
+        allow get: if isValidId(roomId) && isValidId(participantId) && isSignedIn();
+        allow list: if isValidId(roomId) && isSignedIn() && existing().roomId == roomId;
+        allow create: if isValidId(roomId) && isValidId(participantId)
+          && isSignedIn()
+          && isValidWatchRoomParticipant(incoming(), roomId, participantId)
+          && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(roomId) && isValidId(participantId)
+          && isSignedIn()
+          && existing().uid == request.auth.uid
+          && isValidWatchRoomParticipant(incoming(), roomId, participantId)
+          && incoming().uid == existing().uid
+          && incoming().roomId == existing().roomId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'lastSeenMs', 'updatedAt']);
+        allow delete: if isValidId(roomId) && isValidId(participantId)
+          && isSignedIn()
+          && existing().uid == request.auth.uid;
+      }
+
+      match /messages/{messageId} {
+        allow get: if isValidId(roomId) && isValidId(messageId) && isSignedIn();
+        allow list: if isValidId(roomId) && isSignedIn() && existing().roomId == roomId;
+        allow create: if isValidId(roomId) && isValidId(messageId)
+          && isSignedIn()
+          && isValidWatchRoomMessage(incoming(), roomId)
+          && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
+          && incoming().createdAt == request.time;
+        allow update: if false;
+        allow delete: if isValidId(roomId) && isValidId(messageId)
+          && isSignedIn()
+          && existing().uid == request.auth.uid;
+      }
     }
 
     // User Root Profile (Strictly private to the owner)
@@ -206,7 +353,7 @@ service cloud.firestore {
           && incoming().animeId == existing().animeId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'listStatus', 'listUpdatedAt', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'coverImage', 'format', 'status', 'episodes', 'genres', 'idMal', 'averageScore', 'listStatus', 'listUpdatedAt', 'userScore', 'userReview', 'userNotes', 'scoreUpdatedAt', 'customListIds', 'updatedAt']);
         allow delete: if isValidId(userId) && isValidId(favoriteId) && isOwner(userId);
       }
 
@@ -246,7 +393,7 @@ service cloud.firestore {
           && incoming().mangaId == existing().mangaId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'cover', 'flag', 'origLang', 'score', 'status', 'year', 'userScore', 'userReview', 'userNotes', 'scoreUpdatedAt', 'customListIds', 'updatedAt']);
         allow delete: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
       }
 
@@ -305,8 +452,48 @@ service cloud.firestore {
           && incoming().uid == existing().uid
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'updatedAt']);
         allow delete: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
+      }
+
+      // User Custom Lists Subcollection
+      match /custom_lists/{listId} {
+        allow get: if isValidId(userId) && isValidId(listId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(listId)
+          && isOwner(userId)
+          && isValidCustomList(incoming(), listId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(listId)
+          && isOwner(userId)
+          && isValidCustomList(incoming(), listId)
+          && incoming().uid == existing().uid
+          && incoming().listId == existing().listId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'color', 'icon', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(listId) && isOwner(userId);
+      }
+
+      // User Push Subscriptions Subcollection
+      match /push_subscriptions/{subId} {
+        allow get: if isValidId(userId) && isValidId(subId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(subId)
+          && isOwner(userId)
+          && isValidPushSubscriptionEntry(incoming(), subId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(subId)
+          && isOwner(userId)
+          && isValidPushSubscriptionEntry(incoming(), subId)
+          && incoming().uid == existing().uid
+          && incoming().subId == existing().subId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['endpoint', 'updatedAt']);
+        allow delete: if isValidId(userId) && isValidId(subId) && isOwner(userId);
       }
 
       // User Suggestions Subcollection

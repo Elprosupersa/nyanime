@@ -14,6 +14,7 @@ import {
   validateIncomingRequestOrigin,
   validateProxyTargetUrl
 } from './src/utils/proxySecurity.ts';
+import { handleFeatureApiRoutes } from './src/server/featureRoutes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -561,6 +562,9 @@ export function createAppServer(): http.Server {
     }
     if (urlObj.pathname === '/api/video-proxy') {
       await handleVideoProxy(req, res);
+      return;
+    }
+    if (await handleFeatureApiRoutes(req, res, urlObj)) {
       return;
     }
 

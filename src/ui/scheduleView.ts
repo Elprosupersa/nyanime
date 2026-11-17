@@ -9,6 +9,7 @@ import {
   state,
   uiHooks
 } from './appState.ts';
+import { collectDueAiringNotifications } from '../utils/pushNotifications.ts';
 
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DIAS_SEMANA_CORTOS = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
@@ -66,13 +67,12 @@ export const ScheduleReminderManager = {
 
 export async function checkAndNotifyAiringEpisodes(simulcasts: any[]): Promise<void> {
   if (!Array.isArray(simulcasts) || simulcasts.length === 0) return;
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
   const remindedIds = new Set(ScheduleReminderManager.getAll().map(Number));
-  if (remindedIds.size === 0) return;
+  const watchingFavs = FavoritesManager.getByStatus('watching');
+  if (remindedIds.size === 0 && watchingFavs.length === 0) return;
 
   const nowMs = Date.now();
-  const nowSec = Math.floor(nowMs / 1000);
   let notifiedMap: Record<string, number> = {};
   try {
     notifiedMap = JSON.parse(localStorage.getItem(NOTIFIED_AIRINGS_KEY) || '{}') || {};
@@ -86,50 +86,87 @@ export async function checkAndNotifyAiringEpisodes(simulcasts: any[]): Promise<v
     if ((notifiedMap[k] || 0) < weekAgoMs) delete notifiedMap[k];
   });
 
-  let updated = false;
-  for (const anime of simulcasts) {
-    if (!remindedIds.has(Number(anime.id))) continue;
-    const airingAt = Number(anime._weekAiringAt || 0);
-    if (!airingAt) continue;
-
-    // Newly aired or airing within +/- window (already aired in the last 6 hours up to 60s ahead)
-    const diff = nowSec - airingAt;
-    if (diff < -60 || diff > 6 * 3600) continue;
-
-    const epNum = anime._weekEpisode || anime.nextAiringEpisode?.episode || 1;
-    const key = `${anime.id}_ep_${epNum}`;
-    if (notifiedMap[key]) continue;
-
-    notifiedMap[key] = nowMs;
-    updated = true;
-
-    const title = anime.title?.english || anime.title?.romaji || 'Anime';
-    const notifTitle = `🔴 Nuevo episodio disponible: ${title}`;
-    const notifBody = `Episodio ${epNum} ya disponible para ver en NyAnime TV.`;
-
-    try {
-      if (navigator.serviceWorker?.ready) {
-        const reg = await navigator.serviceWorker.ready;
-        if (reg && typeof reg.showNotification === 'function') {
-          await reg.showNotification(notifTitle, {
-            body: notifBody,
-            icon: '/pwa-192x192.png',
-            tag: `nyanime-air-${key}`
-          });
-          continue;
-        }
-      }
-      new Notification(notifTitle, { body: notifBody, icon: '/pwa-192x192.png' });
-    } catch {
-      // Ignore notification sandbox restrictions
-    }
+  const simulcastById = new Map<number, any>();
+  for (const s of simulcasts) {
+    if (s?.id) simulcastById.set(Number(s.id), s);
   }
 
-  if (updated) {
-    try {
-      localStorage.setItem(NOTIFIED_AIRINGS_KEY, JSON.stringify(notifiedMap));
-    } catch {
-      // ignore
+  const reminders = Array.from(remindedIds)
+    .map((id) => {
+      const matched = simulcastById.get(id);
+      if (!matched) return null;
+      return {
+        animeId: id,
+        title: matched.title?.english || matched.title?.romaji || 'Anime',
+        episode: Number(matched._weekEpisode || matched.nextAiringEpisode?.episode || 1),
+        airingAt: Number(matched._weekAiringAt || matched.nextAiringEpisode?.airingAt || 0)
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => Boolean(r));
+
+  const enrichedWatching = watchingFavs.map((fav) => {
+    const matched = simulcastById.get(Number(fav.id));
+    if (matched) {
+      return {
+        ...fav,
+        nextAiringEpisode: {
+          episode: Number(matched._weekEpisode || fav.nextAiringEpisode?.episode || 1),
+          airingAt: Number(matched._weekAiringAt || fav.nextAiringEpisode?.airingAt || 0)
+        }
+      };
+    }
+    return fav;
+  });
+
+  const due = collectDueAiringNotifications({
+    watchingAnimes: enrichedWatching,
+    reminders,
+    alreadyNotifiedKeys: new Set(Object.keys(notifiedMap)),
+    nowMs,
+    windowHours: 12
+  });
+
+  if (due.length === 0) return;
+
+  for (const item of due) {
+    notifiedMap[item.dedupKey] = nowMs;
+  }
+  try {
+    localStorage.setItem(NOTIFIED_AIRINGS_KEY, JSON.stringify(notifiedMap));
+  } catch {
+    // ignore
+  }
+
+  if (nWin.NyAnimePWA?.dispatchAiringPush) {
+    void nWin.NyAnimePWA.dispatchAiringPush(
+      due.map((d) => ({
+        animeId: d.animeId,
+        title: d.title,
+        episode: d.episode,
+        body: d.body
+      }))
+    );
+  }
+
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    for (const item of due) {
+      const notifTitle = `🔴 Nuevo episodio disponible: ${item.title}`;
+      try {
+        if (navigator.serviceWorker?.ready) {
+          const reg = await navigator.serviceWorker.ready;
+          if (reg && typeof reg.showNotification === 'function') {
+            await reg.showNotification(notifTitle, {
+              body: item.body,
+              icon: '/pwa-192x192.png',
+              tag: `nyanime-air-${item.dedupKey}`
+            });
+            continue;
+          }
+        }
+        new Notification(notifTitle, { body: item.body, icon: '/pwa-192x192.png' });
+      } catch {
+        // Ignore notification sandbox restrictions
+      }
     }
   }
 }

@@ -98,6 +98,14 @@
           "type": "array",
           "description": "Lista acotada de géneros del anime."
         },
+        "idMal": {
+          "type": "integer",
+          "description": "ID opcional en MyAnimeList para AniSkip y Scrobble."
+        },
+        "averageScore": {
+          "type": "integer",
+          "description": "Puntuación promedio global (0-100)."
+        },
         "listStatus": {
           "type": "string",
           "enum": ["watching", "plan_to_watch", "completed", "on_hold", "dropped"],
@@ -106,6 +114,27 @@
         "listUpdatedAt": {
           "type": "integer",
           "description": "Marca de tiempo de última actualización de categoría."
+        },
+        "userScore": {
+          "type": "integer",
+          "description": "Calificación personal del usuario (1 a 10)."
+        },
+        "userReview": {
+          "type": "string",
+          "maxLength": 280,
+          "description": "Reseña corta del usuario."
+        },
+        "userNotes": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Notas privadas sobre el anime."
+        },
+        "scoreUpdatedAt": {
+          "type": "integer"
+        },
+        "customListIds": {
+          "type": "array",
+          "description": "IDs de listas personalizadas a las que pertenece."
         },
         "createdAt": {
           "type": "string",
@@ -159,6 +188,23 @@
         "year": {
           "type": "string",
           "maxLength": 16
+        },
+        "userScore": {
+          "type": "integer"
+        },
+        "userReview": {
+          "type": "string",
+          "maxLength": 280
+        },
+        "userNotes": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "scoreUpdatedAt": {
+          "type": "integer"
+        },
+        "customListIds": {
+          "type": "array"
         },
         "createdAt": {
           "type": "string",
@@ -303,6 +349,33 @@
           "type": "string",
           "maxLength": 32
         },
+        "readerBrightness": {
+          "type": "integer"
+        },
+        "readerContrast": {
+          "type": "integer"
+        },
+        "readerSepia": {
+          "type": "integer"
+        },
+        "readerContinuous": {
+          "type": "boolean"
+        },
+        "autoSkipIntro": {
+          "type": "boolean"
+        },
+        "autoSkipOutro": {
+          "type": "boolean"
+        },
+        "autoScrobble": {
+          "type": "boolean"
+        },
+        "pushEnabled": {
+          "type": "boolean"
+        },
+        "weeklySummaryPush": {
+          "type": "boolean"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -410,6 +483,205 @@
         }
       },
       "required": ["uid", "seasonId", "watchedEpisodes", "updatedAtMs", "createdAt", "updatedAt"]
+    },
+    "CustomList": {
+      "title": "CustomList",
+      "description": "Lista o colección personalizada creada por el usuario.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "listId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "color": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "listId", "name", "color", "icon", "createdAt", "updatedAt"]
+    },
+    "PushSubscriptionEntry": {
+      "title": "PushSubscriptionEntry",
+      "description": "Registro de suscripción Web Push del navegador/dispositivo del usuario.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "subId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "endpoint": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "subId", "endpoint", "createdAt", "updatedAt"]
+    },
+    "WatchRoom": {
+      "title": "WatchRoom",
+      "description": "Sala compartida en tiempo real para ver episodios sincronizados con amigos.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "animeId": {
+          "type": "integer"
+        },
+        "animeTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "seasonNum": {
+          "type": "integer"
+        },
+        "episodeNum": {
+          "type": "integer"
+        },
+        "playbackState": {
+          "type": "string",
+          "enum": ["playing", "paused"]
+        },
+        "playbackTime": {
+          "type": "number"
+        },
+        "updatedAtMs": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "closed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["roomId", "hostUid", "hostName", "animeId", "animeTitle", "seasonNum", "episodeNum", "playbackState", "playbackTime", "updatedAtMs", "status", "createdAt", "updatedAt"]
+    },
+    "WatchRoomParticipant": {
+      "title": "WatchRoomParticipant",
+      "description": "Participante conectado en una sala compartida.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 40000
+        },
+        "lastSeenMs": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "roomId", "displayName", "avatar", "lastSeenMs", "createdAt", "updatedAt"]
+    },
+    "WatchRoomMessage": {
+      "title": "WatchRoomMessage",
+      "description": "Mensaje en vivo dentro del mini-chat de una sala compartida.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 40000
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "roomId", "displayName", "avatar", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -439,7 +711,15 @@
     },
     "/users/{userId}/settings/{settingId}": {
       "schema": { "$ref": "#/entities/UserSettings" },
-      "description": "Preferencias del lector y recordatorios de emisión."
+      "description": "Preferencias del lector, reproducción y recordatorios de emisión."
+    },
+    "/users/{userId}/custom_lists/{listId}": {
+      "schema": { "$ref": "#/entities/CustomList" },
+      "description": "Listas o colecciones temáticas personalizadas del usuario."
+    },
+    "/users/{userId}/push_subscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/PushSubscriptionEntry" },
+      "description": "Suscripciones Web Push registradas por el usuario."
     },
     "/users/{userId}/suggestions/{suggestionId}": {
       "schema": { "$ref": "#/entities/UserSuggestion" },
@@ -448,6 +728,18 @@
     "/episodes/{episodeKey}/comments/{commentId}": {
       "schema": { "$ref": "#/entities/EpisodeComment" },
       "description": "Comentarios reales en tiempo real por episodio."
+    },
+    "/watch_rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/WatchRoom" },
+      "description": "Salas en tiempo real de Watch Together."
+    },
+    "/watch_rooms/{roomId}/participants/{participantId}": {
+      "schema": { "$ref": "#/entities/WatchRoomParticipant" },
+      "description": "Participantes activos en una sala Watch Together."
+    },
+    "/watch_rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/WatchRoomMessage" },
+      "description": "Mensajes en tiempo real de una sala Watch Together."
     }
   }
 }

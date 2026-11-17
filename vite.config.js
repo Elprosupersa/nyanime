@@ -11,6 +11,7 @@ import {
   validateIncomingRequestOrigin,
   validateProxyTargetUrl
 } from './src/utils/proxySecurity.ts';
+import { handleFeatureApiRoutes } from './src/server/featureRoutes.ts';
 
 function nyanimeServerProxyPlugin() {
   const apiLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
@@ -59,6 +60,21 @@ function nyanimeServerProxyPlugin() {
   };
 
   const attachMiddleware = (middlewares) => {
+    middlewares.use(async (req, res, next) => {
+      try {
+        const rawUrl = req.url || '/';
+        if (!rawUrl.startsWith('/api/auth/') && !rawUrl.startsWith('/api/push/')) {
+          next();
+          return;
+        }
+        const urlObj = new URL(rawUrl, 'http://localhost:3000');
+        const handled = await handleFeatureApiRoutes(req, res, urlObj);
+        if (!handled) next();
+      } catch (err) {
+        next(err);
+      }
+    });
+
     middlewares.use('/api/proxy', async (req, res) => {
       if (!applyStrictCors(req, res)) return;
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -523,7 +539,7 @@ export default defineConfig(({ command }) => {
       nyanimeServerProxyPlugin(),
       VitePWA({
         registerType: 'prompt',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'sw-push.js'],
         manifest: {
           id: '/',
           name: 'NyAnime TV',
@@ -557,6 +573,7 @@ export default defineConfig(({ command }) => {
           ]
         },
         workbox: {
+          importScripts: ['/sw-push.js'],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           globIgnores: ['assets/aistudio/**', 'assets/aistudio/**/*', 'legacy_archive/**', 'legacy_archive/**/*'],
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

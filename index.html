@@ -83,6 +83,21 @@
       <div class="loader"><div class="spinner"></div></div>
     </div>
 
+    <div id="section-reco-because" class="hide">
+      <div class="section-title">
+        <div class="section-title-left" id="reco-because-title">Porque viste...</div>
+      </div>
+      <div class="h-scroll" id="lista-reco-because"></div>
+    </div>
+
+    <div id="section-reco-library" class="hide">
+      <div class="section-title">
+        <div class="section-title-left">Similares en tu lista</div>
+        <button type="button" class="section-title-action" onclick="cambiarTab('perfil')">Biblioteca →</button>
+      </div>
+      <div class="h-scroll" id="lista-reco-library"></div>
+    </div>
+
     <div class="nav-spacer"></div>
   </div>
 
@@ -423,6 +438,8 @@
       <section id="profile-panel-biblioteca" class="profile-panel" aria-label="Mi Biblioteca categorizada">
         <div class="profile-filter-chips" id="profile-library-filter-tabs"></div>
 
+        <div class="profile-custom-lists-bar" id="profile-custom-lists-bar"></div>
+
         <div class="profile-lib-toolbar">
           <div class="profile-lib-search-wrap">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
@@ -430,6 +447,7 @@
           </div>
           <select id="profile-library-sort" class="profile-lib-sort" aria-label="Ordenar biblioteca" onchange="onProfileLibrarySortChange(this.value)">
             <option value="recent">Más recientes</option>
+            <option value="score">Mejor puntuación ★</option>
             <option value="title">Título A–Z</option>
             <option value="progress">Mayor progreso</option>
           </select>
@@ -440,6 +458,14 @@
 
       <!-- PANEL 2: ESTADÍSTICAS Y ACTIVIDAD -->
       <section id="profile-panel-actividad" class="profile-panel hide" aria-label="Estadísticas y actividad">
+        <div class="oled-card profile-card-flat" id="card-profile-ratings" style="margin-bottom:14px;">
+          <div class="oled-card-title" style="justify-content:space-between; width:100%;">
+            <span>⭐ Calificaciones y Reseñas</span>
+            <button type="button" class="oled-btn-secondary" style="padding:6px 10px; font-size:11px;" onclick="abrirModalResumenSemanal()">📊 Resumen Semanal</button>
+          </div>
+          <div id="profile-ratings-summary"></div>
+        </div>
+
         <div class="profile-2col-grid">
           <div class="oled-card profile-card-flat">
             <div class="oled-card-title">Distribución de Biblioteca Anime</div>
@@ -537,6 +563,15 @@
           </div>
         </div>
 
+        <!-- TARJETA OLED: SCROBBLING ANILIST / MAL (OAUTH) -->
+        <div class="oled-card profile-card-flat" id="card-oauth-scrobble" style="margin-bottom:14px;">
+          <div class="oled-card-title">🔄 Sincronización Bidireccional (AniList / MAL)</div>
+          <div class="oled-card-desc">
+            Conecta tus cuentas por OAuth para actualizar automáticamente tu progreso, estado y nota (1–10) en AniList y MyAnimeList al ver cada episodio.
+          </div>
+          <div id="oauth-scrobble-container"></div>
+        </div>
+
         <!-- TARJETA OLED: BACKUP Y RESTAURACIÓN JSON -->
         <div class="oled-card profile-card-flat" id="card-backup-json">
           <div class="oled-card-title">
@@ -582,6 +617,15 @@
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- TARJETA OLED: NOTIFICACIONES PUSH Y RESUMEN SEMANAL -->
+        <div class="oled-card profile-card-flat" id="card-web-push" style="margin-bottom:14px;">
+          <div class="oled-card-title">🔔 Alertas Push de Emisión y Resumen Semanal</div>
+          <div class="oled-card-desc">
+            Recibe notificaciones en tu celular cuando se estrene un episodio nuevo de tus animes en "Viendo" o marcados en el calendario, junto con tu resumen semanal.
+          </div>
+          <div id="web-push-status-body"></div>
         </div>
 
         <div class="profile-menu">
@@ -694,6 +738,7 @@
       </div>
 
       <div class="det-library-status-bar" id="det-library-status-bar"></div>
+      <div class="det-personal-panel" id="det-personal-panel"></div>
 
       <div class="crunchy-season-wrap" id="det-temporadas" style="display:none;"></div>
       <div class="range-chips" id="det-rangos"></div>
@@ -773,6 +818,8 @@
         <span id="mihon-btn-download-text">Caché</span>
       </button>
     </div>
+
+    <div class="det-personal-panel mihon-personal-panel" id="manga-det-personal-panel"></div>
 
     <div class="mihon-synopsis-box">
       <div class="mihon-synopsis-text" id="manga-det-sinopsis">...</div>
@@ -887,6 +934,9 @@
           <a class="btn-alt-source" id="btn-open-external-stream" href="#" target="_blank" rel="noopener noreferrer" style="display:none;" title="Abrir reproductor directo en nueva pestaña">
             <span>↗ Abrir</span>
           </a>
+          <button type="button" class="btn-alt-source" id="btn-skip-85s" onclick="saltarSegundosPlayer(85)" title="Adelantar 85 segundos (Intro OP)">⏩ +85s</button>
+          <button type="button" class="btn-alt-source" id="btn-autoskip-toggle" onclick="toggleAutoSkipIntro()" title="Activar/desactivar auto-salto de Intro/Outro">Auto-Salto: OFF</button>
+          <button type="button" class="btn-alt-source" id="btn-watch-together" onclick="toggleWatchTogetherPanel()" title="Ver sincronizado con amigos">👥 Watch Together</button>
           <button type="button" class="btn-alt-source" id="btn-pip-toggle" onclick="togglePictureInPicture()" title="Mini reproductor flotante (Picture-in-Picture)">PiP</button>
           <button type="button" class="btn-alt-source" id="btn-copy-stream" onclick="copiarEnlaceStreaming()" title="Copiar enlace directo">
             <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
@@ -902,6 +952,8 @@
           </button>
         </div>
       </div>
+
+      <section id="watch-together-panel" class="watch-together-panel hide" aria-label="Sala Compartida Watch Together"></section>
 
       <div class="ep-nav-header">Todos los episodios</div>
       <div class="episodes-list" id="rep-lista-episodios"></div>
@@ -958,6 +1010,11 @@
 
     <div class="lector-content" id="lector-content"></div>
 
+    <div class="lector-spread-controls hide" id="lector-spread-controls" onclick="event.stopPropagation()">
+      <button type="button" class="lector-spread-nav-btn" id="btn-spread-left" onclick="navegarSpreadLector('ArrowLeft', event)" aria-label="Página izquierda">◀</button>
+      <button type="button" class="lector-spread-nav-btn" id="btn-spread-right" onclick="navegarSpreadLector('ArrowRight', event)" aria-label="Página derecha">▶</button>
+    </div>
+
     <div class="lector-floating-hud" id="lector-floating-hud">
       <button type="button" class="lector-hud-btn" id="btn-lector-prev" onclick="navegarCapituloLector(-1, event)">⏮ Ant</button>
       <div class="lector-hud-page" id="lector-page-indicator">📄 1 / 1 · 0%</div>
@@ -977,17 +1034,25 @@
         <span style="font-weight:800; font-size:15px; color:#fff;">⚙️ Ajustes del Lector</span>
         <button type="button" class="btn-circle" style="width:30px; height:30px;" onclick="cerrarAjustesLector()" aria-label="Cerrar ajustes del lector">✕</button>
       </div>
-      <div style="display:flex; flex-direction:column; gap:14px; margin-top:14px;">
+      <div style="display:flex; flex-direction:column; gap:14px; margin-top:14px; max-height:66vh; overflow-y:auto;">
         <div>
-          <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">MODO DE LECTURA</div>
-          <div style="display:flex; gap:8px;">
-            <button type="button" class="chip active" id="mode-webtoon-btn" onclick="setReaderMode('webtoon')">📜 Webtoon Continuo</button>
+          <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">MODO Y DIRECCIÓN DE LECTURA</div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="chip active" id="mode-webtoon-btn" onclick="setReaderMode('webtoon')">📜 Webtoon Cascada</button>
             <button type="button" class="chip" id="mode-ltr-btn" onclick="setReaderMode('ltr')">📖 Paginado (LTR)</button>
+            <button type="button" class="chip" id="mode-rtl-btn" onclick="setReaderMode('rtl')">🇯🇵 Manga Tradicional (RTL)</button>
+            <button type="button" class="chip" id="mode-double-btn" onclick="setReaderMode('double')">📖 Doble Página</button>
           </div>
         </div>
         <div>
+          <label class="reader-toggle-row">
+            <input type="checkbox" id="reader-continuous-toggle" checked onchange="setReaderContinuousChapter(this.checked)">
+            <span>Lectura continua entre capítulos (autocarga el siguiente al finalizar)</span>
+          </label>
+        </div>
+        <div>
           <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">COLOR DE FONDO</div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="chip active" id="bg-oled-btn" onclick="setReaderBg('#000000')">🖤 OLED Black</button>
             <button type="button" class="chip" id="bg-dark-btn" onclick="setReaderBg('#0d1117')">🩶 Gris Oscuro</button>
             <button type="button" class="chip" id="bg-light-btn" onclick="setReaderBg('#ffffff')">🤍 Blanco</button>
@@ -995,9 +1060,29 @@
         </div>
         <div>
           <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">AJUSTE DE ANCHO</div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="chip active" id="width-full-btn" onclick="setReaderWidth('100%')">100% Pantalla</button>
             <button type="button" class="chip" id="width-800-btn" onclick="setReaderWidth('800px')">800px Centrado</button>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:12px; font-weight:700; color:#94a3b8;">FILTROS NOCTURNOS</span>
+            <button type="button" class="section-title-action" onclick="resetReaderFilters()">Restablecer</button>
+          </div>
+          <div class="reader-filter-sliders">
+            <label class="reader-slider-row">
+              <span>Brillo <strong id="reader-brightness-val">100%</strong></span>
+              <input type="range" id="reader-brightness-slider" min="45" max="130" value="100" oninput="setReaderFilter('brightness', this.value)">
+            </label>
+            <label class="reader-slider-row">
+              <span>Contraste <strong id="reader-contrast-val">100%</strong></span>
+              <input type="range" id="reader-contrast-slider" min="60" max="140" value="100" oninput="setReaderFilter('contrast', this.value)">
+            </label>
+            <label class="reader-slider-row">
+              <span>Filtro Cálido Nocturno <strong id="reader-sepia-val">0%</strong></span>
+              <input type="range" id="reader-sepia-slider" min="0" max="70" value="0" oninput="setReaderFilter('sepia', this.value)">
+            </label>
           </div>
         </div>
       </div>

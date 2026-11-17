@@ -32,12 +32,31 @@ import {
   getOfflineMangaChapterPagesByAliases,
   getOfflineMangaChaptersForSeries
 } from '../services/offline.ts';
+import {
+  type MangaNightFilters,
+  type MangaReaderMode,
+  DEFAULT_NIGHT_FILTERS,
+  buildMangaSpreads,
+  buildReaderFilterCss,
+  clampNightFilters,
+  formatSpreadLabel,
+  normalizeMangaReaderMode,
+  stepSpreadIndex
+} from '../utils/mangaReaderHelpers.ts';
 
 let lectorHudVisible = true;
-const readerCurrentSettings: { mode: string; bg: string; width: string } = {
+const readerCurrentSettings: {
+  mode: MangaReaderMode;
+  bg: string;
+  width: string;
+  continuousChapter: boolean;
+  filters: MangaNightFilters;
+} = {
   mode: 'webtoon',
   bg: '#000000',
-  width: '100%'
+  width: '100%',
+  continuousChapter: true,
+  filters: { ...DEFAULT_NIGHT_FILTERS }
 };
 
 let readerZoomLevel = 1.0;
@@ -49,6 +68,11 @@ let lastSavedPageWriteAt = 0;
 let activeReaderBlobUrls: string[] = [];
 let readerCurrentOfflineManifestId: string | null = null;
 let isReaderCachingInFlight = false;
+let activeReaderPages: string[] = [];
+let activeReaderSaverPages: string[] = [];
+let activeSpreadIndex = 0;
+let continuousChapterArmed = false;
+let isContinuousAdvancing = false;
 let lastResolvedReaderPages: {
   mangaId: string | number;
   chapterNum: number;
@@ -418,63 +442,10 @@ export async function abrirLectorManga(idx: number): Promise<void> {
     return;
   }
 
-  if (content) {
-    content.classList.add('mode-webtoon');
-    applyReaderZoom(1.0);
-    initReaderGestures();
-    const saverList: string[] = Array.isArray(resPages?.saverPages) ? resPages.saverPages : [];
-    const restorePage = Math.min(pages.length, Math.max(1, savedPageBeforeSave));
-    content.innerHTML = pages.map((url, i) => {
-      const pNum = i + 1;
-      const sUrl = saverList[i] || '';
-      const fastUrl = toFastImgUrl(url);
-      const fastSaver = sUrl ? toFastImgUrl(sUrl) : '';
-      let inId = '';
-      if (url.includes('identification=')) {
-        inId = url.split('identification=')[1].split('&')[0];
-      }
-      const isEager = pNum <= 4 || Math.abs(pNum - restorePage) <= 2;
-      return `
-        <div class="webtoon-page-wrap" id="page-wrap-${pNum}" style="background:${readerCurrentSettings.bg}; min-height:220px; position:relative;">
-          <div class="webtoon-page-skeleton" id="skel-${pNum}">
-            <div class="spinner" style="width:28px; height:28px;"></div>
-            <span>Cargando página ${pNum}...</span>
-          </div>
-          <img src="${fastUrl}"
-               data-raw-url="${escHtml(url)}"
-               data-orig-src="${escHtml(fastUrl)}"
-               data-saver-src="${escHtml(fastSaver)}"
-               data-inmanga-id="${escHtml(inId)}"
-               data-page="${pNum}"
-               class="webtoon-page-img"
-               id="img-page-${pNum}"
-               loading="${isEager ? 'eager' : 'lazy'}"
-               ${pNum <= 2 ? 'fetchpriority="high"' : ''}
-               decoding="async"
-               style="max-width:${readerCurrentSettings.width};"
-               onload="this.parentElement.classList.add('loaded'); document.getElementById('skel-${pNum}')?.remove()"
-               onerror="handleMangaImgError(this)"/>
-        </div>
-      `;
-    }).join('');
-  }
-
-  const targetPage = Math.min(pages.length, Math.max(1, savedPageBeforeSave));
-  const initialPct = pages.length > 0 ? Math.round(((targetPage - 1) / pages.length) * 100) : 0;
-  if (pageInd) pageInd.textContent = `📄 ${targetPage} / ${pages.length} · ${initialPct}%`;
-
-  setupLectorPageObserver(pages.length);
-
-  if (targetPage > 1 && lector) {
-    requestAnimationFrame(() => {
-      const targetWrap = document.getElementById(`page-wrap-${targetPage}`);
-      if (targetWrap) {
-        lector.scrollTo({ top: Math.max(0, targetWrap.offsetTop - 8), behavior: 'auto' });
-        lastTrackedReaderPage = targetPage;
-        progressivePreloadReaderPages(targetPage, pages.length);
-      }
-    });
-  }
+  activeReaderPages = pages;
+  activeReaderSaverPages = Array.isArray(resPages?.saverPages) ? resPages.saverPages : [];
+  const restorePage = Math.min(pages.length, Math.max(1, savedPageBeforeSave));
+  renderActiveMangaReaderPages(restorePage);
 
   const nextCap = mangaUiState.capitulosLectorList[mangaUiState.capituloActualIdx + 1];
   if (nextCap && activeManga && !isOfflineServed && !isOfflineNow) {
@@ -482,6 +453,182 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       void prefetchCapituloObjetivoManga(activeManga, nextCap);
     }, 500);
   }
+}
+
+function buildReaderPageImageHtml(url: string, pNum: number, sUrl = '', isEager = true): string {
+  const fastUrl = toFastImgUrl(url);
+  const fastSaver = sUrl ? toFastImgUrl(sUrl) : '';
+  let inId = '';
+  if (url.includes('identification=')) {
+    inId = url.split('identification=')[1].split('&')[0];
+  }
+  return `
+    <div class="webtoon-page-wrap" id="page-wrap-${pNum}" style="background:${readerCurrentSettings.bg}; min-height:220px; position:relative;">
+      <div class="webtoon-page-skeleton" id="skel-${pNum}">
+        <div class="spinner" style="width:28px; height:28px;"></div>
+        <span>Cargando página ${pNum}...</span>
+      </div>
+      <img src="${fastUrl}"
+           data-raw-url="${escHtml(url)}"
+           data-orig-src="${escHtml(fastUrl)}"
+           data-saver-src="${escHtml(fastSaver)}"
+           data-inmanga-id="${escHtml(inId)}"
+           data-page="${pNum}"
+           class="webtoon-page-img"
+           id="img-page-${pNum}"
+           loading="${isEager ? 'eager' : 'lazy'}"
+           ${pNum <= 2 ? 'fetchpriority="high"' : ''}
+           decoding="async"
+           style="max-width:${readerCurrentSettings.width};"
+           onload="this.parentElement.classList.add('loaded'); document.getElementById('skel-${pNum}')?.remove()"
+           onerror="handleMangaImgError(this)"/>
+    </div>
+  `;
+}
+
+export function renderActiveMangaReaderPages(restorePage = 1): void {
+  const lector = document.getElementById('pantalla-lector');
+  const content = document.getElementById('lector-content');
+  const pageInd = document.getElementById('lector-page-indicator');
+  const spreadControls = document.getElementById('lector-spread-controls');
+  if (!content || activeReaderPages.length === 0) return;
+
+  const mode = readerCurrentSettings.mode;
+  content.classList.toggle('mode-webtoon', mode === 'webtoon');
+  content.classList.toggle('mode-ltr', mode === 'ltr');
+  content.classList.toggle('mode-rtl', mode === 'rtl');
+  content.classList.toggle('mode-double', mode === 'double');
+  content.style.filter = buildReaderFilterCss(readerCurrentSettings.filters);
+
+  applyReaderZoom(1.0);
+  initReaderGestures();
+  bindReaderKeyboardNavigation();
+
+  continuousChapterArmed = false;
+  isContinuousAdvancing = false;
+  setTimeout(() => {
+    continuousChapterArmed = true;
+  }, 750);
+
+  if (mode === 'webtoon') {
+    if (spreadControls) spreadControls.classList.add('hide');
+    const targetPage = Math.min(activeReaderPages.length, Math.max(1, restorePage));
+    content.innerHTML = activeReaderPages
+      .map((url, i) => {
+        const pNum = i + 1;
+        const isEager = pNum <= 4 || Math.abs(pNum - targetPage) <= 2;
+        return buildReaderPageImageHtml(url, pNum, activeReaderSaverPages[i] || '', isEager);
+      })
+      .join('');
+
+    const initialPct = activeReaderPages.length > 0 ? Math.round(((targetPage - 1) / activeReaderPages.length) * 100) : 0;
+    if (pageInd) pageInd.textContent = `📄 ${targetPage} / ${activeReaderPages.length} · ${initialPct}%`;
+    setupLectorPageObserver(activeReaderPages.length);
+
+    if (targetPage > 1 && lector) {
+      requestAnimationFrame(() => {
+        const targetWrap = document.getElementById(`page-wrap-${targetPage}`);
+        if (targetWrap) {
+          lector.scrollTo({ top: Math.max(0, targetWrap.offsetTop - 8), behavior: 'auto' });
+          lastTrackedReaderPage = targetPage;
+          progressivePreloadReaderPages(targetPage, activeReaderPages.length);
+        }
+      });
+    }
+    return;
+  }
+
+  // Paginated modes: ltr, rtl, double
+  if (lector) lector.onscroll = null;
+  if (spreadControls) spreadControls.classList.remove('hide');
+
+  const spreads = buildMangaSpreads(activeReaderPages, mode);
+  const targetPage = Math.min(activeReaderPages.length, Math.max(1, restorePage));
+  const matchedSpreadIdx = spreads.findIndex((s) => s.pageNumbers.includes(targetPage));
+  activeSpreadIndex = matchedSpreadIdx >= 0 ? matchedSpreadIdx : 0;
+  renderCurrentSpread();
+}
+
+function renderCurrentSpread(): void {
+  const content = document.getElementById('lector-content');
+  const pageInd = document.getElementById('lector-page-indicator');
+  const lector = document.getElementById('pantalla-lector');
+  if (!content || activeReaderPages.length === 0) return;
+
+  const spreads = buildMangaSpreads(activeReaderPages, readerCurrentSettings.mode);
+  if (spreads.length === 0) return;
+  activeSpreadIndex = Math.min(Math.max(0, activeSpreadIndex), spreads.length - 1);
+  const spread = spreads[activeSpreadIndex];
+  if (!spread) return;
+
+  const isRightToLeftOrder = readerCurrentSettings.mode === 'rtl' || readerCurrentSettings.mode === 'double';
+  const pageHtmlList = spread.pageNumbers.map((pNum) =>
+    buildReaderPageImageHtml(activeReaderPages[pNum - 1], pNum, activeReaderSaverPages[pNum - 1] || '', true)
+  );
+  const orderedHtml =
+    spread.pageNumbers.length === 2 && isRightToLeftOrder ? [...pageHtmlList].reverse().join('') : pageHtmlList.join('');
+
+  content.innerHTML = `<div class="lector-double-spread ${readerCurrentSettings.mode === 'double' ? 'is-double' : 'is-single'}">${orderedHtml}</div>`;
+  if (lector) lector.scrollTo({ top: 0, behavior: 'auto' });
+
+  const currentPage = spread.pageNumbers[0] || 1;
+  lastTrackedReaderPage = currentPage;
+  const pct = activeReaderPages.length > 0 ? Math.round(((spread.pageNumbers[spread.pageNumbers.length - 1]) / activeReaderPages.length) * 100) : 0;
+  if (pageInd) {
+    pageInd.textContent = `📖 ${formatSpreadLabel(spread, activeReaderPages.length)} · ${pct}%`;
+  }
+
+  const activeManga = getActiveManga();
+  const currentCap = mangaUiState.capitulosLectorList[mangaUiState.capituloActualIdx];
+  if (activeManga?.id && currentCap) {
+    MangaHistoryManager.savePageNumber(activeManga.id, currentCap.chapterNum, currentPage);
+  }
+}
+
+export function navegarSpreadLector(
+  dirKey: 'prev' | 'next' | 'ArrowLeft' | 'ArrowRight',
+  event?: Event
+): void {
+  if (event) event.stopPropagation();
+  if (readerCurrentSettings.mode === 'webtoon') return;
+  const spreads = buildMangaSpreads(activeReaderPages, readerCurrentSettings.mode);
+  if (spreads.length === 0) return;
+
+  const res = stepSpreadIndex(activeSpreadIndex, spreads.length, dirKey, readerCurrentSettings.mode);
+  if (res.boundary === 'end') {
+    if (readerCurrentSettings.continuousChapter && mangaUiState.capituloActualIdx + 1 < mangaUiState.capitulosLectorList.length) {
+      navegarCapituloLector(1);
+    } else {
+      mostrarToast('Has llegado al final del capítulo');
+    }
+    return;
+  }
+  if (res.boundary === 'start') {
+    if (readerCurrentSettings.continuousChapter && mangaUiState.capituloActualIdx > 0) {
+      navegarCapituloLector(-1);
+    } else {
+      mostrarToast('Estás en la primera página');
+    }
+    return;
+  }
+  activeSpreadIndex = res.nextIndex;
+  renderCurrentSpread();
+}
+
+function bindReaderKeyboardNavigation(): void {
+  if (nWin._nyMangaReaderKeyBound) return;
+  nWin._nyMangaReaderKeyBound = true;
+  document.addEventListener('keydown', (e) => {
+    const lector = document.getElementById('pantalla-lector');
+    if (!lector || lector.classList.contains('hide')) return;
+    if (readerCurrentSettings.mode === 'webtoon') return;
+    const tag = String(document.activeElement?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      navegarSpreadLector(e.key);
+    }
+  });
 }
 
 export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void> {
@@ -642,26 +789,9 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
               group: esGroupLabel
             };
           }
-          const titulo = document.getElementById('lector-titulo');
-          if (titulo) titulo.textContent = `${title || 'Manga'} · Cap. ${chap} (${esGroupLabel})`;
-          contentEl.innerHTML = esPages.map((url, i) => {
-            const pNum = i + 1;
-            const fastUrl = toFastImgUrl(url);
-            let inId = '';
-            if (url.includes('identification=')) inId = url.split('identification=')[1].split('&')[0];
-            return `
-              <div class="webtoon-page-wrap" id="page-wrap-${pNum}" style="background:${readerCurrentSettings.bg}; min-height:220px; position:relative;">
-                <div class="webtoon-page-skeleton" id="skel-${pNum}">
-                  <div class="spinner" style="width:28px; height:28px;"></div>
-                  <span>Cargando página ${pNum}...</span>
-                </div>
-                <img src="${fastUrl}" data-raw-url="${escHtml(url)}" data-inmanga-id="${escHtml(inId)}" data-orig-src="${escHtml(fastUrl)}" data-page="${pNum}" class="webtoon-page-img" id="img-page-${pNum}" loading="${pNum <= 3 ? 'eager' : 'lazy'}" style="max-width:${readerCurrentSettings.width};" onload="this.parentElement.classList.add('loaded'); document.getElementById('skel-${pNum}')?.remove()" onerror="handleMangaImgError(this)"/>
-              </div>
-            `;
-          }).join('');
-          const pageInd = document.getElementById('lector-page-indicator');
-          if (pageInd) pageInd.textContent = `📄 1 / ${esPages.length} · 0%`;
-          setupLectorPageObserver(esPages.length);
+          activeReaderPages = esPages;
+          activeReaderSaverPages = [];
+          renderActiveMangaReaderPages(1);
           return;
         }
       } catch {
@@ -821,6 +951,24 @@ export function setupLectorPageObserver(totalPages: number): void {
     }
 
     progressivePreloadReaderPages(currentPage, currentTotal);
+
+    if (
+      readerCurrentSettings.mode === 'webtoon' &&
+      readerCurrentSettings.continuousChapter &&
+      continuousChapterArmed &&
+      !isContinuousAdvancing &&
+      scrollHeight > 120 &&
+      scrollTop >= scrollHeight - 24 &&
+      mangaUiState.capituloActualIdx + 1 < mangaUiState.capitulosLectorList.length
+    ) {
+      isContinuousAdvancing = true;
+      const nextIdx = mangaUiState.capituloActualIdx + 1;
+      const nextCap = mangaUiState.capitulosLectorList[nextIdx];
+      mostrarToast(`📖 Cargando siguiente capítulo (Cap. ${nextCap?.chapter || nextIdx + 1})...`, 'info');
+      setTimeout(() => {
+        void abrirLectorManga(nextIdx);
+      }, 320);
+    }
   };
 
   progressivePreloadReaderPages(1, totalPages);
@@ -925,6 +1073,13 @@ export function applyReaderSettingsFromCloud(settings: any): void {
   if (settings.mode) setReaderMode(settings.mode, true);
   if (settings.bg) setReaderBg(settings.bg, true);
   if (settings.width) setReaderWidth(settings.width, true);
+  if (typeof settings.continuousChapter === 'boolean') {
+    setReaderContinuousChapter(settings.continuousChapter, true);
+  }
+  if (settings.filters && typeof settings.filters === 'object') {
+    readerCurrentSettings.filters = clampNightFilters(settings.filters);
+    syncReaderFilterControlsUI();
+  }
   persistReaderSettings(true);
 }
 
@@ -933,27 +1088,105 @@ export function loadSavedReaderSettings(): void {
     const raw = localStorage.getItem('nyanime_reader_settings_v1');
     if (raw) {
       applyReaderSettingsFromCloud(JSON.parse(raw));
+    } else {
+      syncReaderFilterControlsUI();
     }
   } catch {
-    // ignore
+    syncReaderFilterControlsUI();
   }
 }
 
 export function getReaderSettings() {
-  return { ...readerCurrentSettings };
+  return {
+    ...readerCurrentSettings,
+    filters: { ...readerCurrentSettings.filters }
+  };
+}
+
+function syncReaderFilterControlsUI(): void {
+  const f = clampNightFilters(readerCurrentSettings.filters);
+  const content = document.getElementById('lector-content');
+  if (content) content.style.filter = buildReaderFilterCss(f);
+
+  const bSlider = document.getElementById('reader-brightness-slider') as HTMLInputElement | null;
+  const cSlider = document.getElementById('reader-contrast-slider') as HTMLInputElement | null;
+  const sSlider = document.getElementById('reader-sepia-slider') as HTMLInputElement | null;
+  const bVal = document.getElementById('reader-brightness-val');
+  const cVal = document.getElementById('reader-contrast-val');
+  const sVal = document.getElementById('reader-sepia-val');
+  const contToggle = document.getElementById('reader-continuous-toggle') as HTMLInputElement | null;
+
+  if (bSlider) bSlider.value = String(f.brightness);
+  if (cSlider) cSlider.value = String(f.contrast);
+  if (sSlider) sSlider.value = String(f.sepia);
+  if (bVal) bVal.textContent = `${f.brightness}%`;
+  if (cVal) cVal.textContent = `${f.contrast}%`;
+  if (sVal) sVal.textContent = `${f.sepia}%`;
+  if (contToggle) contToggle.checked = Boolean(readerCurrentSettings.continuousChapter);
 }
 
 export function setReaderMode(mode: string, skipCloud = false): void {
-  readerCurrentSettings.mode = mode;
+  const cleanMode = normalizeMangaReaderMode(mode);
+  const prevMode = readerCurrentSettings.mode;
+  readerCurrentSettings.mode = cleanMode;
   const content = document.getElementById('lector-content');
   if (content) {
-    content.classList.toggle('mode-webtoon', mode === 'webtoon');
-    content.classList.toggle('mode-ltr', mode === 'ltr');
+    content.classList.toggle('mode-webtoon', cleanMode === 'webtoon');
+    content.classList.toggle('mode-ltr', cleanMode === 'ltr');
+    content.classList.toggle('mode-rtl', cleanMode === 'rtl');
+    content.classList.toggle('mode-double', cleanMode === 'double');
   }
-  document.querySelectorAll('#mode-webtoon-btn, #mode-ltr-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`mode-${mode}-btn`)?.classList.add('active');
+  document.querySelectorAll('#mode-webtoon-btn, #mode-ltr-btn, #mode-rtl-btn, #mode-double-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`mode-${cleanMode}-btn`)?.classList.add('active');
+
+  const lector = document.getElementById('pantalla-lector');
+  const isReaderOpen = Boolean(lector && !lector.classList.contains('hide'));
+  if (isReaderOpen && activeReaderPages.length > 0 && prevMode !== cleanMode) {
+    renderActiveMangaReaderPages(lastTrackedReaderPage || 1);
+  }
+
   persistReaderSettings(skipCloud);
-  if (!skipCloud) mostrarToast(mode === 'webtoon' ? '📜 Modo Webtoon Continuo Activado' : '📖 Modo Paginado Activado', 'success');
+  if (!skipCloud) {
+    const labelMap: Record<MangaReaderMode, string> = {
+      webtoon: '📜 Modo Webtoon Continuo Activado',
+      ltr: '📖 Paginado Izquierda → Derecha',
+      rtl: '🇯🇵 Manga Tradicional Derecha → Izquierda',
+      double: '📖 Lectura Doble Página (Manga)'
+    };
+    mostrarToast(labelMap[cleanMode], 'success');
+  }
+}
+
+export function setReaderContinuousChapter(enabled: boolean, skipCloud = false): void {
+  readerCurrentSettings.continuousChapter = Boolean(enabled);
+  const toggle = document.getElementById('reader-continuous-toggle') as HTMLInputElement | null;
+  if (toggle) toggle.checked = readerCurrentSettings.continuousChapter;
+  persistReaderSettings(skipCloud);
+  if (!skipCloud) {
+    mostrarToast(
+      readerCurrentSettings.continuousChapter
+        ? 'Lectura continua entre capítulos activada ✓'
+        : 'Lectura continua desactivada',
+      'info'
+    );
+  }
+}
+
+export function setReaderFilter(key: 'brightness' | 'contrast' | 'sepia', value: number | string, skipCloud = false): void {
+  const num = Number(value);
+  readerCurrentSettings.filters = clampNightFilters({
+    ...readerCurrentSettings.filters,
+    [key]: Number.isFinite(num) ? num : 100
+  });
+  syncReaderFilterControlsUI();
+  persistReaderSettings(skipCloud);
+}
+
+export function resetReaderFilters(skipCloud = false): void {
+  readerCurrentSettings.filters = { ...DEFAULT_NIGHT_FILTERS };
+  syncReaderFilterControlsUI();
+  persistReaderSettings(skipCloud);
+  if (!skipCloud) mostrarToast('Filtros nocturnos restablecidos', 'info');
 }
 
 export function setReaderBg(color: string, skipCloud = false): void {
@@ -987,6 +1220,10 @@ export function cerrarLector(): void {
   applyReaderZoom(1.0);
   const content = document.getElementById('lector-content');
   if (content) content.innerHTML = '';
+  activeReaderPages = [];
+  activeReaderSaverPages = [];
+  continuousChapterArmed = false;
+  document.getElementById('lector-spread-controls')?.classList.add('hide');
   revokeActiveReaderBlobUrls();
   readerCurrentOfflineManifestId = null;
   document.getElementById('pantalla-lector')?.classList.add('hide');

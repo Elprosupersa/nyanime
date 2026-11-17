@@ -1,12 +1,15 @@
 import {
   type AnimeListStatus,
   AnimeWatchedManager,
+  AppPreferencesManager,
+  CustomListsManager,
   DownloadManager,
   FavoritesManager,
   HistoryManager,
   MangaFavoritesManager,
   MangaHistoryManager,
   MangaReadStateManager,
+  OAuthScrobbleManager,
   UserManager,
   cambiarTab,
   cerrarModales,
@@ -29,18 +32,33 @@ import {
   getRankProgress,
   normalizeAnimeListStatus
 } from '../utils/profileStats.ts';
+import {
+  computeLibraryRatingsSummary,
+  sanitizeCustomListIds,
+  sanitizeUserScore
+} from '../utils/libraryEnhancements.ts';
+import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
+import { extractRoomCodeFromSearch } from '../utils/watchTogether.ts';
 import { formatRelativeTime } from '../utils/sanitize.ts';
 import * as OfflineService from '../services/offline.ts';
 
 type ProfileSectionTab = 'biblioteca' | 'actividad' | 'cuenta' | 'herramientas';
-type ProfileLibraryFilter = 'all' | AnimeListStatus | 'manga';
-type ProfileLibrarySort = 'recent' | 'title' | 'progress';
+type ProfileLibraryFilter = 'all' | AnimeListStatus | 'manga' | `custom:${string}`;
+type ProfileLibrarySort = 'recent' | 'score' | 'title' | 'progress';
 
 let activeProfileTab: ProfileSectionTab = 'biblioteca';
 let activeLibraryFilter: ProfileLibraryFilter = 'all';
 let activeLibrarySort: ProfileLibrarySort = 'recent';
 let librarySearchQuery = '';
 let lastBackPressTime = 0;
+
+let oauthProvidersStatusCache: {
+  loaded: boolean;
+  appUrl?: string;
+  anilist?: { configured: boolean; callbackUrl?: string };
+  mal?: { configured: boolean; callbackUrl?: string };
+} = { loaded: false };
+let oauthStatusFetching = false;
 
 export function cambiarSubTabPerfil(tab: ProfileSectionTab): void {
   activeProfileTab = tab;
@@ -55,8 +73,11 @@ export function cambiarSubTabPerfil(tab: ProfileSectionTab): void {
 
   if (tab === 'herramientas') {
     void refreshProfileOfflineStats();
+    renderWebPushStatusCard();
   } else if (tab === 'actividad') {
     renderProfileActivityPanel();
+  } else if (tab === 'cuenta') {
+    renderOAuthScrobbleCard();
   } else if (tab === 'biblioteca') {
     renderProfileLibraryPanel();
   }
@@ -73,12 +94,23 @@ export function onProfileLibrarySearchInput(val: string): void {
 }
 
 export function onProfileLibrarySortChange(val: string): void {
-  if (val === 'title' || val === 'progress' || val === 'recent') {
+  if (val === 'title' || val === 'progress' || val === 'recent' || val === 'score') {
     activeLibrarySort = val;
   } else {
     activeLibrarySort = 'recent';
   }
   renderProfileLibraryPanel();
+}
+
+export function eliminarListaPersonalizada(listId: string): void {
+  const listObj = CustomListsManager.getById(listId);
+  if (!listObj) return;
+  if (activeLibraryFilter === `custom:${listId}`) {
+    activeLibraryFilter = 'all';
+  }
+  if (CustomListsManager.remove(listId)) {
+    showToast(`Colección "${listObj.name}" eliminada`);
+  }
 }
 
 export function cambiarCategoriaAnimeEnPerfil(animeId: number | string, newStatus: string): void {
@@ -129,6 +161,190 @@ export function abrirMangaDesdePerfil(mangaId: number | string): void {
   }
 }
 
+export async function conectarOAuth(provider: 'anilist' | 'mal'): Promise<void> {
+  try {
+    showToast(`Abriendo autorización OAuth con ${provider === 'anilist' ? 'AniList' : 'MyAnimeList'}...`);
+    const session = await OAuthScrobbleManager.connectPopup(provider);
+    if (session) {
+      showToast(`Conectado a ${provider === 'anilist' ? 'AniList' : 'MyAnimeList'} como ${session.username || 'usuario'} ✓`);
+    }
+  } catch (err: any) {
+    showToast(err?.message || `No se pudo conectar ${provider.toUpperCase()}`);
+  }
+}
+
+export function desconectarOAuth(provider: 'anilist' | 'mal'): void {
+  OAuthScrobbleManager.disconnect(provider);
+  showToast(`Cuenta de ${provider === 'anilist' ? 'AniList' : 'MyAnimeList'} desconectada`);
+}
+
+export function toggleAutoScrobblePref(enabled: boolean): void {
+  AppPreferencesManager.setAutoScrobble(Boolean(enabled));
+  showToast(enabled ? 'Auto-scrobble bidireccional activado ✓' : 'Auto-scrobble desactivado');
+}
+
+function renderOAuthScrobbleCard(): void {
+  const container = document.getElementById('oauth-scrobble-container');
+  if (!container) return;
+
+  if (!oauthProvidersStatusCache.loaded && !oauthStatusFetching) {
+    oauthStatusFetching = true;
+    void OAuthScrobbleManager.fetchProvidersStatus().then((status) => {
+      oauthStatusFetching = false;
+      oauthProvidersStatusCache = {
+        loaded: true,
+        appUrl: status?.appUrl,
+        anilist: status?.anilist,
+        mal: status?.mal
+      };
+      if (activeProfileTab === 'cuenta') {
+        renderOAuthScrobbleCard();
+      }
+    });
+  }
+
+  const prefs = AppPreferencesManager.get();
+  const alSession = OAuthScrobbleManager.getSession('anilist');
+  const malSession = OAuthScrobbleManager.getSession('mal');
+  const alCfg = oauthProvidersStatusCache.anilist;
+  const malCfg = oauthProvidersStatusCache.mal;
+  const baseOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const alCallback = alCfg?.callbackUrl || `${baseOrigin}/api/auth/anilist/callback`;
+  const malCallback = malCfg?.callbackUrl || `${baseOrigin}/api/auth/mal/callback`;
+
+  container.innerHTML = `
+    <label class="reader-toggle-row" style="margin-bottom:10px;">
+      <input type="checkbox" ${prefs.autoScrobble ? 'checked' : ''} onchange="toggleAutoScrobblePref(this.checked)">
+      <span>Auto-scrobble al completar episodios o cambiar estado en biblioteca</span>
+    </label>
+
+    <div class="oauth-provider-list">
+      <div class="oauth-provider-row">
+        <div class="oauth-provider-meta">
+          <div class="oauth-provider-name">AniList OAuth</div>
+          <div class="oauth-provider-sub">${
+            alSession
+              ? `Conectado como <strong>${escHtml(alSession.username || 'AniList')}</strong> ✓`
+              : alCfg && !alCfg.configured
+                ? `Requiere variables <code>ANILIST_CLIENT_ID</code> / <code>SECRET</code>`
+                : 'Sincroniza episodios, estado y nota 1–10'
+          }</div>
+          <div class="oauth-provider-cb">Callback: <code>${escHtml(alCallback)}</code></div>
+        </div>
+        <div class="oauth-provider-actions">
+          ${
+            alSession
+              ? `<button type="button" class="oled-btn-secondary danger-tint" onclick="desconectarOAuth('anilist')">Desconectar</button>`
+              : `<button type="button" class="oled-btn-secondary" onclick="conectarOAuth('anilist')">Conectar</button>`
+          }
+        </div>
+      </div>
+
+      <div class="oauth-provider-row">
+        <div class="oauth-provider-meta">
+          <div class="oauth-provider-name">MyAnimeList OAuth 2.0</div>
+          <div class="oauth-provider-sub">${
+            malSession
+              ? `Conectado como <strong>${escHtml(malSession.username || 'MAL')}</strong> ✓`
+              : malCfg && !malCfg.configured
+                ? `Requiere variables <code>MAL_CLIENT_ID</code> / <code>SECRET</code>`
+                : 'Sincroniza episodios, estado y nota 1–10'
+          }</div>
+          <div class="oauth-provider-cb">Callback: <code>${escHtml(malCallback)}</code></div>
+        </div>
+        <div class="oauth-provider-actions">
+          ${
+            malSession
+              ? `<button type="button" class="oled-btn-secondary danger-tint" onclick="desconectarOAuth('mal')">Desconectar</button>`
+              : `<button type="button" class="oled-btn-secondary" onclick="conectarOAuth('mal')">Conectar</button>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export async function activarWebPush(): Promise<void> {
+  if (!nWin.NyAnimePWA?.subscribeWebPush) {
+    showToast('Servicio Web Push no disponible en este navegador.');
+    return;
+  }
+  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
+  const uid = fbUser?.uid || 'local-user';
+  try {
+    await nWin.NyAnimePWA.subscribeWebPush(uid);
+    renderWebPushStatusCard();
+  } catch (err: any) {
+    showToast(err?.message || 'No se pudo activar Web Push.');
+  }
+}
+
+export async function desconectarWebPush(): Promise<void> {
+  if (!nWin.NyAnimePWA?.unsubscribeWebPush) return;
+  await nWin.NyAnimePWA.unsubscribeWebPush();
+  renderWebPushStatusCard();
+}
+
+export async function enviarPruebaWebPush(): Promise<void> {
+  if (!nWin.NyAnimePWA?.sendTestPush) return;
+  await nWin.NyAnimePWA.sendTestPush();
+}
+
+export function toggleWeeklySummaryPushPref(enabled: boolean): void {
+  AppPreferencesManager.setWeeklySummaryPush(Boolean(enabled));
+  showToast(enabled ? 'Resumen semanal Push activado ✓' : 'Resumen semanal Push desactivado');
+}
+
+export async function enviarResumenSemanalPush(): Promise<void> {
+  const digest = buildWeeklyDigestSummary({
+    history: HistoryManager.getAll(),
+    mangaHistory: MangaHistoryManager.getAll(),
+    favorites: FavoritesManager.getAll()
+  });
+  if (nWin.NyAnimePWA?.sendWeeklyDigestPush) {
+    await nWin.NyAnimePWA.sendWeeklyDigestPush(digest.headline);
+  } else {
+    showToast(digest.headline);
+  }
+}
+
+function renderWebPushStatusCard(): void {
+  const container = document.getElementById('web-push-status-body');
+  if (!container) return;
+  const isSupported = Boolean(nWin.NyAnimePWA?.isPushSupported?.());
+  const endpoint = nWin.NyAnimePWA?.getPushEndpoint?.() || null;
+  const prefs = AppPreferencesManager.get();
+
+  container.innerHTML = `
+    <div class="push-status-card">
+      <div class="push-status-badge ${endpoint ? 'active' : ''}">
+        ${
+          !isSupported
+            ? '⚠️ Tu navegador actual no soporta Web Push'
+            : endpoint
+              ? '🔔 Notificaciones Push Activas en este dispositivo ✓'
+              : '🔕 Notificaciones Push inactivas'
+        }
+      </div>
+      <label class="reader-toggle-row" style="margin:8px 0;">
+        <input type="checkbox" ${prefs.weeklySummaryPush ? 'checked' : ''} onchange="toggleWeeklySummaryPushPref(this.checked)">
+        <span>Incluir resumen semanal de episodios y mangas leídos</span>
+      </label>
+      <div class="oled-btn-row" style="flex-wrap:wrap;">
+        ${
+          endpoint
+            ? `
+              <button type="button" class="oled-btn-secondary" onclick="enviarPruebaWebPush()">📲 Probar Push</button>
+              <button type="button" class="oled-btn-secondary danger-tint" onclick="desconectarWebPush()">Desactivar Push</button>
+            `
+            : `<button type="button" class="oled-btn-secondary" ${!isSupported ? 'disabled' : ''} style="border-color:rgba(255,26,64,0.45); color:#fff; background:rgba(255,26,64,0.16);" onclick="activarWebPush()">🔔 Activar Alertas Push</button>`
+        }
+        <button type="button" class="oled-btn-secondary" onclick="abrirModalResumenSemanal()">📊 Resumen Semanal</button>
+      </div>
+    </div>
+  `;
+}
+
 async function refreshProfileOfflineStats(): Promise<void> {
   const summaryEl = document.getElementById('profile-offline-summary-text');
   const breakdownEl = document.getElementById('profile-offline-breakdown');
@@ -161,11 +377,13 @@ async function refreshProfileOfflineStats(): Promise<void> {
 
 function renderProfileLibraryPanel(): void {
   const tabsWrap = document.getElementById('profile-library-filter-tabs');
+  const customListsWrap = document.getElementById('profile-custom-lists-bar');
   const gridEl = document.getElementById('profile-library-list');
   if (!tabsWrap || !gridEl) return;
 
   const animes = FavoritesManager.getAll();
   const mangas = MangaFavoritesManager.getAll();
+  const customLists = CustomListsManager.getAll();
   const watchedMap = AnimeWatchedManager.getAll();
   const summary = computeLibrarySummary({
     animes,
@@ -175,6 +393,13 @@ function renderProfileLibraryPanel(): void {
     totalSecondsWatched: UserManager.getUser().stats.totalSecondsWatched,
     chaptersRead: UserManager.getTotalChaptersRead()
   });
+
+  if (activeLibraryFilter.startsWith('custom:')) {
+    const targetListId = activeLibraryFilter.slice('custom:'.length);
+    if (!customLists.some((l) => l.id === targetListId)) {
+      activeLibraryFilter = 'all';
+    }
+  }
 
   const filterDefs: Array<{ id: ProfileLibraryFilter; label: string; count: number }> = [
     { id: 'all', label: 'Todos', count: summary.totalLibraryItems },
@@ -200,22 +425,61 @@ function renderProfileLibraryPanel(): void {
     )
     .join('');
 
+  if (customListsWrap) {
+    const customChips = customLists
+      .map((l) => {
+        const count =
+          animes.filter((a) => sanitizeCustomListIds(a.customListIds).includes(l.id)).length +
+          mangas.filter((m) => sanitizeCustomListIds(m.customListIds).includes(l.id)).length;
+        const isActive = activeLibraryFilter === `custom:${l.id}`;
+        const listIdSafe = escHtml(l.id);
+        return `
+          <div class="custom-list-pill ${isActive ? 'active' : ''}" style="border-color:${isActive ? escHtml(l.color) : 'rgba(255,255,255,0.12)'};">
+            <button type="button" class="custom-list-pill-btn" onclick="setProfileLibraryFilter('custom:${listIdSafe}')">
+              <span>${escHtml(l.icon)}</span>
+              <span>${escHtml(l.name)}</span>
+              <span class="profile-filter-count">${count}</span>
+            </button>
+            <button type="button" class="custom-list-del-btn" title="Eliminar colección" aria-label="Eliminar ${escHtml(l.name)}" onclick="eliminarListaPersonalizada('${listIdSafe}')">✕</button>
+          </div>
+        `;
+      })
+      .join('');
+
+    customListsWrap.innerHTML = `
+      <div class="custom-lists-strip">
+        <button type="button" class="custom-list-new-btn" onclick="abrirModalNuevaLista()">+ Nueva colección</button>
+        ${customChips}
+      </div>
+    `;
+  }
+
   const q = librarySearchQuery;
+  const customFilterId = activeLibraryFilter.startsWith('custom:')
+    ? activeLibraryFilter.slice('custom:'.length)
+    : null;
 
   const matchingAnimes =
     activeLibraryFilter === 'manga'
       ? []
       : animes.filter((anime) => {
-          const st = normalizeAnimeListStatus(anime.listStatus, 'plan_to_watch');
-          if (activeLibraryFilter !== 'all' && st !== activeLibraryFilter) return false;
+          if (customFilterId) {
+            if (!sanitizeCustomListIds(anime.customListIds).includes(customFilterId)) return false;
+          } else {
+            const st = normalizeAnimeListStatus(anime.listStatus, 'plan_to_watch');
+            if (activeLibraryFilter !== 'all' && st !== activeLibraryFilter) return false;
+          }
           if (!q) return true;
           const t = `${anime.title?.english || ''} ${anime.title?.romaji || ''}`.toLowerCase();
           return t.includes(q);
         });
 
   const matchingMangas =
-    activeLibraryFilter === 'all' || activeLibraryFilter === 'manga'
+    activeLibraryFilter === 'all' || activeLibraryFilter === 'manga' || Boolean(customFilterId)
       ? mangas.filter((m) => {
+          if (customFilterId && !sanitizeCustomListIds(m.customListIds).includes(customFilterId)) {
+            return false;
+          }
           if (!q) return true;
           return String(m.title || '').toLowerCase().includes(q);
         })
@@ -228,6 +492,9 @@ function renderProfileLibraryPanel(): void {
       )
     );
     matchingMangas.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+  } else if (activeLibrarySort === 'score') {
+    matchingAnimes.sort((a, b) => (sanitizeUserScore(b.userScore) ?? 0) - (sanitizeUserScore(a.userScore) ?? 0));
+    matchingMangas.sort((a, b) => (sanitizeUserScore(b.userScore) ?? 0) - (sanitizeUserScore(a.userScore) ?? 0));
   } else if (activeLibrarySort === 'progress') {
     matchingAnimes.sort((a, b) => {
       const pa = countWatchedForAnime(a, watchedMap);
@@ -246,7 +513,7 @@ function renderProfileLibraryPanel(): void {
         <div class="profile-empty-title">${isFilteredEmpty ? 'Sin títulos en esta vista' : 'Tu biblioteca está vacía'}</div>
         <div class="profile-empty-desc">${
           isFilteredEmpty
-            ? 'Prueba otra categoría, limpia la búsqueda o agrega nuevos animes desde el catálogo.'
+            ? 'Prueba otra categoría, limpia la búsqueda o asigna títulos a esta colección desde su ficha.'
             : 'Guarda animes como Viendo, Por Ver o Completados desde su ficha, o importa tu lista de AniList / MyAnimeList.'
         }</div>
         <div class="profile-empty-actions">
@@ -268,6 +535,7 @@ function renderProfileLibraryPanel(): void {
       const status = normalizeAnimeListStatus(anime.listStatus, 'plan_to_watch');
       const meta = getCategoryMeta(status);
       const fmt = escHtml(anime.format || 'TV');
+      const userScore = sanitizeUserScore(anime.userScore);
       const epText =
         prog.totalEpisodes > 0
           ? `${prog.watchedCount} / ${prog.totalEpisodes} eps`
@@ -278,6 +546,7 @@ function renderProfileLibraryPanel(): void {
         <article class="profile-lib-card" data-anime-id="${animeIdStr}">
           <button type="button" class="profile-lib-cover-btn" onclick="abrirAnimeDesdePerfil('${animeIdStr}')" aria-label="Abrir ${title}">
             <img src="${cover}" alt="${title}" loading="lazy" onerror="this.onerror=null; this.src='${fallback}';">
+            ${userScore ? `<span class="profile-lib-score-badge">★ ${userScore}</span>` : ''}
           </button>
           <div class="profile-lib-body">
             <div class="profile-lib-head">
@@ -289,6 +558,11 @@ function renderProfileLibraryPanel(): void {
               <span>·</span>
               <span class="profile-num">${escHtml(epText)}</span>
             </div>
+            ${
+              anime.userReview
+                ? `<div class="profile-lib-review-snip">"${escHtml(String(anime.userReview).slice(0, 72))}"</div>`
+                : ''
+            }
             <div class="profile-lib-progress-track">
               <div class="profile-lib-progress-fill" style="width:${prog.pct}%; background:${meta.accentColor};"></div>
             </div>
@@ -301,6 +575,7 @@ function renderProfileLibraryPanel(): void {
                   (c) => `<option value="${c.id}" ${c.id === status ? 'selected' : ''}>${escHtml(c.label)}</option>`
                 ).join('')}
               </select>
+              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('anime', '${animeIdStr}')">⭐ Nota</button>
               <button type="button" class="profile-lib-open-btn" onclick="abrirAnimeDesdePerfil('${animeIdStr}')">Abrir</button>
             </div>
           </div>
@@ -316,11 +591,13 @@ function renderProfileLibraryPanel(): void {
       const cover = escHtml(safeImg(m.cover, fallback));
       const readSet = MangaReadStateManager.getReadChapters(m.id);
       const mangaIdStr = escHtml(String(m.id));
+      const userScore = sanitizeUserScore(m.userScore);
       const flag = m.origLang === 'ko' ? 'Manhwa' : m.origLang === 'zh' ? 'Manhua' : 'Manga';
       return `
         <article class="profile-lib-card" data-manga-id="${mangaIdStr}">
           <button type="button" class="profile-lib-cover-btn" onclick="abrirMangaDesdePerfil('${mangaIdStr}')" aria-label="Abrir ${title}">
             <img src="${cover}" alt="${title}" loading="lazy" onerror="this.onerror=null; this.src='${fallback}';">
+            ${userScore ? `<span class="profile-lib-score-badge">★ ${userScore}</span>` : ''}
           </button>
           <div class="profile-lib-body">
             <div class="profile-lib-head">
@@ -332,8 +609,14 @@ function renderProfileLibraryPanel(): void {
               <span>·</span>
               <span class="profile-num">${readSet.size} caps leídos</span>
             </div>
+            ${
+              m.userReview
+                ? `<div class="profile-lib-review-snip">"${escHtml(String(m.userReview).slice(0, 72))}"</div>`
+                : ''
+            }
             <div class="profile-lib-footer" style="margin-top:auto;">
               <span class="profile-lib-tag-manga">Biblioteca Manga</span>
+              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('manga', '${mangaIdStr}')">⭐ Nota</button>
               <button type="button" class="profile-lib-open-btn" onclick="abrirMangaDesdePerfil('${mangaIdStr}')">Leer</button>
             </div>
           </div>
@@ -346,6 +629,7 @@ function renderProfileLibraryPanel(): void {
 }
 
 function renderProfileActivityPanel(): void {
+  const ratingsSummaryEl = document.getElementById('profile-ratings-summary');
   const distBarEl = document.getElementById('profile-dist-bar');
   const distLegendEl = document.getElementById('profile-dist-legend');
   const genresEl = document.getElementById('profile-top-genres');
@@ -367,6 +651,38 @@ function renderProfileActivityPanel(): void {
     totalSecondsWatched: user.stats.totalSecondsWatched,
     chaptersRead: UserManager.getTotalChaptersRead()
   });
+
+  if (ratingsSummaryEl) {
+    const rSum = computeLibraryRatingsSummary(animes, mangas, 6);
+    if (rSum.ratedCount === 0) {
+      ratingsSummaryEl.innerHTML =
+        '<div style="font-size:12px; color:var(--text-muted);">Aún no has puntuado ninguna serie. Usa "⭐ Nota" en tu biblioteca o en cualquier ficha para calificar del 1 al 10.</div>';
+    } else {
+      const topHtml = rSum.topRated
+        .map((item) => {
+          const idSafe = escHtml(item.id);
+          const onclickFn =
+            item.kind === 'anime'
+              ? `abrirAnimeDesdePerfil('${idSafe}')`
+              : `abrirMangaDesdePerfil('${idSafe}')`;
+          return `
+            <button type="button" class="profile-rated-item" onclick="${onclickFn}">
+              <span class="profile-rated-score">★ ${item.userScore}</span>
+              <span class="profile-rated-title">${escHtml(item.title)}</span>
+              <span class="profile-rated-kind">${item.kind === 'anime' ? 'Anime' : 'Manga'}</span>
+            </button>
+          `;
+        })
+        .join('');
+      ratingsSummaryEl.innerHTML = `
+        <div class="profile-ratings-kpi">
+          <div><strong class="profile-num" style="font-size:20px; color:#fbbf24;">★ ${rSum.averageScore.toFixed(1)}</strong> <span>promedio personal</span></div>
+          <div><strong class="profile-num">${rSum.ratedCount}</strong> <span>títulos calificados</span></div>
+        </div>
+        <div class="profile-rated-list">${topHtml}</div>
+      `;
+    }
+  }
 
   if (distBarEl && distLegendEl) {
     if (summary.totalSavedAnimes === 0) {
@@ -635,6 +951,8 @@ export function renderProfileUI(): void {
   }
 
   renderProfileLibraryPanel();
+  renderOAuthScrobbleCard();
+  renderWebPushStatusCard();
   if (activeProfileTab === 'actividad') {
     renderProfileActivityPanel();
   }
@@ -717,6 +1035,18 @@ export function initApp(): void {
   setupTouchGestures();
 
   nWin.handleAndroidBackButton = handleAndroidBackButton;
+
+  const inviteRoomCode = extractRoomCodeFromSearch(window.location.search);
+  if (inviteRoomCode) {
+    setTimeout(() => {
+      showToast(`Invitación a Sala Compartida ${inviteRoomCode}`, {
+        label: 'Unirse ahora',
+        onClick: () => {
+          void nWin.abrirSalaWatchTogetherDesdeCodigo?.(inviteRoomCode);
+        }
+      });
+    }, 650);
+  }
 
   if (!nWin._nyLifecycleFlushesBound) {
     (nWin as any)._nyLifecycleFlushesBound = true;

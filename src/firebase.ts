@@ -26,10 +26,12 @@ import {
   orderBy,
   limit,
   startAfter,
+  onSnapshot,
   serverTimestamp,
   type QueryDocumentSnapshot,
   type DocumentData,
-  type Timestamp
+  type Timestamp,
+  type Unsubscribe
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 import {
@@ -42,6 +44,17 @@ import {
 } from './utils/syncLogic.ts';
 import { normalizeAnimeListStatus } from './utils/profileStats.ts';
 import {
+  sanitizeCustomListIds,
+  sanitizeShortText,
+  sanitizeUserScore
+} from './utils/libraryEnhancements.ts';
+import {
+  generateRoomCode,
+  normalizeRoomCode,
+  sanitizeWatchChatText,
+  type WatchRoomState
+} from './utils/watchTogether.ts';
+import {
   DEFAULT_AVATAR_URL,
   sanitizeAvatarForAuthPhotoUrl,
   sanitizeAvatarForCloud
@@ -49,6 +62,7 @@ import {
 import {
   compactFavoritesArray,
   compactHistoryArray,
+  compactMangaEntry,
   safeStorageSetItem
 } from './utils/storageQuota.ts';
 
@@ -155,6 +169,7 @@ function translateAuthError(error: unknown): string {
 const TOMBSTONE_KEYS = {
   deletedAnimeFavs: 'nyanime_deleted_anime_favs_v1',
   deletedMangaFavs: 'nyanime_deleted_manga_favs_v1',
+  deletedCustomLists: 'nyanime_deleted_custom_lists_v1',
   clearedHistoryAt: 'nyanime_cleared_anime_history_at_v1',
   clearedMangaHistoryAt: 'nyanime_cleared_manga_history_at_v1',
   mangaReadTsPrefix: 'nyanime_read_ts_'
@@ -187,6 +202,10 @@ export interface ReaderSettingsShape {
   bg?: string;
   width?: string;
   mode?: string;
+  brightness?: number;
+  contrast?: number;
+  sepia?: number;
+  continuousChapter?: boolean;
 }
 
 interface NyAnimeWindow extends Window {
@@ -214,6 +233,15 @@ interface NyAnimeWindow extends Window {
   MangaFavoritesManager?: {
     KEY: string;
     getAll: () => Array<Record<string, unknown>>;
+  };
+  CustomListsManager?: {
+    KEY: string;
+    getAll: () => Array<Record<string, unknown>>;
+  };
+  AppPreferencesManager?: {
+    KEY: string;
+    get: () => Record<string, unknown>;
+    save: (next: Record<string, unknown>, skipSync?: boolean) => void;
   };
   AnimeWatchedManager?: {
     KEY: string;
@@ -430,9 +458,26 @@ function buildSanitizedFavoritePayload(uid: string, animeId: number, item: Recor
   if (typeof item.episodes === 'number' && Number.isFinite(item.episodes) && item.episodes >= 0) {
     payload.episodes = Math.floor(item.episodes);
   }
+  if (typeof item.idMal === 'number' && Number.isFinite(item.idMal) && item.idMal > 0) {
+    payload.idMal = Math.floor(item.idMal);
+  }
+  if (typeof item.averageScore === 'number' && Number.isFinite(item.averageScore) && item.averageScore > 0) {
+    payload.averageScore = Math.min(100, Math.max(0, Math.round(item.averageScore)));
+  }
   if (Array.isArray(item.genres)) {
     payload.genres = item.genres.filter((g) => typeof g === 'string' && g.trim()).slice(0, 20);
   }
+  const userScore = sanitizeUserScore(item.userScore);
+  if (userScore !== null) payload.userScore = userScore;
+  const userReview = sanitizeShortText(item.userReview, 280);
+  if (userReview) payload.userReview = userReview;
+  const userNotes = sanitizeShortText(item.userNotes, 500);
+  if (userNotes) payload.userNotes = userNotes;
+  if (Number.isFinite(Number(item.scoreUpdatedAt)) && Number(item.scoreUpdatedAt) > 0) {
+    payload.scoreUpdatedAt = Math.floor(Number(item.scoreUpdatedAt));
+  }
+  const customListIds = sanitizeCustomListIds(item.customListIds);
+  if (customListIds.length > 0) payload.customListIds = customListIds;
   return payload;
 }
 
@@ -488,8 +533,15 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
           status: cloudItem.status || 'FINISHED',
           episodes: cloudItem.episodes || null,
           genres: cloudItem.genres || [],
+          idMal: cloudItem.idMal || undefined,
+          averageScore: cloudItem.averageScore || undefined,
           listStatus: normalizeAnimeListStatus(cloudItem.listStatus, 'plan_to_watch'),
-          listUpdatedAt: Math.max(0, Math.floor(Number(cloudItem.listUpdatedAt || 0)))
+          listUpdatedAt: Math.max(0, Math.floor(Number(cloudItem.listUpdatedAt || 0))),
+          userScore: sanitizeUserScore(cloudItem.userScore) ?? undefined,
+          userReview: cloudItem.userReview || undefined,
+          userNotes: cloudItem.userNotes || undefined,
+          scoreUpdatedAt: Number(cloudItem.scoreUpdatedAt || 0) || undefined,
+          customListIds: sanitizeCustomListIds(cloudItem.customListIds)
         });
       } else if (localItem && cloudItem) {
         const synced = resolveFavoriteStatusSync({
@@ -498,20 +550,42 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
           cloudStatus: cloudItem.listStatus,
           cloudUpdatedAt: cloudItem.listUpdatedAt
         });
-        if (synced.winner === 'local') {
+        const localScoreTs = Math.max(0, Math.floor(Number(localItem.scoreUpdatedAt || 0)));
+        const cloudScoreTs = Math.max(0, Math.floor(Number(cloudItem.scoreUpdatedAt || 0)));
+        const localLists = sanitizeCustomListIds(localItem.customListIds);
+        const cloudLists = sanitizeCustomListIds(cloudItem.customListIds);
+        const listsChanged = JSON.stringify(localLists) !== JSON.stringify(cloudLists);
+
+        if (synced.winner === 'local' || cloudScoreTs > localScoreTs) {
           pullToLocal.push({
             ...localItem,
             listStatus: synced.listStatus,
-            listUpdatedAt: synced.listUpdatedAt
+            listUpdatedAt: synced.listUpdatedAt,
+            userScore: cloudScoreTs > localScoreTs ? (sanitizeUserScore(cloudItem.userScore) ?? undefined) : localItem.userScore,
+            userReview: cloudScoreTs > localScoreTs ? (cloudItem.userReview || undefined) : localItem.userReview,
+            userNotes: cloudScoreTs > localScoreTs ? (cloudItem.userNotes || undefined) : localItem.userNotes,
+            scoreUpdatedAt: Math.max(localScoreTs, cloudScoreTs) || undefined,
+            customListIds: cloudScoreTs > localScoreTs ? cloudLists : localLists
           });
-        } else if (synced.winner === 'cloud') {
+        } else if (synced.winner === 'cloud' || localScoreTs > cloudScoreTs || listsChanged) {
           const favRef = doc(db, 'users', uid, 'favorites', docId);
+          const updateFields: Record<string, unknown> = {
+            listStatus: synced.listStatus,
+            listUpdatedAt: synced.listUpdatedAt,
+            customListIds: localLists,
+            updatedAt: serverTimestamp()
+          };
+          if (localScoreTs >= cloudScoreTs) {
+            const s = sanitizeUserScore(localItem.userScore);
+            if (s !== null) updateFields.userScore = s;
+            const r = sanitizeShortText(localItem.userReview, 280);
+            if (r) updateFields.userReview = r;
+            const n = sanitizeShortText(localItem.userNotes, 500);
+            if (n) updateFields.userNotes = n;
+            if (localScoreTs > 0) updateFields.scoreUpdatedAt = localScoreTs;
+          }
           try {
-            await updateDoc(favRef, {
-              listStatus: synced.listStatus,
-              listUpdatedAt: synced.listUpdatedAt,
-              updatedAt: serverTimestamp()
-            });
+            await updateDoc(favRef, updateFields);
           } catch {
             const cleanPayload = buildSanitizedFavoritePayload(uid, Number(localItem.id), {
               ...localItem,
@@ -525,7 +599,6 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
     }
 
     if (pullToLocal.length > 0 && win.FavoritesManager?.KEY) {
-      // Re-read latest local list so edits made mid-sync are never overwritten by a stale pre-await snapshot
       const latestLocal = win.FavoritesManager?.getAll ? win.FavoritesManager.getAll() : [];
       const deletedSet = new Set(readIdSet(TOMBSTONE_KEYS.deletedAnimeFavs));
       let changedLocal = false;
@@ -540,11 +613,18 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
         } else {
           const curTs = Math.max(0, Math.floor(Number(latestLocal[existingIdx].listUpdatedAt || 0)));
           const incTs = Math.max(0, Math.floor(Number(incomingItem.listUpdatedAt || 0)));
-          if (incTs > curTs) {
+          const curScoreTs = Math.max(0, Math.floor(Number(latestLocal[existingIdx].scoreUpdatedAt || 0)));
+          const incScoreTs = Math.max(0, Math.floor(Number(incomingItem.scoreUpdatedAt || 0)));
+          if (incTs > curTs || incScoreTs > curScoreTs) {
             latestLocal[existingIdx] = {
               ...latestLocal[existingIdx],
-              listStatus: incomingItem.listStatus,
-              listUpdatedAt: incTs
+              listStatus: incTs >= curTs ? incomingItem.listStatus : latestLocal[existingIdx].listStatus,
+              listUpdatedAt: Math.max(curTs, incTs),
+              userScore: incScoreTs >= curScoreTs ? incomingItem.userScore : latestLocal[existingIdx].userScore,
+              userReview: incScoreTs >= curScoreTs ? incomingItem.userReview : latestLocal[existingIdx].userReview,
+              userNotes: incScoreTs >= curScoreTs ? incomingItem.userNotes : latestLocal[existingIdx].userNotes,
+              scoreUpdatedAt: Math.max(curScoreTs, incScoreTs) || undefined,
+              customListIds: incScoreTs >= curScoreTs ? incomingItem.customListIds : latestLocal[existingIdx].customListIds
             };
             changedLocal = true;
           }
@@ -688,14 +768,25 @@ async function syncMangaFavoritesBidirectional(uid: string): Promise<void> {
       if (item.score) payload.score = String(item.score).slice(0, 16);
       if (item.status) payload.status = String(item.status).slice(0, 40);
       if (item.year) payload.year = String(item.year).slice(0, 16);
+      const userScore = sanitizeUserScore(item.userScore);
+      if (userScore !== null) payload.userScore = userScore;
+      const userReview = sanitizeShortText(item.userReview, 280);
+      if (userReview) payload.userReview = userReview;
+      const userNotes = sanitizeShortText(item.userNotes, 500);
+      if (userNotes) payload.userNotes = userNotes;
+      if (Number.isFinite(Number(item.scoreUpdatedAt)) && Number(item.scoreUpdatedAt) > 0) {
+        payload.scoreUpdatedAt = Math.floor(Number(item.scoreUpdatedAt));
+      }
+      const customListIds = sanitizeCustomListIds(item.customListIds);
+      if (customListIds.length > 0) payload.customListIds = customListIds;
       await setDoc(doc(db, 'users', uid, 'manga_favorites', docId), payload);
     }
 
     let changedLocal = false;
     for (const docId of mergePlan.toKeepLocal) {
-      if (!localMap.has(docId)) {
-        const cloudItem = cloudMap.get(docId);
-        if (!cloudItem) continue;
+      const localItem = localMap.get(docId);
+      const cloudItem = cloudMap.get(docId);
+      if (!localItem && cloudItem) {
         localList.push({
           id: Number(docId) || docId,
           title: cloudItem.title,
@@ -705,14 +796,113 @@ async function syncMangaFavoritesBidirectional(uid: string): Promise<void> {
           origLang: cloudItem.origLang || 'jp',
           score: cloudItem.score || '8.6',
           status: cloudItem.status || 'En Emisión',
-          year: cloudItem.year || '2024'
+          year: cloudItem.year || '2024',
+          userScore: sanitizeUserScore(cloudItem.userScore) ?? undefined,
+          userReview: cloudItem.userReview || undefined,
+          userNotes: cloudItem.userNotes || undefined,
+          scoreUpdatedAt: Number(cloudItem.scoreUpdatedAt || 0) || undefined,
+          customListIds: sanitizeCustomListIds(cloudItem.customListIds)
+        });
+        changedLocal = true;
+      } else if (localItem && cloudItem) {
+        const localScoreTs = Math.max(0, Math.floor(Number(localItem.scoreUpdatedAt || 0)));
+        const cloudScoreTs = Math.max(0, Math.floor(Number(cloudItem.scoreUpdatedAt || 0)));
+        if (cloudScoreTs > localScoreTs) {
+          localItem.userScore = sanitizeUserScore(cloudItem.userScore) ?? undefined;
+          localItem.userReview = cloudItem.userReview || undefined;
+          localItem.userNotes = cloudItem.userNotes || undefined;
+          localItem.scoreUpdatedAt = cloudScoreTs;
+          localItem.customListIds = sanitizeCustomListIds(cloudItem.customListIds);
+          changedLocal = true;
+        } else if (localScoreTs > cloudScoreTs) {
+          const updateFields: Record<string, unknown> = {
+            scoreUpdatedAt: localScoreTs,
+            customListIds: sanitizeCustomListIds(localItem.customListIds),
+            updatedAt: serverTimestamp()
+          };
+          const s = sanitizeUserScore(localItem.userScore);
+          if (s !== null) updateFields.userScore = s;
+          const r = sanitizeShortText(localItem.userReview, 280);
+          if (r) updateFields.userReview = r;
+          const n = sanitizeShortText(localItem.userNotes, 500);
+          if (n) updateFields.userNotes = n;
+          await updateDoc(doc(db, 'users', uid, 'manga_favorites', docId), updateFields).catch(() => {});
+        }
+      }
+    }
+
+    if (changedLocal && win.MangaFavoritesManager?.KEY) {
+      safeStorageSetItem(
+        win.MangaFavoritesManager.KEY,
+        JSON.stringify(localList.map((m) => compactMangaEntry(m) || m))
+      );
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+async function syncCustomListsBidirectional(uid: string): Promise<void> {
+  const path = `users/${uid}/custom_lists`;
+  try {
+    const colRef = collection(db, 'users', uid, 'custom_lists');
+    const snap = await getDocs(colRef);
+    const cloudMap = new Map<string, Record<string, unknown>>();
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.listId) cloudMap.set(sanitizeDocId(data.listId), data);
+    });
+
+    const localLists = win.CustomListsManager?.getAll ? win.CustomListsManager.getAll() : [];
+    const localMap = new Map<string, Record<string, unknown>>();
+    for (const l of localLists) {
+      if (l?.id) localMap.set(sanitizeDocId(l.id), l);
+    }
+
+    const mergePlan = resolveFavoritesMerge({
+      localIds: Array.from(localMap.keys()),
+      cloudIds: Array.from(cloudMap.keys()),
+      deletedIds: readIdSet(TOMBSTONE_KEYS.deletedCustomLists)
+    });
+
+    for (const listId of mergePlan.toDeleteCloud) {
+      await deleteDoc(doc(db, 'users', uid, 'custom_lists', listId));
+      removeIdTombstone(TOMBSTONE_KEYS.deletedCustomLists, listId);
+    }
+
+    for (const listId of mergePlan.toUpload) {
+      const l = localMap.get(listId);
+      if (!l) continue;
+      await setDoc(doc(db, 'users', uid, 'custom_lists', listId), {
+        uid,
+        listId,
+        name: sanitizeShortText(l.name, 48) || 'Lista',
+        color: String(l.color || '#ff1a40').slice(0, 24),
+        icon: String(l.icon || '📁').slice(0, 16),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    let changedLocal = false;
+    for (const listId of mergePlan.toKeepLocal) {
+      if (!localMap.has(listId)) {
+        const cloud = cloudMap.get(listId);
+        if (!cloud) continue;
+        localLists.push({
+          id: listId,
+          name: String(cloud.name || 'Lista'),
+          color: String(cloud.color || '#ff1a40'),
+          icon: String(cloud.icon || '📁'),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
         });
         changedLocal = true;
       }
     }
 
-    if (changedLocal && win.MangaFavoritesManager?.KEY) {
-      safeStorageSetItem(win.MangaFavoritesManager.KEY, JSON.stringify(localList));
+    if (changedLocal && win.CustomListsManager?.KEY) {
+      safeStorageSetItem(win.CustomListsManager.KEY, JSON.stringify(localLists.slice(0, 40)));
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
@@ -997,9 +1187,20 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
     const snap = await getDoc(ref);
     const localReminders = win.ScheduleReminderManager?.getAll ? win.ScheduleReminderManager.getAll() : [];
     const localReader = win.getReaderSettings ? win.getReaderSettings() : {};
+    const localPrefs = win.AppPreferencesManager?.get ? win.AppPreferencesManager.get() : {};
+
     const readerBg = String(localReader.bg || '#000000').slice(0, 32);
     const readerWidth = String(localReader.width || '100%').slice(0, 32);
     const readerMode = String(localReader.mode || 'webtoon').slice(0, 32);
+    const readerBrightness = Math.min(130, Math.max(45, Math.round(Number(localReader.brightness ?? 100))));
+    const readerContrast = Math.min(140, Math.max(60, Math.round(Number(localReader.contrast ?? 100))));
+    const readerSepia = Math.min(70, Math.max(0, Math.round(Number(localReader.sepia ?? 0))));
+    const readerContinuous = Boolean(localReader.continuousChapter);
+    const autoSkipIntro = Boolean(localPrefs.autoSkipIntro);
+    const autoSkipOutro = Boolean(localPrefs.autoSkipOutro);
+    const autoScrobble = localPrefs.autoScrobble !== false;
+    const pushEnabled = Boolean(localPrefs.pushEnabled);
+    const weeklySummaryPush = localPrefs.weeklySummaryPush !== false;
 
     if (!snap.exists()) {
       await setDoc(ref, {
@@ -1008,16 +1209,20 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
         readerBg,
         readerWidth,
         readerMode,
+        readerBrightness,
+        readerContrast,
+        readerSepia,
+        readerContinuous,
+        autoSkipIntro,
+        autoSkipOutro,
+        autoScrobble,
+        pushEnabled,
+        weeklySummaryPush,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
     } else {
-      const cloudData = snap.data() as {
-        scheduleReminders?: number[];
-        readerBg?: string;
-        readerWidth?: string;
-        readerMode?: string;
-      };
+      const cloudData = snap.data() as Record<string, any>;
       const cloudReminders = Array.isArray(cloudData.scheduleReminders) ? cloudData.scheduleReminders : [];
       const mergedReminders = Array.from(new Set([...localReminders, ...cloudReminders])).slice(0, 500);
       if (mergedReminders.length > localReminders.length && win.ScheduleReminderManager?.KEY) {
@@ -1027,13 +1232,27 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
       const cloudReader: ReaderSettingsShape = {
         bg: cloudData.readerBg || readerBg,
         width: cloudData.readerWidth || readerWidth,
-        mode: cloudData.readerMode || readerMode
+        mode: cloudData.readerMode || readerMode,
+        brightness: typeof cloudData.readerBrightness === 'number' ? cloudData.readerBrightness : readerBrightness,
+        contrast: typeof cloudData.readerContrast === 'number' ? cloudData.readerContrast : readerContrast,
+        sepia: typeof cloudData.readerSepia === 'number' ? cloudData.readerSepia : readerSepia,
+        continuousChapter: typeof cloudData.readerContinuous === 'boolean' ? cloudData.readerContinuous : readerContinuous
       };
-      if (
-        (cloudData.readerBg || cloudData.readerWidth || cloudData.readerMode) &&
-        win.applyReaderSettingsFromCloud
-      ) {
+      if (win.applyReaderSettingsFromCloud) {
         win.applyReaderSettingsFromCloud(cloudReader);
+      }
+
+      if (win.AppPreferencesManager?.save) {
+        win.AppPreferencesManager.save(
+          {
+            autoSkipIntro: typeof cloudData.autoSkipIntro === 'boolean' ? cloudData.autoSkipIntro : autoSkipIntro,
+            autoSkipOutro: typeof cloudData.autoSkipOutro === 'boolean' ? cloudData.autoSkipOutro : autoSkipOutro,
+            autoScrobble: typeof cloudData.autoScrobble === 'boolean' ? cloudData.autoScrobble : autoScrobble,
+            pushEnabled: typeof cloudData.pushEnabled === 'boolean' ? cloudData.pushEnabled : pushEnabled,
+            weeklySummaryPush: typeof cloudData.weeklySummaryPush === 'boolean' ? cloudData.weeklySummaryPush : weeklySummaryPush
+          },
+          true
+        );
       }
 
       const needsCloudUpdate =
@@ -1048,6 +1267,15 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
           readerBg,
           readerWidth,
           readerMode,
+          readerBrightness,
+          readerContrast,
+          readerSepia,
+          readerContinuous,
+          autoSkipIntro,
+          autoSkipOutro,
+          autoScrobble,
+          pushEnabled,
+          weeklySummaryPush,
           updatedAt: serverTimestamp()
         });
       }
@@ -1078,6 +1306,7 @@ async function runFullCloudSync(): Promise<void> {
       syncFavoritesBidirectional(user.uid),
       syncAnimeWatchedBidirectional(user.uid),
       syncMangaFavoritesBidirectional(user.uid),
+      syncCustomListsBidirectional(user.uid),
       syncHistoryBidirectional(user.uid),
       syncMangaProgressBidirectional(user.uid),
       syncSettingsBidirectional(user.uid)
@@ -1368,6 +1597,10 @@ export const FirebaseSyncBridge = {
         readerBg: String(settings.bg || '#000000').slice(0, 32),
         readerWidth: String(settings.width || '100%').slice(0, 32),
         readerMode: String(settings.mode || 'webtoon').slice(0, 32),
+        readerBrightness: Math.min(130, Math.max(45, Math.round(Number(settings.brightness ?? 100)))),
+        readerContrast: Math.min(140, Math.max(60, Math.round(Number(settings.contrast ?? 100)))),
+        readerSepia: Math.min(70, Math.max(0, Math.round(Number(settings.sepia ?? 0)))),
+        readerContinuous: Boolean(settings.continuousChapter),
         updatedAt: serverTimestamp()
       };
       if (!snap.exists()) {
@@ -1382,6 +1615,50 @@ export const FirebaseSyncBridge = {
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async saveCustomList(listObj: { id: string; name: string; color: string; icon: string }) {
+    const user = auth.currentUser;
+    if (!user) return;
+    const listId = sanitizeDocId(listObj.id).slice(0, 64);
+    removeIdTombstone(TOMBSTONE_KEYS.deletedCustomLists, listId);
+    const path = `users/${user.uid}/custom_lists/${listId}`;
+    try {
+      const ref = doc(db, 'users', user.uid, 'custom_lists', listId);
+      const snap = await getDoc(ref);
+      const name = sanitizeShortText(listObj.name, 48) || 'Lista';
+      const color = String(listObj.color || '#ff1a40').slice(0, 24);
+      const icon = String(listObj.icon || '📁').slice(0, 16);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          uid: user.uid,
+          listId,
+          name,
+          color,
+          icon,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await updateDoc(ref, { name, color, icon, updatedAt: serverTimestamp() });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async deleteCustomList(listIdRaw: string) {
+    const listId = sanitizeDocId(listIdRaw).slice(0, 64);
+    addIdTombstone(TOMBSTONE_KEYS.deletedCustomLists, listId);
+    const user = auth.currentUser;
+    if (!user) return;
+    const path = `users/${user.uid}/custom_lists/${listId}`;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'custom_lists', listId));
+      removeIdTombstone(TOMBSTONE_KEYS.deletedCustomLists, listId);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   },
 
@@ -1558,23 +1835,26 @@ export const FirebaseSyncBridge = {
   async exportBackupJSON() {
     const favorites = win.FavoritesManager?.getAll ? win.FavoritesManager.getAll() : [];
     const mangaFavorites = win.MangaFavoritesManager?.getAll ? win.MangaFavoritesManager.getAll() : [];
+    const customLists = win.CustomListsManager?.getAll ? win.CustomListsManager.getAll() : [];
     const history = win.HistoryManager?.getAll ? win.HistoryManager.getAll() : [];
     const mangaHistory = win.MangaHistoryManager?.getAll ? win.MangaHistoryManager.getAll() : [];
     const animeWatched = win.AnimeWatchedManager?.getAll ? win.AnimeWatchedManager.getAll() : {};
     const scheduleReminders = win.ScheduleReminderManager?.getAll ? win.ScheduleReminderManager.getAll() : [];
     return {
-      schemaVersion: '2.4.0',
+      schemaVersion: '2.5.0',
       exportedAt: new Date().toISOString(),
       app: 'NyAnime TV',
       firebaseUid: auth.currentUser?.uid || null,
       data: {
         favorites,
         mangaFavorites,
+        customLists,
         history,
         mangaHistory,
         animeWatched,
         scheduleReminders,
         readerSettings: win.getReaderSettings ? win.getReaderSettings() : {},
+        appPreferences: win.AppPreferencesManager?.get ? win.AppPreferencesManager.get() : {},
         userProfile: win.UserManager?.getUser ? win.UserManager.getUser() : {}
       }
     };
@@ -1590,6 +1870,9 @@ export const FirebaseSyncBridge = {
     }
     if (Array.isArray(data.mangaFavorites) && win.MangaFavoritesManager?.KEY) {
       safeStorageSetItem(win.MangaFavoritesManager.KEY, JSON.stringify(data.mangaFavorites));
+    }
+    if (Array.isArray(data.customLists) && win.CustomListsManager?.KEY) {
+      safeStorageSetItem(win.CustomListsManager.KEY, JSON.stringify(data.customLists));
     }
     if (Array.isArray(data.history) && win.HistoryManager?.KEY) {
       safeStorageSetItem(
@@ -1609,6 +1892,9 @@ export const FirebaseSyncBridge = {
     if (data.readerSettings && win.applyReaderSettingsFromCloud) {
       win.applyReaderSettingsFromCloud(data.readerSettings as ReaderSettingsShape);
     }
+    if (data.appPreferences && win.AppPreferencesManager?.save) {
+      win.AppPreferencesManager.save(data.appPreferences as Record<string, unknown>, true);
+    }
     if (data.userProfile && win.UserManager?.saveUser) {
       win.UserManager.saveUser(data.userProfile as Record<string, unknown>);
     }
@@ -1616,6 +1902,282 @@ export const FirebaseSyncBridge = {
     if (auth.currentUser) {
       await runFullCloudSync();
     }
+  }
+};
+
+export interface WatchRoomParticipantRecord {
+  uid: string;
+  displayName: string;
+  avatar: string;
+  lastSeenMs: number;
+}
+
+export interface WatchRoomMessageRecord {
+  id: string;
+  uid: string;
+  displayName: string;
+  avatar: string;
+  text: string;
+  createdAt: Timestamp | null;
+}
+
+export const FirebaseWatchTogetherBridge = {
+  isAuthenticated() {
+    return Boolean(auth.currentUser);
+  },
+
+  getCurrentUid(): string | null {
+    return auth.currentUser?.uid || null;
+  },
+
+  async createRoom(input: {
+    animeId: number;
+    animeTitle: string;
+    seasonNum: number;
+    episodeNum: number;
+    playbackTime: number;
+    playbackState: 'playing' | 'paused';
+  }): Promise<string> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Inicia sesión con tu cuenta NyAnime para crear una sala compartida.');
+    const roomId = generateRoomCode();
+    const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
+    const hostName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Anfitrión')
+      .trim()
+      .slice(0, 80) || 'Anfitrión';
+    const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
+    const now = Date.now();
+    const roomPath = `watch_rooms/${roomId}`;
+
+    try {
+      await setDoc(doc(db, 'watch_rooms', roomId), {
+        roomId,
+        hostUid: user.uid,
+        hostName,
+        animeId: Math.max(0, Math.floor(Number(input.animeId || 0))),
+        animeTitle: String(input.animeTitle || 'Anime').slice(0, 240),
+        seasonNum: Math.max(1, Math.floor(Number(input.seasonNum || 1))),
+        episodeNum: Math.max(1, Math.floor(Number(input.episodeNum || 1))),
+        playbackState: input.playbackState === 'playing' ? 'playing' : 'paused',
+        playbackTime: Math.max(0, Number(input.playbackTime || 0)),
+        updatedAtMs: now,
+        status: 'active',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid), {
+        uid: user.uid,
+        roomId,
+        displayName: hostName,
+        avatar,
+        lastSeenMs: now,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      return roomId;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, roomPath);
+    }
+  },
+
+  async joinRoom(roomIdRaw: string): Promise<WatchRoomState> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Inicia sesión para unirte a la sala compartida.');
+    const roomId = normalizeRoomCode(roomIdRaw);
+    const roomPath = `watch_rooms/${roomId}`;
+    try {
+      const snap = await getDoc(doc(db, 'watch_rooms', roomId));
+      if (!snap.exists()) {
+        throw new Error(`La sala ${roomId} no existe o ya fue cerrada.`);
+      }
+      const data = snap.data() as WatchRoomState;
+      if (data.status !== 'active') {
+        throw new Error(`La sala ${roomId} ya terminó.`);
+      }
+      const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
+      const displayName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Invitado')
+        .trim()
+        .slice(0, 80) || 'Invitado';
+      const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
+      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid), {
+        uid: user.uid,
+        roomId,
+        displayName,
+        avatar,
+        lastSeenMs: Date.now(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      return data;
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('no existe') || error.message.includes('terminó'))) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.GET, roomPath);
+    }
+  },
+
+  async updatePlayback(
+    roomIdRaw: string,
+    patch: {
+      animeId?: number;
+      animeTitle?: string;
+      seasonNum?: number;
+      episodeNum?: number;
+      playbackState: 'playing' | 'paused';
+      playbackTime: number;
+    }
+  ): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) return;
+    const roomId = normalizeRoomCode(roomIdRaw);
+    const path = `watch_rooms/${roomId}`;
+    try {
+      const fields: Record<string, unknown> = {
+        playbackState: patch.playbackState === 'playing' ? 'playing' : 'paused',
+        playbackTime: Math.max(0, Number(patch.playbackTime || 0)),
+        updatedAtMs: Date.now(),
+        updatedAt: serverTimestamp()
+      };
+      if (typeof patch.animeId === 'number') fields.animeId = Math.max(0, Math.floor(patch.animeId));
+      if (typeof patch.animeTitle === 'string' && patch.animeTitle) fields.animeTitle = patch.animeTitle.slice(0, 240);
+      if (typeof patch.seasonNum === 'number') fields.seasonNum = Math.max(1, Math.floor(patch.seasonNum));
+      if (typeof patch.episodeNum === 'number') fields.episodeNum = Math.max(1, Math.floor(patch.episodeNum));
+      await updateDoc(doc(db, 'watch_rooms', roomId), fields);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  },
+
+  async sendChatMessage(roomIdRaw: string, rawText: string): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Inicia sesión para chatear en la sala.');
+    const roomId = normalizeRoomCode(roomIdRaw);
+    const cleanText = sanitizeWatchChatText(rawText);
+    if (!cleanText) return;
+    const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
+    const displayName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario')
+      .trim()
+      .slice(0, 80) || 'Usuario';
+    const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
+    const msgId = sanitizeDocId(`m_${user.uid.slice(0, 10)}_${Date.now()}`);
+    const path = `watch_rooms/${roomId}/messages/${msgId}`;
+    try {
+      await setDoc(doc(db, 'watch_rooms', roomId, 'messages', msgId), {
+        uid: user.uid,
+        roomId,
+        displayName,
+        avatar,
+        text: cleanText,
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  },
+
+  async leaveRoom(roomIdRaw: string, closeIfHost = false): Promise<void> {
+    const user = auth.currentUser;
+    if (!user || !roomIdRaw) return;
+    const roomId = normalizeRoomCode(roomIdRaw);
+    try {
+      await deleteDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid)).catch(() => {});
+      if (closeIfHost) {
+        const snap = await getDoc(doc(db, 'watch_rooms', roomId)).catch(() => null);
+        if (snap?.exists() && snap.data()?.hostUid === user.uid) {
+          await updateDoc(doc(db, 'watch_rooms', roomId), {
+            status: 'closed',
+            updatedAt: serverTimestamp()
+          }).catch(() => {});
+        }
+      }
+    } catch {
+      // Best-effort cleanup
+    }
+  },
+
+  subscribeRoom(
+    roomIdRaw: string,
+    handlers: {
+      onRoom: (room: WatchRoomState | null) => void;
+      onParticipants: (items: WatchRoomParticipantRecord[]) => void;
+      onMessages: (items: WatchRoomMessageRecord[]) => void;
+      onError?: (err: Error) => void;
+    }
+  ): () => void {
+    const roomId = normalizeRoomCode(roomIdRaw);
+    const unsubs: Unsubscribe[] = [];
+
+    const roomPath = `watch_rooms/${roomId}`;
+    unsubs.push(
+      onSnapshot(
+        doc(db, 'watch_rooms', roomId),
+        (snap) => {
+          handlers.onRoom(snap.exists() ? (snap.data() as WatchRoomState) : null);
+        },
+        (error) => {
+          if (handlers.onError) handlers.onError(error);
+          else handleFirestoreError(error, OperationType.GET, roomPath);
+        }
+      )
+    );
+
+    const partPath = `watch_rooms/${roomId}/participants`;
+    unsubs.push(
+      onSnapshot(
+        collection(db, 'watch_rooms', roomId, 'participants'),
+        (snap) => {
+          const list: WatchRoomParticipantRecord[] = [];
+          snap.forEach((d) => {
+            const p = d.data();
+            list.push({
+              uid: String(p.uid || d.id),
+              displayName: String(p.displayName || 'Usuario'),
+              avatar: String(p.avatar || DEFAULT_AVATAR_URL),
+              lastSeenMs: Number(p.lastSeenMs || 0)
+            });
+          });
+          handlers.onParticipants(list);
+        },
+        (error) => {
+          if (handlers.onError) handlers.onError(error);
+          else handleFirestoreError(error, OperationType.LIST, partPath);
+        }
+      )
+    );
+
+    const msgPath = `watch_rooms/${roomId}/messages`;
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'watch_rooms', roomId, 'messages'), orderBy('createdAt', 'asc'), limit(60)),
+        (snap) => {
+          const msgs: WatchRoomMessageRecord[] = [];
+          snap.forEach((d) => {
+            const m = d.data();
+            msgs.push({
+              id: d.id,
+              uid: String(m.uid || ''),
+              displayName: String(m.displayName || 'Usuario'),
+              avatar: String(m.avatar || DEFAULT_AVATAR_URL),
+              text: String(m.text || ''),
+              createdAt: (m.createdAt as Timestamp) || null
+            });
+          });
+          handlers.onMessages(msgs);
+        },
+        (error) => {
+          if (handlers.onError) handlers.onError(error);
+          else handleFirestoreError(error, OperationType.LIST, msgPath);
+        }
+      )
+    );
+
+    return () => {
+      unsubs.forEach((u) => {
+        try { u(); } catch { /* ignore */ }
+      });
+    };
   }
 };
 
@@ -1627,6 +2189,7 @@ win.NyAnime.Core = {
   ...(win.NyAnime.Core || {}),
   firebaseAuthManager: FirebaseAuthBridge,
   commentsBridge: FirebaseCommentsBridge,
+  watchTogetherBridge: FirebaseWatchTogetherBridge,
   syncAll: () => FirebaseSyncBridge.syncAll(),
   exportBackupJSON: () => FirebaseSyncBridge.exportBackupJSON(),
   importBackupJSON: (json: Record<string, unknown>) => FirebaseSyncBridge.importBackupJSON(json)

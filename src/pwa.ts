@@ -5,6 +5,7 @@ import {
   shouldAllowSwTriggeredReload,
   trySafeReload
 } from './utils/pwaReloadGuard.ts';
+import { urlBase64ToUint8Array } from './utils/pushNotifications.ts';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -29,6 +30,13 @@ interface PWAWindow extends Window {
     openInstallModal: () => void;
     closeInstallModal: () => void;
     refreshUI: () => void;
+    isPushSupported: () => boolean;
+    getPushEndpoint: () => Promise<string | null>;
+    subscribeWebPush: (uid?: string) => Promise<{ ok: boolean; endpoint?: string; reason?: string }>;
+    unsubscribeWebPush: () => Promise<boolean>;
+    sendTestPush: () => Promise<boolean>;
+    dispatchAiringPush: (items: Array<{ animeId: number; title: string; episode: number; body: string }>) => Promise<boolean>;
+    sendWeeklyDigestPush: (headline: string) => Promise<boolean>;
   };
   showToast?: (msg: string, opts?: ToastActionOptions) => void;
 }
@@ -187,6 +195,151 @@ function closePWAInstallModal() {
   if (modal) modal.classList.remove('active');
 }
 
+function isPushSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    'serviceWorker' in navigator &&
+    'PushManager' in window &&
+    'Notification' in window
+  );
+}
+
+async function getActiveSwRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    const existing = await navigator.serviceWorker.getRegistration();
+    if (existing) return existing;
+    return await navigator.serviceWorker.register('/sw-push.js').catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
+async function getPushEndpoint(): Promise<string | null> {
+  if (!isPushSupported()) return null;
+  try {
+    const reg = await getActiveSwRegistration();
+    if (!reg) return null;
+    const sub = await reg.pushManager.getSubscription();
+    return sub?.endpoint || null;
+  } catch {
+    return null;
+  }
+}
+
+async function subscribeWebPush(uid = 'local'): Promise<{ ok: boolean; endpoint?: string; reason?: string }> {
+  if (!isPushSupported()) {
+    return { ok: false, reason: 'Tu navegador no soporta Web Push.' };
+  }
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') {
+    return { ok: false, reason: 'Permiso de notificaciones denegado en el navegador.' };
+  }
+  const reg = await getActiveSwRegistration();
+  if (!reg) {
+    return { ok: false, reason: 'Service Worker no disponible aún en este entorno.' };
+  }
+
+  try {
+    const keyResp = await fetch('/api/push/vapid-public-key');
+    if (!keyResp.ok) {
+      return { ok: false, reason: 'No se pudo obtener la clave VAPID del servidor.' };
+    }
+    const { publicKey } = (await keyResp.json()) as { publicKey?: string };
+    if (!publicKey) {
+      return { ok: false, reason: 'Clave VAPID vacía.' };
+    }
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const appServerKey = urlBase64ToUint8Array(publicKey);
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: appServerKey.buffer as ArrayBuffer
+      });
+    }
+
+    const subJson = sub.toJSON();
+    const saveResp = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, subscription: subJson })
+    });
+    if (!saveResp.ok) {
+      return { ok: false, reason: 'Error registrando la suscripción en el servidor.' };
+    }
+
+    localStorage.setItem('nyanime_push_enabled', '1');
+    return { ok: true, endpoint: sub.endpoint };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : 'Error suscribiendo a Web Push.' };
+  }
+}
+
+async function unsubscribeWebPush(): Promise<boolean> {
+  try {
+    const reg = await getActiveSwRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) {
+      await fetch('/api/push/unsubscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint })
+      }).catch(() => {});
+      await sub.unsubscribe();
+    }
+    localStorage.removeItem('nyanime_push_enabled');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sendTestPush(): Promise<boolean> {
+  try {
+    const endpoint = await getPushEndpoint();
+    const resp = await fetch('/api/push/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint })
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function dispatchAiringPush(
+  items: Array<{ animeId: number; title: string; episode: number; body: string }>
+): Promise<boolean> {
+  if (!items || items.length === 0) return false;
+  try {
+    const endpoint = await getPushEndpoint();
+    const resp = await fetch('/api/push/check-airing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint, items })
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function sendWeeklyDigestPush(headline: string): Promise<boolean> {
+  try {
+    const endpoint = await getPushEndpoint();
+    const resp = await fetch('/api/push/send-weekly-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint, headline })
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 pwaWin.NyAnimePWA = {
   isInstallable: () => Boolean(deferredPrompt),
   isInstalled: () => isInstalledState,
@@ -197,7 +350,14 @@ pwaWin.NyAnimePWA = {
   applyUpdate: applyPWAUpdate,
   openInstallModal: openPWAInstallModal,
   closeInstallModal: closePWAInstallModal,
-  refreshUI: refreshPWAInstallUI
+  refreshUI: refreshPWAInstallUI,
+  isPushSupported,
+  getPushEndpoint,
+  subscribeWebPush,
+  unsubscribeWebPush,
+  sendTestPush,
+  dispatchAiringPush,
+  sendWeeklyDigestPush
 };
 
 if (document.readyState === 'loading') {

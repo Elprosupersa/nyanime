@@ -293,6 +293,11 @@ export function compactAnimeStorageEntry(
     : [];
 
   const nextEpNum = Number(src.nextAiringEpisode?.episode || 0);
+  const nextEpAiringAt = Number(src.nextAiringEpisode?.airingAt || 0);
+  const idMal = Number(src.idMal || 0);
+  const averageScore = Number(src.averageScore || 0);
+  const rawUserScore = src.userScore !== undefined && src.userScore !== null ? Math.round(Number(src.userScore)) : null;
+
   const compact: Record<string, any> = {
     id: src.id,
     title: {
@@ -309,14 +314,44 @@ export function compactAnimeStorageEntry(
     genres
   };
 
+  if (Number.isFinite(idMal) && idMal > 0) {
+    compact.idMal = Math.floor(idMal);
+  }
+  if (Number.isFinite(averageScore) && averageScore > 0) {
+    compact.averageScore = Math.round(averageScore);
+  }
   if (bannerImage) {
     compact.bannerImage = bannerImage;
   }
   if (Number.isFinite(nextEpNum) && nextEpNum > 0) {
-    compact.nextAiringEpisode = { episode: Math.floor(nextEpNum) };
+    compact.nextAiringEpisode =
+      Number.isFinite(nextEpAiringAt) && nextEpAiringAt > 0
+        ? { episode: Math.floor(nextEpNum), airingAt: Math.floor(nextEpAiringAt) }
+        : { episode: Math.floor(nextEpNum) };
   }
   if (typeof src.hentailaSlug === 'string' && src.hentailaSlug.trim()) {
     compact.hentailaSlug = src.hentailaSlug.trim().slice(0, 200);
+  }
+  if (rawUserScore !== null && Number.isFinite(rawUserScore) && rawUserScore >= 1 && rawUserScore <= 10) {
+    compact.userScore = rawUserScore;
+  }
+  if (typeof src.userReview === 'string' && src.userReview.trim()) {
+    compact.userReview = src.userReview.trim().slice(0, 280);
+  }
+  if (typeof src.userNotes === 'string' && src.userNotes.trim()) {
+    compact.userNotes = src.userNotes.trim().slice(0, 500);
+  }
+  if (Number.isFinite(Number(src.scoreUpdatedAt)) && Number(src.scoreUpdatedAt) > 0) {
+    compact.scoreUpdatedAt = Math.floor(Number(src.scoreUpdatedAt));
+  }
+  if (Array.isArray(src.customListIds) && src.customListIds.length > 0) {
+    compact.customListIds = Array.from(
+      new Set(
+        src.customListIds
+          .map((x: unknown) => String(x || '').trim().slice(0, 64))
+          .filter((x: string) => /^[a-zA-Z0-9_-]+$/.test(x))
+      )
+    ).slice(0, 25);
   }
   return compact;
 }
@@ -356,6 +391,8 @@ export function mergeAnimeFavoriteMetadata(
   const mergedGenres = (next.genres.length > 0 ? next.genres : prev.genres).slice(0, 12);
   const mergedSlug = next.hentailaSlug || prev.hentailaSlug;
   const mergedNextEp = next.nextAiringEpisode || prev.nextAiringEpisode || null;
+  const mergedIdMal = next.idMal || prev.idMal;
+  const mergedAvgScore = next.averageScore || prev.averageScore;
 
   const result: Record<string, any> = {
     id: rawNext.id ?? rawPrev.id,
@@ -369,6 +406,12 @@ export function mergeAnimeFavoriteMetadata(
     listUpdatedAt: Math.max(0, Math.floor(Number(nowMs || Date.now())))
   };
 
+  if (mergedIdMal) {
+    result.idMal = mergedIdMal;
+  }
+  if (mergedAvgScore) {
+    result.averageScore = mergedAvgScore;
+  }
   if (mergedBanner) {
     result.bannerImage = mergedBanner;
   }
@@ -377,6 +420,29 @@ export function mergeAnimeFavoriteMetadata(
   }
   if (mergedSlug) {
     result.hentailaSlug = mergedSlug;
+  }
+
+  const finalScore = next.userScore ?? prev.userScore;
+  if (finalScore !== undefined) {
+    result.userScore = finalScore;
+  }
+  const finalReview = next.userReview ?? prev.userReview;
+  if (finalReview) {
+    result.userReview = finalReview;
+  }
+  const finalNotes = next.userNotes ?? prev.userNotes;
+  if (finalNotes) {
+    result.userNotes = finalNotes;
+  }
+  const finalScoreTs = Math.max(Number(next.scoreUpdatedAt || 0), Number(prev.scoreUpdatedAt || 0));
+  if (finalScoreTs > 0) {
+    result.scoreUpdatedAt = finalScoreTs;
+  }
+  const finalLists = Array.isArray(rawNext.customListIds)
+    ? next.customListIds || []
+    : prev.customListIds || [];
+  if (finalLists && finalLists.length > 0) {
+    result.customListIds = finalLists;
   }
 
   return result;

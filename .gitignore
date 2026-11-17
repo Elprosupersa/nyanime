@@ -15,6 +15,8 @@ test_tbate_investigation.py
 # Credenciales y Variables de Entorno
 .env
 .env*.local
+.nyanime-vapid.json
+.nyanime-push-subs.json
 *.key
 *.pem
 *.keystore

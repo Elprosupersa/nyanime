@@ -20,9 +20,11 @@
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "@types/web-push": "^3.6.4",
     "eslint": "^10.14.0",
     "firebase": "^13.3.0",
     "hls.js": "^1.7.4",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "web-push": "^4.0.0"
   }
 }

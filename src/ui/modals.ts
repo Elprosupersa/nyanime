@@ -1,4 +1,5 @@
 import {
+  CustomListsManager,
   DownloadManager,
   FavoritesManager,
   MangaFavoritesManager,
@@ -7,6 +8,8 @@ import {
   SuggestionsManager,
   UserManager,
   cerrarModales,
+  escHtml,
+  getActiveManga,
   nWin,
   safeImg,
   showToast,
@@ -14,6 +17,8 @@ import {
   uiHooks
 } from './appState.ts';
 import { formatWatchDuration } from '../utils/profileStats.ts';
+import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
+import { sanitizeShortText, sanitizeUserScore } from '../utils/libraryEnhancements.ts';
 import {
   DEFAULT_AVATAR_URL,
   compressAvatarImageInBrowser,
@@ -396,6 +401,94 @@ const MODALS_MARKUP = `
       <button class="oled-btn-secondary" style="width:100%; justify-content:center;" onclick="cerrarModales()">
         Entendido
       </button>
+    </div>
+  </div>
+
+  <!-- MODAL: NUEVA LISTA PERSONALIZADA -->
+  <div class="ny-dialog" id="modal-custom-list" onclick="cerrarModales(event)">
+    <div class="ny-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header">
+        <div class="ny-dialog-title">📁 Nueva Colección Personalizada</div>
+        <div class="ny-dialog-close" onclick="cerrarModales()">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </div>
+      </div>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+        Crea carpetas temáticas como "Para ver el finde", "Top Isekai" o "Clásicos 90s" para organizar tus animes y mangas.
+      </div>
+      <div style="margin-bottom:12px;">
+        <div class="avatar-section-label">NOMBRE DE LA COLECCIÓN</div>
+        <input type="text" id="input-custom-list-name" maxlength="48" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); padding:10px 12px; border-radius:10px; color:white; font-family:inherit; font-size:13px;" placeholder="Ej. Maratón de Finde">
+      </div>
+      <div style="margin-bottom:12px;">
+        <div class="avatar-section-label">ICONO</div>
+        <div class="custom-list-icon-row" id="custom-list-icon-row">
+          <button type="button" class="chip active" data-icon="📁" onclick="seleccionarIconoListaNueva('📁', this)">📁</button>
+          <button type="button" class="chip" data-icon="⭐" onclick="seleccionarIconoListaNueva('⭐', this)">⭐</button>
+          <button type="button" class="chip" data-icon="🔥" onclick="seleccionarIconoListaNueva('🔥', this)">🔥</button>
+          <button type="button" class="chip" data-icon="🎌" onclick="seleccionarIconoListaNueva('🎌', this)">🎌</button>
+          <button type="button" class="chip" data-icon="📚" onclick="seleccionarIconoListaNueva('📚', this)">📚</button>
+          <button type="button" class="chip" data-icon="💎" onclick="seleccionarIconoListaNueva('💎', this)">💎</button>
+          <button type="button" class="chip" data-icon="🌙" onclick="seleccionarIconoListaNueva('🌙', this)">🌙</button>
+          <button type="button" class="chip" data-icon="⚡" onclick="seleccionarIconoListaNueva('⚡', this)">⚡</button>
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <div class="avatar-section-label">COLOR DE ETIQUETA</div>
+        <div class="custom-list-color-row" id="custom-list-color-row">
+          <button type="button" class="color-swatch-btn active" style="background:#ff1a40;" data-color="#ff1a40" onclick="seleccionarColorListaNueva('#ff1a40', this)" aria-label="Rojo"></button>
+          <button type="button" class="color-swatch-btn" style="background:#38bdf8;" data-color="#38bdf8" onclick="seleccionarColorListaNueva('#38bdf8', this)" aria-label="Azul"></button>
+          <button type="button" class="color-swatch-btn" style="background:#a78bfa;" data-color="#a78bfa" onclick="seleccionarColorListaNueva('#a78bfa', this)" aria-label="Violeta"></button>
+          <button type="button" class="color-swatch-btn" style="background:#34d399;" data-color="#34d399" onclick="seleccionarColorListaNueva('#34d399', this)" aria-label="Verde"></button>
+          <button type="button" class="color-swatch-btn" style="background:#fbbf24;" data-color="#fbbf24" onclick="seleccionarColorListaNueva('#fbbf24', this)" aria-label="Ámbar"></button>
+          <button type="button" class="color-swatch-btn" style="background:#fb7185;" data-color="#fb7185" onclick="seleccionarColorListaNueva('#fb7185', this)" aria-label="Rosa"></button>
+        </div>
+      </div>
+      <button type="button" class="btn-download-season" style="width:100%; justify-content:center; padding:12px;" onclick="crearListaPersonalizada()">
+        Crear Colección
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL: CALIFICACIÓN Y NOTAS PERSONALES -->
+  <div class="ny-dialog" id="modal-personal-review" onclick="cerrarModales(event)">
+    <div class="ny-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header">
+        <div class="ny-dialog-title" id="review-modal-title">⭐ Calificar y Escribir Nota</div>
+        <div class="ny-dialog-close" onclick="cerrarModales()">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </div>
+      </div>
+      <div id="review-modal-subtitle" style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Puntuación personal (1–10 ★) y notas privadas</div>
+      <div style="margin-bottom:12px;">
+        <div class="avatar-section-label">TU PUNTUACIÓN (1–10)</div>
+        <div class="score-picker-grid" id="review-score-picker"></div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div class="avatar-section-label">RESEÑA CORTA (HASTA 280 CARACTERES)</div>
+        <textarea id="input-personal-review" maxlength="280" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:10px; color:white; font-family:inherit; font-size:12px; min-height:68px;" placeholder="Tu opinión breve sobre la serie..."></textarea>
+      </div>
+      <div style="margin-bottom:14px;">
+        <div class="avatar-section-label">NOTAS PRIVADAS (SOLO PARA TI · EJ. EPISODIO O RECORDATORIO)</div>
+        <textarea id="input-personal-notes" maxlength="500" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:10px; color:white; font-family:inherit; font-size:12px; min-height:68px;" placeholder="Notas personales privadas..."></textarea>
+      </div>
+      <div class="oled-btn-row">
+        <button type="button" class="oled-btn-secondary" onclick="cerrarModales()">Cancelar</button>
+        <button type="button" class="btn-download-season" style="flex:1; justify-content:center;" onclick="guardarResenaPersonal()">Guardar Calificación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: RESUMEN SEMANAL -->
+  <div class="ny-dialog" id="modal-weekly-summary" onclick="cerrarModales(event)">
+    <div class="ny-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header">
+        <div class="ny-dialog-title">📊 Tu Resumen Semanal</div>
+        <div class="ny-dialog-close" onclick="cerrarModales()">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </div>
+      </div>
+      <div id="weekly-summary-body"></div>
     </div>
   </div>
 `;
@@ -989,3 +1082,175 @@ export function enviarSugerencia(): void {
   cerrarModales();
   showToast('💌 ¡Muchas gracias! Tu sugerencia ha sido enviada al creador.');
 }
+
+let pendingListColor = '#ff1a40';
+let pendingListIcon = '📁';
+let pendingReviewTarget: { kind: 'anime' | 'manga'; item: any; score: number | null } | null = null;
+
+export function abrirModalNuevaLista(): void {
+  ensureModalsMounted();
+  pendingListColor = '#ff1a40';
+  pendingListIcon = '📁';
+  const input = document.getElementById('input-custom-list-name') as HTMLInputElement | null;
+  if (input) input.value = '';
+  document.querySelectorAll('#custom-list-icon-row .chip').forEach((c) => {
+    c.classList.toggle('active', (c as HTMLElement).dataset.icon === '📁');
+  });
+  document.querySelectorAll('#custom-list-color-row .color-swatch-btn').forEach((c) => {
+    c.classList.toggle('active', (c as HTMLElement).dataset.color === '#ff1a40');
+  });
+  document.getElementById('modal-custom-list')?.classList.add('active');
+}
+
+export function seleccionarIconoListaNueva(icon: string, btn?: HTMLElement | null): void {
+  pendingListIcon = icon || '📁';
+  document.querySelectorAll('#custom-list-icon-row .chip').forEach((c) => c.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+export function seleccionarColorListaNueva(color: string, btn?: HTMLElement | null): void {
+  pendingListColor = color || '#ff1a40';
+  document.querySelectorAll('#custom-list-color-row .color-swatch-btn').forEach((c) => c.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+export function crearListaPersonalizada(): void {
+  const input = document.getElementById('input-custom-list-name') as HTMLInputElement | null;
+  const rawName = sanitizeShortText(input?.value || '', 48);
+  if (!rawName) {
+    showToast('Escribe un nombre para la colección.');
+    return;
+  }
+  const created = CustomListsManager.create(rawName, {
+    color: pendingListColor,
+    icon: pendingListIcon
+  });
+  if (!created) return;
+  cerrarModales();
+  showToast(`${created.icon} Lista "${created.name}" creada`);
+}
+
+function renderReviewScorePicker(): void {
+  const wrap = document.getElementById('review-score-picker');
+  if (!wrap || !pendingReviewTarget) return;
+  const current = pendingReviewTarget.score;
+  const scores: Array<number | null> = [null, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  wrap.innerHTML = scores
+    .map((s) => {
+      const isSelected = current === s;
+      const label = s === null ? 'Sin nota' : `★ ${s}`;
+      return `<button type="button" class="score-pill-btn ${isSelected ? 'active' : ''}" onclick="seleccionarPuntuacionModal(${s === null ? 'null' : s})">${label}</button>`;
+    })
+    .join('');
+}
+
+export function seleccionarPuntuacionModal(score: number | null): void {
+  if (!pendingReviewTarget) return;
+  pendingReviewTarget.score = score === null ? null : sanitizeUserScore(score);
+  renderReviewScorePicker();
+}
+
+export function abrirModalResenaPersonal(kind: 'anime' | 'manga', itemId: string | number): void {
+  ensureModalsMounted();
+  let item: any = null;
+  if (kind === 'anime') {
+    const activeDet = nWin.getActiveDetailAnimeEntry?.();
+    item =
+      FavoritesManager.getEntry(itemId) ||
+      (activeDet && String(activeDet.id) === String(itemId) ? activeDet : null) ||
+      (state.anime && String(state.anime.id) === String(itemId) ? state.anime : null) ||
+      activeDet ||
+      state.anime;
+  } else {
+    const activeM = getActiveManga();
+    item =
+      MangaFavoritesManager.getEntry(itemId) ||
+      (activeM && String(activeM.id) === String(itemId) ? activeM : null) ||
+      activeM;
+  }
+  if (!item) {
+    showToast('Guarda primero el título en tu biblioteca para calificarlo.');
+    return;
+  }
+
+  pendingReviewTarget = {
+    kind,
+    item,
+    score: sanitizeUserScore(item.userScore)
+  };
+
+  const titleEl = document.getElementById('review-modal-title');
+  const subEl = document.getElementById('review-modal-subtitle');
+  const revEl = document.getElementById('input-personal-review') as HTMLTextAreaElement | null;
+  const notesEl = document.getElementById('input-personal-notes') as HTMLTextAreaElement | null;
+
+  const displayTitle =
+    kind === 'anime'
+      ? item.title?.english || item.title?.romaji || 'Anime'
+      : item.title || 'Manga';
+
+  if (titleEl) titleEl.textContent = `⭐ ${displayTitle}`;
+  if (subEl) subEl.textContent = kind === 'anime' ? 'Calificación (se sincroniza con AniList/MAL si está conectado)' : 'Calificación y notas privadas de manga';
+  if (revEl) revEl.value = String(item.userReview || '');
+  if (notesEl) notesEl.value = String(item.userNotes || '');
+  renderReviewScorePicker();
+  document.getElementById('modal-personal-review')?.classList.add('active');
+}
+
+export function guardarResenaPersonal(): void {
+  if (!pendingReviewTarget) return;
+  const revEl = document.getElementById('input-personal-review') as HTMLTextAreaElement | null;
+  const notesEl = document.getElementById('input-personal-notes') as HTMLTextAreaElement | null;
+  const patch = {
+    userScore: pendingReviewTarget.score,
+    userReview: revEl?.value || '',
+    userNotes: notesEl?.value || ''
+  };
+  const ok =
+    pendingReviewTarget.kind === 'anime'
+      ? FavoritesManager.setRatingAndNotes(pendingReviewTarget.item, patch)
+      : MangaFavoritesManager.setRatingAndNotes(pendingReviewTarget.item, patch);
+
+  if (ok) {
+    cerrarModales();
+    showToast('Calificación y notas guardadas ★');
+  }
+}
+
+export function abrirModalResumenSemanal(): void {
+  ensureModalsMounted();
+  const bodyEl = document.getElementById('weekly-summary-body');
+  if (!bodyEl) return;
+
+  const digest = buildWeeklyDigestSummary({
+    history: HistoryManager.getAll(),
+    mangaHistory: MangaHistoryManager.getAll(),
+    favorites: FavoritesManager.getAll()
+  });
+
+  bodyEl.innerHTML = `
+    <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">${escHtml(digest.weekLabel)}</div>
+    <div style="background:rgba(255,26,64,0.08); border:1px solid rgba(255,26,64,0.28); border-radius:12px; padding:12px; margin-bottom:12px; font-size:13px; color:#fff; font-weight:700;">
+      ${escHtml(digest.headline)}
+    </div>
+    <div class="weekly-digest-grid">
+      <div class="stat-card"><div class="stat-label">Episodios</div><div class="stat-num">${digest.episodesWatchedCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Minutos</div><div class="stat-num">${digest.minutesWatched}m</div></div>
+      <div class="stat-card"><div class="stat-label">Mangas</div><div class="stat-num">${digest.chaptersReadCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Series activas</div><div class="stat-num">${digest.activeSeriesCount}</div></div>
+    </div>
+    ${
+      digest.watchingTitles.length > 0
+        ? `<div style="margin:12px 0; font-size:12px; color:var(--text-muted);">
+            <strong style="color:#fff;">Actualmente viendo:</strong> ${digest.watchingTitles.map((t) => escHtml(t)).join(' · ')}
+           </div>`
+        : ''
+    }
+    <div class="oled-btn-row" style="margin-top:12px;">
+      <button type="button" class="oled-btn-secondary" onclick="enviarResumenSemanalPush()">📲 Enviar como Push</button>
+      <button type="button" class="btn-download-season" style="flex:1; justify-content:center;" onclick="cerrarModales()">Cerrar</button>
+    </div>
+  `;
+  document.getElementById('modal-weekly-summary')?.classList.add('active');
+}
+
