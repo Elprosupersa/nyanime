@@ -1,5 +1,7 @@
 import {
   ANILIST_URL,
+  type AnimeListStatus,
+  AnimeWatchedManager,
   CacheManager,
   FavoritesManager,
   HistoryManager,
@@ -13,6 +15,7 @@ import {
   uiHooks
 } from './appState.ts';
 import { computeProgressPercent, formatPlaybackTime } from '../utils/playerResume.ts';
+import { ANIME_LIST_CATEGORIES, countWatchedForAnime, getCategoryMeta } from '../utils/profileStats.ts';
 import { AniListMangaService } from './mangaCatalogView.ts';
 import {
   HENTAILA_GENRES,
@@ -1238,6 +1241,7 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
 }
 
 let subTabFavoritos: 'anime' | 'manga' = 'anime';
+let favAnimeCategoryFilter: AnimeListStatus | 'all' = 'all';
 
 export function cambiarSubTabFavoritos(tipo: 'anime' | 'manga', el: HTMLElement | null = null): void {
   subTabFavoritos = tipo;
@@ -1248,40 +1252,73 @@ export function cambiarSubTabFavoritos(tipo: 'anime' | 'manga', el: HTMLElement 
 
 export function renderFavoritos(): void {
   const container = document.getElementById('resultados-favoritos');
+  const statusBar = document.getElementById('favoritos-anime-status-tabs');
   if (!container) return;
   container.innerHTML = '';
 
   if (subTabFavoritos === 'anime') {
-    const list = FavoritesManager.getAll();
+    const counts = FavoritesManager.getCounts();
+    if (statusBar) {
+      statusBar.classList.remove('hide');
+      statusBar.innerHTML = '';
+      const allChip = document.createElement('button');
+      allChip.type = 'button';
+      allChip.className = `chip ${favAnimeCategoryFilter === 'all' ? 'active' : ''}`;
+      allChip.textContent = `Todos (${counts.all})`;
+      allChip.onclick = () => {
+        favAnimeCategoryFilter = 'all';
+        renderFavoritos();
+      };
+      statusBar.appendChild(allChip);
+
+      ANIME_LIST_CATEGORIES.forEach((cat) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `chip ${favAnimeCategoryFilter === cat.id ? 'active' : ''}`;
+        chip.textContent = `${cat.label} (${counts[cat.id]})`;
+        chip.onclick = () => {
+          favAnimeCategoryFilter = cat.id;
+          renderFavoritos();
+        };
+        statusBar.appendChild(chip);
+      });
+    }
+
+    const list = FavoritesManager.getByStatus(favAnimeCategoryFilter);
     if (list.length === 0) {
       container.innerHTML = `
         <div style="grid-column: 1/-1; text-align:center; padding:50px 20px;">
           <div style="font-size:44px; margin-bottom:12px;">🎬</div>
-          <div style="font-weight:700; font-size:16px; color:white; margin-bottom:6px;">No tienes animes guardados</div>
-          <div style="font-size:12px; color:var(--text-muted); margin-bottom:18px;">Guarda tus animes preferidos para verlos cuando quieras.</div>
-          <button class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('inicio')">✨ Explorar Animes</button>
+          <div style="font-weight:700; font-size:16px; color:white; margin-bottom:6px;">${favAnimeCategoryFilter === 'all' ? 'No tienes animes guardados' : 'No hay animes en esta categoría'}</div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:18px;">Guarda tus animes preferidos y organízalos como Viendo, Por Ver o Completados.</div>
+          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('inicio')">✨ Explorar Animes</button>
         </div>
       `;
       return;
     }
+    const watchedMap = AnimeWatchedManager.getAll();
     list.forEach(anime => {
       const title = escHtml(anime.title?.english || anime.title?.romaji || 'Anime');
       const fallback = generarPortadaSVG(anime.title?.english || anime.title?.romaji || 'Anime', 'ja', 'Anime');
       const img = escHtml(safeImg(anime.coverImage?.large || anime.coverImage?.extraLarge, fallback));
-      const totalEps = escHtml(anime.episodes || anime.nextAiringEpisode?.episode || '?');
+      const prog = countWatchedForAnime(anime, watchedMap);
+      const totalLabel = prog.totalEpisodes > 0 ? `${prog.watchedCount}/${prog.totalEpisodes} EP` : `${prog.watchedCount > 0 ? prog.watchedCount : '?'} EP`;
+      const catMeta = getCategoryMeta(anime.listStatus || 'plan_to_watch');
       const card = document.createElement('div');
       card.className = 'card-h fade-in';
       card.onclick = () => { void uiHooks.abrirDetalle(anime); };
       card.innerHTML = `
         <div class="card-h-img-wrap">
           <img src="${img}" alt="${title}" loading="lazy" onerror="this.onerror=null; this.src='${fallback}';">
-          <div class="ep-badge">${totalEps} EP</div>
+          <div class="ep-badge">${escHtml(totalLabel)}</div>
+          <div class="card-cat-strip" style="color:${catMeta.accentColor}; border-color:${catMeta.borderTint};">${escHtml(catMeta.shortLabel)}</div>
         </div>
         <div class="card-h-title">${title}</div>
       `;
       container.appendChild(card);
     });
   } else {
+    if (statusBar) statusBar.classList.add('hide');
     const list = MangaFavoritesManager.getAll();
     if (list.length === 0) {
       container.innerHTML = `
@@ -1289,7 +1326,7 @@ export function renderFavoritos(): void {
           <div style="font-size:44px; margin-bottom:12px;">📖</div>
           <div style="font-weight:700; font-size:16px; color:white; margin-bottom:6px;">No tienes mangas guardados</div>
           <div style="font-size:12px; color:var(--text-muted); margin-bottom:18px;">Guarda tus mangas y manhwas favoritos para acceder a sus capítulos.</div>
-          <button class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('lectura')">✨ Explorar Catálogo de Mangas</button>
+          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('lectura')">✨ Explorar Catálogo de Mangas</button>
         </div>
       `;
       return;

@@ -1,3 +1,5 @@
+import { type AnimeListStatus, mapExternalStatusToListStatus } from '../utils/profileStats.ts';
+
 export interface ImportedAnimeItem {
   id: number;
   title: { romaji: string; english: string };
@@ -8,6 +10,8 @@ export interface ImportedAnimeItem {
   episodes?: number | null;
   genres?: string[];
   description?: string;
+  listStatus?: AnimeListStatus;
+  watchedProgress?: number;
 }
 
 export interface ImportedMangaItem {
@@ -52,7 +56,10 @@ export async function importFromAniList(username: string): Promise<ExternalImpor
     query ($userName: String) {
       animeList: MediaListCollection(userName: $userName, type: ANIME) {
         lists {
+          status
           entries {
+            status
+            progress
             media {
               id
               title { romaji english }
@@ -96,7 +103,12 @@ export async function importFromAniList(username: string): Promise<ExternalImpor
   const json = (await resp.json()) as {
     errors?: Array<{ message?: string; status?: number }>;
     data?: {
-      animeList?: { lists?: Array<{ entries?: Array<{ media: ImportedAnimeItem }> }> };
+      animeList?: {
+        lists?: Array<{
+          status?: string;
+          entries?: Array<{ status?: string; progress?: number; media: ImportedAnimeItem }>;
+        }>;
+      };
       mangaList?: {
         lists?: Array<{
           entries?: Array<{
@@ -125,7 +137,13 @@ export async function importFromAniList(username: string): Promise<ExternalImpor
   }
 
   const rawAnimes =
-    json.data?.animeList?.lists?.flatMap((l) => (l.entries || []).map((e) => e.media)) || [];
+    json.data?.animeList?.lists?.flatMap((l) =>
+      (l.entries || []).map((e) => ({
+        ...e.media,
+        listStatus: mapExternalStatusToListStatus(e.status || l.status),
+        watchedProgress: Math.max(0, Math.floor(Number(e.progress || 0)))
+      }))
+    ) || [];
   const rawMangas =
     json.data?.mangaList?.lists?.flatMap((l) => (l.entries || []).map((e) => e.media)) || [];
 
@@ -193,6 +211,8 @@ export async function importFromMyAnimeList(username: string): Promise<ExternalI
     if (jikanAnimelistResp.ok) {
       const payload = (await jikanAnimelistResp.json()) as {
         data?: Array<{
+          watching_status?: number;
+          episodes_watched?: number;
           anime?: {
             mal_id?: number;
             title?: string;
@@ -216,7 +236,9 @@ export async function importFromMyAnimeList(username: string): Promise<ExternalI
           format: a.type || 'TV',
           status: 'FINISHED',
           episodes: a.episodes || null,
-          genres: []
+          genres: [],
+          listStatus: mapExternalStatusToListStatus(entry.watching_status),
+          watchedProgress: Math.max(0, Math.floor(Number(entry.episodes_watched || 0)))
         });
       }
     }
@@ -238,6 +260,8 @@ export async function importFromMyAnimeList(username: string): Promise<ExternalI
           anime_image_path?: string;
           anime_media_type_string?: string;
           anime_num_episodes?: number;
+          status?: number;
+          num_watched_episodes?: number;
         }>;
         if (Array.isArray(rows)) {
           for (const row of rows.slice(0, 150)) {
@@ -253,7 +277,9 @@ export async function importFromMyAnimeList(username: string): Promise<ExternalI
               format: row.anime_media_type_string || 'TV',
               status: 'FINISHED',
               episodes: row.anime_num_episodes || null,
-              genres: []
+              genres: [],
+              listStatus: mapExternalStatusToListStatus(row.status),
+              watchedProgress: Math.max(0, Math.floor(Number(row.num_watched_episodes || 0)))
             });
           }
         }

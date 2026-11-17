@@ -1,5 +1,6 @@
 import {
   ANILIST_URL,
+  type AnimeListStatus,
   AnimeWatchedManager,
   CacheManager,
   DownloadManager,
@@ -12,6 +13,12 @@ import {
   showToast,
   state
 } from './appState.ts';
+import { ANIME_LIST_CATEGORIES, getCategoryMeta } from '../utils/profileStats.ts';
+import {
+  buildSeasonEpisodeRanges,
+  computeEpisodeSelectionByMode,
+  type DownloadPickerFilterMode
+} from '../utils/downloadHelpers.ts';
 import { ensureModalsMounted } from './modals.ts';
 import {
   StreamExtractor,
@@ -20,6 +27,11 @@ import {
 } from './playerView.ts';
 
 let seasonDownloadAbortCtrl: AbortController | null = null;
+let episodeMarkMode = false;
+let libraryMenuOpen = false;
+let dlModalWatchedSet = new Set<number>();
+let dlModalOfflineSet = new Set<number>();
+let dlModalTotalEpisodes = 0;
 
 export function calcularEpisodiosReales(media: any): number {
   if (nWin.NyAnimeSeasons?.computeAvailableEpisodes) {
@@ -144,16 +156,26 @@ export function iniciarOContinuarAnime(): void {
 }
 
 export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => void): Promise<void> {
+  const numericCandidate = typeof animeInput === 'string' ? Number(animeInput) : NaN;
+  const normalizedId =
+    typeof animeInput === 'number'
+      ? animeInput
+      : typeof animeInput === 'string'
+        ? (Number.isFinite(numericCandidate) && numericCandidate > 0 ? numericCandidate : animeInput)
+        : undefined;
   const anime =
     typeof animeInput === 'number' || typeof animeInput === 'string'
-      ? { id: Number(animeInput), title: { romaji: '', english: '' } }
+      ? { id: normalizedId, title: { romaji: '', english: '' } }
       : animeInput || {};
   state.anime = anime;
+  state.fullMedia = null;
   nWin.Store?.setActiveAnime?.(anime);
   state.temporadaActualIdx = 0;
   state.rangoActualIdx = 0;
   state.seasonMenuOpen = false;
   state.episodeMetaMap = {};
+  episodeMarkMode = false;
+  libraryMenuOpen = false;
 
   const epsProvisional = calcularEpisodiosReales(anime);
   const provTitle = anime?.title?.english || anime?.title?.romaji || 'Temporada 1';
@@ -431,7 +453,10 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
   const activeSeason = state.seasons[state.temporadaActualIdx];
   if (activeSeason) {
     aplicarMetadatosTemporadaUI(activeSeason, state.anime);
+    updateFavoriteButton(activeSeason.id || anime.id);
     void cargarAniZipMappingAsync(activeSeason.id);
+  } else {
+    updateFavoriteButton(anime.id);
   }
 
   renderTemporadasDropdown();
@@ -478,27 +503,250 @@ export async function cargarAniZipMappingAsync(seasonAnimeId: number | string): 
   return mapping;
 }
 
-export function updateFavoriteButton(id: number | string): void {
+export function getActiveDetailAnimeEntry(): any {
+  const base = state.anime || {};
+  const media = state.fullMedia || {};
+  const activeSeason = state.seasons?.[state.temporadaActualIdx];
+  if (!activeSeason || !activeSeason.id) {
+    const rawId = base.id ?? media.id;
+    if (!rawId) return null;
+    const rawTitle = base.title || media.title || {};
+    const coverUrl =
+      base.coverImage?.extraLarge ||
+      base.coverImage?.large ||
+      media.coverImage?.extraLarge ||
+      media.coverImage?.large ||
+      '';
+    const nextEp = Number(base.nextAiringEpisode?.episode || media.nextAiringEpisode?.episode || 0);
+    return {
+      id: rawId,
+      title: {
+        romaji: rawTitle.romaji || rawTitle.english || 'Anime',
+        english: rawTitle.english || rawTitle.romaji || 'Anime'
+      },
+      coverImage: {
+        extraLarge: coverUrl,
+        large: base.coverImage?.large || media.coverImage?.large || coverUrl
+      },
+      bannerImage: base.bannerImage || media.bannerImage || '',
+      format: base.format || media.format || 'TV',
+      status: base.status || media.status || 'FINISHED',
+      episodes: Number(base.episodes || media.episodes || 0) || null,
+      genres: Array.isArray(media.genres) && media.genres.length > 0
+        ? media.genres
+        : Array.isArray(base.genres)
+          ? base.genres
+          : [],
+      ...(nextEp > 0 ? { nextAiringEpisode: { episode: nextEp } } : {}),
+      ...(base.hentailaSlug ? { hentailaSlug: base.hentailaSlug } : {})
+    };
+  }
+  const sameAsBase = String(activeSeason.id) === String(base.id);
+  const titleRomaji =
+    activeSeason.romaji ||
+    (sameAsBase ? base.title?.romaji : '') ||
+    activeSeason.title ||
+    base.title?.romaji ||
+    'Anime';
+  const titleEnglish =
+    activeSeason.english ||
+    (sameAsBase ? base.title?.english : '') ||
+    activeSeason.title ||
+    titleRomaji;
+  const coverUrl =
+    activeSeason.coverImage ||
+    (sameAsBase ? base.coverImage?.extraLarge || base.coverImage?.large : '') ||
+    media.coverImage?.extraLarge ||
+    media.coverImage?.large ||
+    base.coverImage?.extraLarge ||
+    base.coverImage?.large ||
+    '';
+  const totalEps =
+    Number(activeSeason.totalEpisodes || 0) > 0
+      ? Number(activeSeason.totalEpisodes)
+      : (sameAsBase ? Number(base.episodes || media.episodes || 0) || null : null);
+  const nextEp = Number(
+    (sameAsBase ? base.nextAiringEpisode?.episode || media.nextAiringEpisode?.episode : 0) || 0
+  );
+
+  return {
+    id: activeSeason.id,
+    title: {
+      romaji: titleRomaji,
+      english: titleEnglish
+    },
+    coverImage: {
+      extraLarge: coverUrl,
+      large: coverUrl
+    },
+    bannerImage: activeSeason.bannerImage || (sameAsBase ? base.bannerImage : '') || coverUrl,
+    format: activeSeason.format || base.format || 'TV',
+    status: activeSeason.status || base.status || 'FINISHED',
+    episodes: totalEps,
+    genres:
+      Array.isArray(media.genres) && media.genres.length > 0
+        ? media.genres
+        : Array.isArray(base.genres)
+          ? base.genres
+          : [],
+    ...(nextEp > 0 ? { nextAiringEpisode: { episode: nextEp } } : {}),
+    ...(sameAsBase && base.hentailaSlug ? { hentailaSlug: base.hentailaSlug } : {})
+  };
+}
+
+function getLibraryCategoryIconSvg(kind: AnimeListStatus | 'add' | 'remove'): string {
+  switch (kind) {
+    case 'watching':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+    case 'plan_to_watch':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+    case 'completed':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4"/></svg>';
+    case 'on_hold':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><line x1="10" y1="9" x2="10" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="14" y1="9" x2="14" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    case 'dropped':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    case 'remove':
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 6h14M3 12h10M3 18h7m5-2 5 5m0-5-5 5"/></svg>';
+    default:
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><line x1="12" y1="8" x2="12" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="9" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  }
+}
+
+export function updateFavoriteButton(id?: number | string): void {
+  const targetId = id ?? getActiveDetailAnimeEntry()?.id ?? state.anime?.id;
+  if (!targetId) return;
   const btn = document.getElementById('det-fav-btn');
-  if (!btn) return;
-  const isFav = FavoritesManager.isFavorite(id);
-  btn.classList.toggle('favorited', isFav);
+  const isFav = FavoritesManager.isFavorite(targetId);
+  if (btn) btn.classList.toggle('favorited', isFav);
+
+  const statusBar = document.getElementById('det-library-status-bar');
+  if (!statusBar) return;
+  const currentStatus = FavoritesManager.getStatus(targetId);
+  const activeMeta = currentStatus ? getCategoryMeta(currentStatus) : null;
+  statusBar.classList.toggle('open', libraryMenuOpen);
+
+  const triggerStyle = activeMeta
+    ? `background:${activeMeta.bgTint}; border-color:${activeMeta.borderTint}; color:${activeMeta.accentColor};`
+    : '';
+
+  statusBar.innerHTML = `
+    <button type="button"
+            class="det-lib-trigger ${activeMeta ? 'has-status' : ''}"
+            id="det-lib-trigger"
+            aria-haspopup="menu"
+            aria-expanded="${libraryMenuOpen ? 'true' : 'false'}"
+            style="${triggerStyle}"
+            onclick="toggleDetalleLibraryMenu(event)">
+      <span class="det-lib-trigger-left">
+        <span class="det-lib-icon">${getLibraryCategoryIconSvg(activeMeta ? activeMeta.id : 'add')}</span>
+        <span class="det-lib-trigger-text">${activeMeta ? escHtml(activeMeta.label) : 'Guardar en lista'}</span>
+      </span>
+      <span class="det-lib-caret" aria-hidden="true">▼</span>
+    </button>
+    <div class="det-lib-menu" id="det-lib-menu" role="menu" aria-label="Guardar en lista">
+      ${
+        currentStatus
+          ? `
+            <button type="button"
+                    role="menuitem"
+                    class="det-lib-option det-lib-option-remove"
+                    onclick="quitarAnimeDetalleDeBiblioteca()">
+              <span class="det-lib-icon">${getLibraryCategoryIconSvg('remove')}</span>
+              <span class="det-lib-option-label">Quitar</span>
+            </button>
+            <div class="det-lib-menu-divider" role="separator"></div>
+          `
+          : ''
+      }
+      ${ANIME_LIST_CATEGORIES.map((cat) => {
+        const active = currentStatus === cat.id;
+        return `
+          <button type="button"
+                  role="menuitemradio"
+                  aria-checked="${active ? 'true' : 'false'}"
+                  class="det-lib-option ${active ? 'active' : ''}"
+                  data-status="${cat.id}"
+                  style="${active ? `background:${cat.bgTint};` : ''}"
+                  onclick="cambiarCategoriaDetalleAnime('${cat.id}')">
+            <span class="det-lib-icon" style="color:${cat.accentColor};">${getLibraryCategoryIconSvg(cat.id)}</span>
+            <span class="det-lib-option-label" style="${active ? `color:${cat.accentColor};` : ''}">${escHtml(cat.label)}</span>
+            ${active ? `<span class="det-lib-option-check" style="color:${cat.accentColor};" aria-hidden="true">✓</span>` : ''}
+          </button>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+export function toggleDetalleLibraryMenu(event?: Event): void {
+  if (event) event.stopPropagation();
+  const statusBar = document.getElementById('det-library-status-bar');
+  if (!statusBar) return;
+  libraryMenuOpen = !libraryMenuOpen;
+  if (libraryMenuOpen && state.seasonMenuOpen) {
+    state.seasonMenuOpen = false;
+    document.getElementById('det-temporadas')?.classList.remove('open');
+  }
+  statusBar.classList.toggle('open', libraryMenuOpen);
+  const trigger = document.getElementById('det-lib-trigger');
+  if (trigger) trigger.setAttribute('aria-expanded', libraryMenuOpen ? 'true' : 'false');
+}
+
+export function cambiarCategoriaDetalleAnime(status: AnimeListStatus): void {
+  const entry = getActiveDetailAnimeEntry();
+  libraryMenuOpen = false;
+  if (!entry?.id) return;
+  const existing = FavoritesManager.getStatus(entry.id);
+  if (existing === status) {
+    const meta = getCategoryMeta(status);
+    showToast(`Ya está en ${meta.label}`);
+    updateFavoriteButton(entry.id);
+    return;
+  }
+  FavoritesManager.setStatus(entry, status);
+}
+
+export function quitarAnimeDetalleDeBiblioteca(): void {
+  const entry = getActiveDetailAnimeEntry();
+  libraryMenuOpen = false;
+  if (!entry?.id) return;
+  FavoritesManager.remove(entry.id);
 }
 
 export function toggleFavoriteCurrentAnime(): void {
-  if (state.anime) {
-    FavoritesManager.toggle(state.anime);
+  const entry = getActiveDetailAnimeEntry();
+  if (entry?.id) {
+    FavoritesManager.toggle(entry, 'watching');
   }
+}
+
+export function toggleEpisodeMarkMode(): void {
+  episodeMarkMode = !episodeMarkMode;
+  renderDetalleEpisodios();
 }
 
 if (!nWin._crunchyOutsideClickBound) {
   nWin._crunchyOutsideClickBound = true;
   document.addEventListener('click', (e) => {
-    const wrap = document.getElementById('det-temporadas');
     const target = e.target as Node | null;
+    const wrap = document.getElementById('det-temporadas');
     if (wrap && wrap.classList.contains('open') && (!target || !wrap.contains(target))) {
       state.seasonMenuOpen = false;
       wrap.classList.remove('open');
+    }
+    const libBar = document.getElementById('det-library-status-bar');
+    if (libBar && libBar.classList.contains('open') && (!target || !libBar.contains(target))) {
+      libraryMenuOpen = false;
+      libBar.classList.remove('open');
+      document.getElementById('det-lib-trigger')?.setAttribute('aria-expanded', 'false');
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && libraryMenuOpen) {
+      libraryMenuOpen = false;
+      document.getElementById('det-library-status-bar')?.classList.remove('open');
+      document.getElementById('det-lib-trigger')?.setAttribute('aria-expanded', 'false');
     }
   });
 }
@@ -508,6 +756,11 @@ export function toggleCrunchySeasonMenu(event?: Event): void {
   const wrap = document.getElementById('det-temporadas');
   if (!wrap) return;
   state.seasonMenuOpen = !state.seasonMenuOpen;
+  if (state.seasonMenuOpen && libraryMenuOpen) {
+    libraryMenuOpen = false;
+    document.getElementById('det-library-status-bar')?.classList.remove('open');
+    document.getElementById('det-lib-trigger')?.setAttribute('aria-expanded', 'false');
+  }
   wrap.classList.toggle('open', state.seasonMenuOpen);
   if (state.seasonMenuOpen) {
     const activeOpt = wrap.querySelector('.crunchy-season-option.active');
@@ -520,9 +773,11 @@ export function seleccionarTemporadaDetalle(idx: number): void {
   state.temporadaActualIdx = idx;
   state.rangoActualIdx = 0;
   state.seasonMenuOpen = false;
+  libraryMenuOpen = false;
   state.episodeMetaMap = {};
   const selected = state.seasons[idx];
   aplicarMetadatosTemporadaUI(selected, state.anime);
+  updateFavoriteButton(selected.id || state.anime?.id);
   renderTemporadasDropdown();
   renderDetalleEpisodios();
   actualizarBotonContinuarDetalleAnime();
@@ -621,6 +876,8 @@ export function renderDetalleEpisodios(): void {
   const headerTitle = document.getElementById('det-header-title');
   const rangosContainer = document.getElementById('det-rangos');
   const dlBtn = document.querySelector('#pantalla-detalle .btn-download-season') as HTMLElement | null;
+  const markModeBtn = document.getElementById('det-mark-mode-btn') as HTMLButtonElement | null;
+  const markHint = document.getElementById('det-mark-hint') as HTMLElement | null;
 
   if (!epContainer || !rangosContainer) return;
   epContainer.innerHTML = '';
@@ -630,6 +887,14 @@ export function renderDetalleEpisodios(): void {
   if (countEl) countEl.innerText = season.episodeLabel || `${season.totalEpisodes} Episodios`;
   if (headerTitle) headerTitle.innerText = season.title || 'Episodios';
   if (dlBtn) dlBtn.style.display = season.totalEpisodes > 0 ? 'flex' : 'none';
+  if (markModeBtn) {
+    markModeBtn.style.display = season.totalEpisodes > 0 ? 'inline-flex' : 'none';
+    markModeBtn.classList.toggle('active', episodeMarkMode);
+    markModeBtn.textContent = episodeMarkMode ? '✓ Listo' : '✓ Marcar vistos';
+  }
+  if (markHint) {
+    markHint.classList.toggle('hide', !episodeMarkMode || season.totalEpisodes <= 0);
+  }
 
   if (season.isUpcoming || season.totalEpisodes === 0) {
     epContainer.innerHTML = season.isUpcoming
@@ -663,21 +928,53 @@ export function renderDetalleEpisodios(): void {
   const watchedSet = AnimeWatchedManager.getWatchedSet(season.id);
 
   for (let i = startEp; i <= endEp; i++) {
+    const isWatched = watchedSet.has(i);
     const btn = document.createElement('button');
-    btn.className = `ep-btn ${watchedSet.has(i) ? 'watched' : ''}`;
+    btn.type = 'button';
+    btn.className = `ep-btn ${isWatched ? 'watched' : ''} ${episodeMarkMode ? 'mark-mode' : ''}`;
+    btn.dataset.ep = String(i);
     btn.innerText = String(i);
     if (state.episodeMetaMap?.[i]?.title) {
       btn.title = `Episodio ${i}: ${state.episodeMetaMap[i].title}`;
     }
-    btn.onclick = () => nWin.abrirReproductor?.(i);
+    btn.onclick = () => {
+      if (episodeMarkMode) {
+        AnimeWatchedManager.markWatched(season.id, i, !isWatched, {
+          totalEpisodes: Number(season.totalEpisodes || state.anime?.episodes || 0)
+        });
+        renderDetalleEpisodios();
+      } else {
+        nWin.abrirReproductor?.(i);
+      }
+    };
     epContainer.appendChild(btn);
   }
   actualizarBotonContinuarDetalleAnime();
+
+  if (nWin.NyAnimeOffline?.getOfflineEpisodesForAnime) {
+    const targetSeasonId = season.id;
+    const targetSeasonNum = Number(season.seasonNumber || 1);
+    void nWin.NyAnimeOffline.getOfflineEpisodesForAnime(targetSeasonId, targetSeasonNum).then((offlineEps: Set<number>) => {
+      if (!offlineEps || offlineEps.size === 0) return;
+      document.querySelectorAll('#det-episodios .ep-btn').forEach((btnEl) => {
+        const epNum = Number((btnEl as HTMLElement).dataset.ep || '0');
+        if (offlineEps.has(epNum)) {
+          btnEl.classList.add('offline-cached');
+          const curTitle = (btnEl as HTMLElement).title;
+          if (!curTitle.includes('Disponible offline')) {
+            (btnEl as HTMLElement).title = curTitle ? `${curTitle} · Disponible offline` : `Episodio ${epNum} · Disponible offline`;
+          }
+        }
+      });
+    }).catch(() => {});
+  }
 }
 
 export function cerrarDetalle(): void {
   state.seasonMenuOpen = false;
+  libraryMenuOpen = false;
   document.getElementById('det-temporadas')?.classList.remove('open');
+  document.getElementById('det-library-status-bar')?.classList.remove('open');
   document.getElementById('pantalla-detalle')?.classList.add('hide');
 }
 
@@ -691,12 +988,60 @@ function getCleanBaseTitleForFilename(rawTitle: string): string {
     .trim();
 }
 
-export function abrirModalDescargaTemporada(): void {
+export function actualizarResumenSeleccionDescarga(): void {
+  const checkedBoxes = document.querySelectorAll('#descarga-ep-list .cb-dl-ep:checked');
+  const count = checkedBoxes.length;
+  const total = dlModalTotalEpisodes || document.querySelectorAll('#descarga-ep-list .cb-dl-ep').length;
+
+  const badgeEl = document.getElementById('dl-selection-summary');
+  if (badgeEl) {
+    badgeEl.textContent = `${count} de ${total} seleccionados`;
+  }
+
+  const audioEl = document.getElementById('select-audio-descarga') as HTMLSelectElement | null;
+  const qualityEl = document.getElementById('select-calidad-descarga') as HTMLSelectElement | null;
+  const destEl = document.getElementById('select-destino-descarga') as HTMLSelectElement | null;
+  const audioLabel = audioEl?.value === 'DUB' ? 'Audio Latino' : 'Sub Español';
+  const qualityLabel = qualityEl?.value === '720p' ? '720p' : '1080p';
+  const destLabel = destEl?.value === 'cache' ? 'Solo app' : 'Offline + .MP4';
+
+  const footerSum = document.getElementById('dl-footer-summary');
+  if (footerSum) {
+    footerSum.textContent = count > 0
+      ? `${count} ${count === 1 ? 'episodio' : 'episodios'} · ${qualityLabel} · ${audioLabel} · ${destLabel}`
+      : 'Ningún episodio seleccionado';
+  }
+
+  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
+  if (startBtn && !seasonDownloadAbortCtrl) {
+    startBtn.disabled = count === 0;
+    startBtn.textContent = count > 0
+      ? `Descargar ${count} ${count === 1 ? 'episodio' : 'episodios'}`
+      : 'Selecciona episodios';
+  }
+
+  document.querySelectorAll('#descarga-ep-list .dl-ep-card').forEach((card) => {
+    const cb = card.querySelector('.cb-dl-ep') as HTMLInputElement | null;
+    card.classList.toggle('selected', Boolean(cb?.checked));
+  });
+}
+
+function setEpisodeCardDownloadState(ep: number, text: string, tone: 'idle' | 'active' | 'done' | 'warn' | 'error'): void {
+  const card = document.querySelector(`#descarga-ep-list .dl-ep-card[data-ep="${ep}"]`) as HTMLElement | null;
+  const stateEl = card?.querySelector('.dl-ep-live-state') as HTMLElement | null;
+  if (!card || !stateEl) return;
+  stateEl.textContent = text;
+  stateEl.className = `dl-ep-live-state ${tone}`;
+}
+
+export async function abrirModalDescargaTemporada(): Promise<void> {
   ensureModalsMounted();
   const season = state.seasons?.[state.temporadaActualIdx] || {
+    id: state.anime?.id || 0,
     seasonNumber: 1,
     shortTag: 'T1',
     title: state.anime?.title?.english || state.anime?.title?.romaji || 'Temporada 1',
+    coverImage: state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || '',
     totalEpisodes: calcularEpisodiosReales(state.anime) || 1
   };
   const seasonTitle =
@@ -707,33 +1052,116 @@ export function abrirModalDescargaTemporada(): void {
     state.anime?.title?.romaji ||
     'Anime';
   const shortTag = season.shortTag || `T${season.seasonNumber || 1}`;
+  const total = Math.max(1, Number(season.totalEpisodes || 1));
+  dlModalTotalEpisodes = total;
+
+  dlModalWatchedSet = AnimeWatchedManager.getWatchedSet(season.id || state.anime?.id || 0);
+  dlModalOfflineSet = nWin.NyAnimeOffline?.getOfflineEpisodesForAnime
+    ? await nWin.NyAnimeOffline.getOfflineEpisodesForAnime(season.id || state.anime?.id || 0, Number(season.seasonNumber || 1))
+    : new Set<number>();
+
+  const coverUrl =
+    season.coverImage ||
+    state.anime?.coverImage?.large ||
+    state.anime?.coverImage?.extraLarge ||
+    '';
+  const coverEl = document.getElementById('dl-series-cover') as HTMLImageElement | null;
+  if (coverEl) {
+    if (coverUrl) {
+      coverEl.src = coverUrl;
+      coverEl.alt = seasonTitle;
+      coverEl.classList.remove('hide');
+    } else {
+      coverEl.classList.add('hide');
+    }
+  }
+
+  const titleEl = document.getElementById('descarga-temporada-title');
+  if (titleEl) titleEl.textContent = seasonTitle;
 
   const infoEl = document.getElementById('descarga-temporada-info');
   if (infoEl) {
-    infoEl.textContent = `${shortTag} · ${seasonTitle} (${season.totalEpisodes} episodios)`;
+    const watchedCount = dlModalWatchedSet.size;
+    const offlineCount = dlModalOfflineSet.size;
+    infoEl.textContent = `${shortTag} · ${total} ${total === 1 ? 'episodio' : 'episodios'} · ${watchedCount} vistos · ${offlineCount} offline`;
   }
+
+  const audioEl = document.getElementById('select-audio-descarga') as HTMLSelectElement | null;
+  if (audioEl) audioEl.value = state.modoAudio === 'DUB' ? 'DUB' : 'SUB';
+
+  const filterInput = document.getElementById('dl-ep-filter-input') as HTMLInputElement | null;
+  if (filterInput) filterInput.value = '';
+
   const progBox = document.getElementById('season-dl-progress-box');
   if (progBox) progBox.classList.add('hide');
-  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
-  if (startBtn) {
-    startBtn.disabled = false;
-    startBtn.textContent = '🚀 Descargar Episodios Seleccionados (.MP4)';
+
+  const rangesContainer = document.getElementById('dl-range-chips');
+  if (rangesContainer) {
+    const ranges = buildSeasonEpisodeRanges(total);
+    if (ranges.length > 0) {
+      rangesContainer.classList.remove('hide');
+      rangesContainer.innerHTML = ranges
+        .map(
+          (r) =>
+            `<button type="button" class="dl-range-btn" onclick="seleccionarRangoDescarga(${r.start}, ${r.end})">${escHtml(r.label)}</button>`
+        )
+        .join('');
+    } else {
+      rangesContainer.classList.add('hide');
+      rangesContainer.innerHTML = '';
+    }
   }
+
+  const defaultSelected =
+    dlModalOfflineSet.size > 0 && dlModalOfflineSet.size < total
+      ? computeEpisodeSelectionByMode({
+          totalEpisodes: total,
+          mode: 'not-downloaded',
+          watchedEpisodes: dlModalWatchedSet,
+          offlineEpisodes: dlModalOfflineSet
+        })
+      : computeEpisodeSelectionByMode({
+          totalEpisodes: total,
+          mode: 'all',
+          watchedEpisodes: dlModalWatchedSet,
+          offlineEpisodes: dlModalOfflineSet
+        });
+
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => {
+    const mode = (btn as HTMLElement).dataset.dlMode;
+    btn.classList.toggle(
+      'active',
+      dlModalOfflineSet.size > 0 && dlModalOfflineSet.size < total ? mode === 'not-downloaded' : mode === 'all'
+    );
+  });
 
   const listContainer = document.getElementById('descarga-ep-list');
   if (!listContainer) return;
-  listContainer.innerHTML = '';
 
-  const total = Number(season.totalEpisodes || 1);
+  const cardsHtml: string[] = [];
   for (let i = 1; i <= total; i++) {
-    listContainer.innerHTML += `
-      <label class="download-ep-row" style="cursor:pointer;">
-        <span>Episodio ${i}</span>
-        <input type="checkbox" class="cb-dl-ep" value="${i}" checked style="accent-color:var(--primary); transform:scale(1.2)">
-      </label>
-    `;
-  }
+    const isChecked = defaultSelected.has(i);
+    const isWatched = dlModalWatchedSet.has(i);
+    const isOffline = dlModalOfflineSet.has(i);
+    const statusParts: string[] = [];
+    if (isOffline) statusParts.push('Offline');
+    if (isWatched) statusParts.push('Visto');
+    const subText = statusParts.length > 0 ? statusParts.join(' · ') : 'Disponible';
+    const epMetaTitle = state.episodeMetaMap?.[i]?.title ? ` title="${escHtml(state.episodeMetaMap[i].title)}"` : '';
 
+    cardsHtml.push(`
+      <label class="dl-ep-card ${isChecked ? 'selected' : ''} ${isOffline ? 'is-offline' : ''}" data-ep="${i}"${epMetaTitle}>
+        <div class="dl-ep-card-top">
+          <span class="dl-ep-num tabular-nums">Ep. ${i}</span>
+          <input type="checkbox" class="cb-dl-ep" value="${i}" ${isChecked ? 'checked' : ''} onchange="actualizarResumenSeleccionDescarga()">
+        </div>
+        <div class="dl-ep-live-state ${isOffline ? 'done' : 'idle'}">${subText}</div>
+      </label>
+    `);
+  }
+  listContainer.innerHTML = cardsHtml.join('');
+
+  actualizarResumenSeleccionDescarga();
   document.getElementById('modal-descarga-temporada')?.classList.add('active');
 }
 
@@ -744,22 +1172,68 @@ export function cancelarDescargaTemporada(): void {
   }
   const progBox = document.getElementById('season-dl-progress-box');
   if (progBox) progBox.classList.add('hide');
-  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
-  if (startBtn) {
-    startBtn.disabled = false;
-    startBtn.textContent = '🚀 Descargar Episodios Seleccionados (.MP4)';
-  }
+  actualizarResumenSeleccionDescarga();
   showToast('Descarga de episodios cancelada.');
 }
 
 export function toggleTodosEpisodiosDescarga(check: boolean): void {
-  document.querySelectorAll('.cb-dl-ep').forEach((el) => {
-    (el as HTMLInputElement).checked = check;
+  aplicarFiltroDescargaEpisodios(check ? 'all' : 'none');
+}
+
+export function aplicarFiltroDescargaEpisodios(mode: DownloadPickerFilterMode): void {
+  const selection = computeEpisodeSelectionByMode({
+    totalEpisodes: dlModalTotalEpisodes || document.querySelectorAll('#descarga-ep-list .cb-dl-ep').length,
+    mode,
+    watchedEpisodes: dlModalWatchedSet,
+    offlineEpisodes: dlModalOfflineSet
+  });
+
+  document.querySelectorAll('#descarga-ep-list .cb-dl-ep').forEach((el) => {
+    const cb = el as HTMLInputElement;
+    const epNum = parseInt(cb.value, 10);
+    cb.checked = selection.has(epNum);
+  });
+
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => {
+    btn.classList.toggle('active', (btn as HTMLElement).dataset.dlMode === mode);
+  });
+  document.querySelectorAll('#dl-range-chips .dl-range-btn').forEach((btn) => btn.classList.remove('active'));
+
+  actualizarResumenSeleccionDescarga();
+}
+
+export function seleccionarRangoDescarga(start: number, end: number): void {
+  document.querySelectorAll('#descarga-ep-list .cb-dl-ep').forEach((el) => {
+    const cb = el as HTMLInputElement;
+    const epNum = parseInt(cb.value, 10);
+    cb.checked = epNum >= start && epNum <= end;
+  });
+
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => btn.classList.remove('active'));
+  document.querySelectorAll('#dl-range-chips .dl-range-btn').forEach((btn) => {
+    const label = start === end ? `Ep. ${start}` : `${start}–${end}`;
+    btn.classList.toggle('active', btn.textContent?.trim() === label);
+  });
+
+  const firstCard = document.querySelector(`#descarga-ep-list .dl-ep-card[data-ep="${start}"]`);
+  firstCard?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  actualizarResumenSeleccionDescarga();
+}
+
+export function filtrarListaEpisodiosDescarga(rawQuery: string): void {
+  const needle = String(rawQuery || '').trim().toLowerCase();
+  document.querySelectorAll('#descarga-ep-list .dl-ep-card').forEach((card) => {
+    const el = card as HTMLElement;
+    const ep = el.dataset.ep || '';
+    const title = (el.title || '').toLowerCase();
+    const visible = !needle || ep.includes(needle) || title.includes(needle);
+    el.classList.toggle('hide', !visible);
   });
 }
 
 export async function iniciarDescargaLote(): Promise<void> {
-  const selected = Array.from(document.querySelectorAll('.cb-dl-ep:checked')).map((el) =>
+  const selected = Array.from(document.querySelectorAll('#descarga-ep-list .cb-dl-ep:checked')).map((el) =>
     parseInt((el as HTMLInputElement).value, 10)
   );
   if (selected.length === 0) {
@@ -790,7 +1264,13 @@ export async function iniciarDescargaLote(): Promise<void> {
     '';
 
   const qualityEl = document.getElementById('select-calidad-descarga') as HTMLSelectElement | null;
+  const audioEl = document.getElementById('select-audio-descarga') as HTMLSelectElement | null;
+  const destEl = document.getElementById('select-destino-descarga') as HTMLSelectElement | null;
+
   const quality = qualityEl?.value || '1080p';
+  const preferredAudio = (audioEl?.value === 'DUB' ? 'DUB' : 'SUB') as 'SUB' | 'DUB';
+  const saveFileToDisk = destEl?.value !== 'cache';
+
   const baseSlug = seasonTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -798,6 +1278,7 @@ export async function iniciarDescargaLote(): Promise<void> {
 
   const progBox = document.getElementById('season-dl-progress-box');
   const progText = document.getElementById('season-dl-progress-text');
+  const progPctEl = document.getElementById('season-dl-progress-pct');
   const progBar = document.getElementById('season-dl-progress-bar') as HTMLElement | null;
   const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
 
@@ -807,10 +1288,13 @@ export async function iniciarDescargaLote(): Promise<void> {
   seasonDownloadAbortCtrl = new AbortController();
   const signal = seasonDownloadAbortCtrl.signal;
 
+  selected.forEach((ep) => setEpisodeCardDownloadState(ep, 'En cola', 'idle'));
   if (progBox) progBox.classList.remove('hide');
+  if (progPctEl) progPctEl.textContent = '0%';
+  if (progBar) progBar.style.width = '0%';
   if (startBtn) {
     startBtn.disabled = true;
-    startBtn.textContent = 'Descargando episodios .MP4...';
+    startBtn.textContent = `Descargando (${selected.length})...`;
   }
 
   let mp4Count = 0;
@@ -821,9 +1305,11 @@ export async function iniciarDescargaLote(): Promise<void> {
       if (signal.aborted) break;
       const ep = selected[idx];
       const basePct = Math.round((idx / selected.length) * 100);
+      setEpisodeCardDownloadState(ep, 'Resolviendo...', 'active');
       if (progText) {
-        progText.textContent = `Resolviendo servidor .MP4 para T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length})...`;
+        progText.textContent = `Resolviendo T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length})...`;
       }
+      if (progPctEl) progPctEl.textContent = `${basePct}%`;
       if (progBar) progBar.style.width = `${basePct}%`;
 
       let fallbackUrl = `https://animeav1.com/media/${baseSlug}/${ep}`;
@@ -832,7 +1318,7 @@ export async function iniciarDescargaLote(): Promise<void> {
       try {
         const ctx = await resolverContextoEpisodio(ep);
         const raw = await videoSourceManager.fetchRawSources(ctx);
-        const ranked = videoSourceManager.rankRawSources(raw, state.modoAudio);
+        const ranked = videoSourceManager.rankRawSources(raw, preferredAudio);
         if (ranked[0]?.url) fallbackUrl = ranked[0].url;
 
         mp4Candidates = ranked.filter(
@@ -866,20 +1352,24 @@ export async function iniciarDescargaLote(): Promise<void> {
               quality,
               directStreamUrl: extracted.streamUrl,
               fallbackWebUrl: fallbackUrl,
-              saveToDeviceFilename: rawFilename,
+              saveToDeviceFilename: saveFileToDisk ? rawFilename : undefined,
               signal,
               onProgress: (pct: number, loadedBytes: number) => {
                 const overall = Math.min(100, Math.round(((idx + pct / 100) / selected.length) * 100));
                 const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
+                setEpisodeCardDownloadState(ep, `${pct}% · ${mb} MB`, 'active');
                 if (progText) {
-                  progText.textContent = `Descargando T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length}) · ${pct}% (${mb} MB)...`;
+                  progText.textContent = `Descargando T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length}) · ${mb} MB`;
                 }
+                if (progPctEl) progPctEl.textContent = `${overall}%`;
                 if (progBar) progBar.style.width = `${overall}%`;
               }
             });
             if (res.kind === 'anime-video') {
               mp4Count += 1;
               downloadedMp4 = true;
+              dlModalOfflineSet.add(ep);
+              setEpisodeCardDownloadState(ep, 'Offline .MP4', 'done');
               break;
             }
           } catch (candErr: any) {
@@ -900,22 +1390,30 @@ export async function iniciarDescargaLote(): Promise<void> {
             fallbackWebUrl: fallbackUrl,
             signal
           });
-          if (res.kind === 'anime-video') mp4Count += 1;
-          else queuedCount += 1;
+          if (res.kind === 'anime-video') {
+            mp4Count += 1;
+            dlModalOfflineSet.add(ep);
+            setEpisodeCardDownloadState(ep, 'Offline .MP4', 'done');
+          } else {
+            queuedCount += 1;
+            setEpisodeCardDownloadState(ep, 'Ver luego', 'warn');
+          }
         }
       }
     }
 
     if (!signal.aborted) {
       if (progBar) progBar.style.width = '100%';
+      if (progPctEl) progPctEl.textContent = '100%';
       await DownloadManager.updateBadge();
+      renderDetalleEpisodios();
       cerrarModales();
       if (mp4Count > 0) {
         showToast(
-          `✅ ${mp4Count} episodio(s) .MP4 descargados al dispositivo y en modo offline${queuedCount > 0 ? ` (+${queuedCount} en Ver Luego)` : ''}.`
+          `${mp4Count} episodio(s) guardados en modo offline${saveFileToDisk ? ' y descargados (.MP4)' : ''}${queuedCount > 0 ? ` (+${queuedCount} en Ver Luego)` : ''}.`
         );
       } else {
-        showToast(`🔖 ${queuedCount} episodio(s) guardados en "Ver Luego".`);
+        showToast(`${queuedCount} episodio(s) guardados en "Ver Luego".`);
       }
     }
   } catch (err: any) {
@@ -925,10 +1423,7 @@ export async function iniciarDescargaLote(): Promise<void> {
   } finally {
     seasonDownloadAbortCtrl = null;
     if (progBox) progBox.classList.add('hide');
-    if (startBtn) {
-      startBtn.disabled = false;
-      startBtn.textContent = '🚀 Descargar Episodios Seleccionados (.MP4)';
-    }
+    actualizarResumenSeleccionDescarga();
   }
 }
 

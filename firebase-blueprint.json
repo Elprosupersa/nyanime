@@ -25,8 +25,12 @@
         },
         "avatar": {
           "type": "string",
-          "description": "URL del avatar seleccionado.",
-          "maxLength": 500
+          "description": "URL o Data URL comprimida del avatar seleccionado.",
+          "maxLength": 40000
+        },
+        "profileUpdatedAt": {
+          "type": "integer",
+          "description": "Marca de tiempo de la última edición manual de nombre o avatar."
         },
         "providerId": {
           "type": "string",
@@ -39,7 +43,11 @@
         },
         "totalMinutes": {
           "type": "integer",
-          "description": "Minutos totales de anime reproducidos."
+          "description": "Minutos totales reales de anime reproducidos."
+        },
+        "totalSecondsWatched": {
+          "type": "integer",
+          "description": "Segundos reales acumulados de reproducción."
         },
         "createdAt": {
           "type": "string",
@@ -89,6 +97,15 @@
         "genres": {
           "type": "array",
           "description": "Lista acotada de géneros del anime."
+        },
+        "listStatus": {
+          "type": "string",
+          "enum": ["watching", "plan_to_watch", "completed", "on_hold", "dropped"],
+          "description": "Categoría del anime en la biblioteca del usuario."
+        },
+        "listUpdatedAt": {
+          "type": "integer",
+          "description": "Marca de tiempo de última actualización de categoría."
         },
         "createdAt": {
           "type": "string",
@@ -344,7 +361,7 @@
         },
         "avatar": {
           "type": "string",
-          "maxLength": 500
+          "maxLength": 40000
         },
         "text": {
           "type": "string",
@@ -361,6 +378,38 @@
         }
       },
       "required": ["uid", "episodeKey", "displayName", "avatar", "text", "createdAt"]
+    },
+    "AnimeWatchedEntry": {
+      "title": "AnimeWatchedEntry",
+      "description": "Episodios vistos deduplicados por temporada/anime.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "seasonId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "watchedEpisodes": {
+          "type": "array",
+          "description": "Lista ordenada de números de episodios vistos."
+        },
+        "updatedAtMs": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "seasonId", "watchedEpisodes", "updatedAtMs", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -370,7 +419,11 @@
     },
     "/users/{userId}/favorites/{favoriteId}": {
       "schema": { "$ref": "#/entities/FavoriteAnime" },
-      "description": "Colección privada de animes favoritos del usuario."
+      "description": "Colección privada de animes en biblioteca del usuario con categoría."
+    },
+    "/users/{userId}/anime_watched/{seasonId}": {
+      "schema": { "$ref": "#/entities/AnimeWatchedEntry" },
+      "description": "Episodios vistos deduplicados por temporada o serie."
     },
     "/users/{userId}/manga_favorites/{mangaId}": {
       "schema": { "$ref": "#/entities/FavoriteManga" },

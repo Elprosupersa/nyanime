@@ -3,6 +3,7 @@ import {
   CommentsManager,
   DownloadManager,
   HistoryManager,
+  UserManager,
   escHtml,
   fetchWithTimeout,
   nativeFetchHtml,
@@ -15,6 +16,10 @@ import {
   formatPlaybackTime,
   shouldResumePlayback
 } from '../utils/playerResume.ts';
+import {
+  computeIframeActiveDeltaSeconds,
+  computeRealWatchDeltaSeconds
+} from '../utils/profileStats.ts';
 import {
   cargarAniZipMappingAsync,
   renderDetalleEpisodios
@@ -1052,6 +1057,42 @@ export const videoSourceManager = new SmartVideoSourceManager();
 
 let _playerWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 let _upNextIntervalTimer: ReturnType<typeof setInterval> | null = null;
+let activeVideoWatchBufferSec = 0;
+let activeVideoLastTickPos: number | null = null;
+let activeIframeLoadedAtMs: number | null = null;
+let activeIframeLastFlushedAtMs: number | null = null;
+let _playerVisibilityBound = false;
+
+function resetWatchTimeTrackers(): void {
+  activeVideoWatchBufferSec = 0;
+  activeVideoLastTickPos = null;
+  activeIframeLoadedAtMs = null;
+  activeIframeLastFlushedAtMs = null;
+}
+
+function flushWatchTimeBuffers(forceSync = false): void {
+  if (activeVideoWatchBufferSec >= 1) {
+    const whole = Math.floor(activeVideoWatchBufferSec);
+    activeVideoWatchBufferSec -= whole;
+    UserManager.addRealWatchSeconds(whole, forceSync);
+  }
+  const rep = document.getElementById('pantalla-reproductor');
+  const isPlayerOpen = Boolean(rep && !rep.classList.contains('hide'));
+  if (activeIframeLoadedAtMs !== null && activeIframeLastFlushedAtMs !== null) {
+    const now = Date.now();
+    const delta = computeIframeActiveDeltaSeconds({
+      elapsedMs: now - activeIframeLastFlushedAtMs,
+      isVisible: document.visibilityState === 'visible',
+      isPlayerOpen,
+      isIframeLoaded: true,
+      maxStepSeconds: 180
+    });
+    activeIframeLastFlushedAtMs = now;
+    if (delta >= 1) {
+      UserManager.addRealWatchSeconds(Math.floor(delta), forceSync);
+    }
+  }
+}
 
 export function cancelUpNextCountdown(): void {
   if (_upNextIntervalTimer) {
@@ -1062,6 +1103,7 @@ export function cancelUpNextCountdown(): void {
 }
 
 export function flushPlayerProgress(): void {
+  flushWatchTimeBuffers(true);
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
   if (!vidEl || !state.anime?.id) return;
   if (!Number.isFinite(vidEl.duration) || vidEl.duration <= 0) return;
@@ -1200,6 +1242,7 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
   const seasonNum = currentSeason.seasonNumber || 1;
   const seasonId = currentSeason.id || state.anime?.id;
   let resumeApplied = false;
+  resetWatchTimeTrackers();
 
   vidEl.addEventListener('loadedmetadata', () => {
     if (resumeApplied || !state.anime?.id) return;
@@ -1213,27 +1256,58 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
         label: 'Reiniciar desde 00:00',
         onClick: () => {
           vidEl.currentTime = 0;
+          activeVideoLastTickPos = 0;
           HistoryManager.saveProgress(state.anime, seasonNum, activeEp, 0, totalDuration, { force: true, seasonId });
           void vidEl.play().catch(() => {});
         }
       });
     }
+    activeVideoLastTickPos = vidEl.currentTime || 0;
     syncMediaSessionMetadata(activeEp);
   });
 
+  vidEl.addEventListener('play', () => {
+    activeVideoLastTickPos = vidEl.currentTime || 0;
+  });
+
+  vidEl.addEventListener('seeked', () => {
+    activeVideoLastTickPos = vidEl.currentTime || 0;
+  });
+
   vidEl.addEventListener('timeupdate', () => {
-    if (!state.anime?.id || !Number.isFinite(vidEl.duration) || vidEl.duration <= 0) return;
+    if (!state.anime?.id) return;
+    const curPos = Number(vidEl.currentTime || 0);
+    if (activeVideoLastTickPos !== null) {
+      const delta = computeRealWatchDeltaSeconds({
+        prevTime: activeVideoLastTickPos,
+        nextTime: curPos,
+        isPaused: vidEl.paused,
+        isSeeking: vidEl.seeking,
+        maxTickSeconds: 5
+      });
+      if (delta > 0) {
+        activeVideoWatchBufferSec += delta;
+        if (activeVideoWatchBufferSec >= 5) {
+          flushWatchTimeBuffers(false);
+        }
+      }
+    }
+    activeVideoLastTickPos = curPos;
+
+    if (!Number.isFinite(vidEl.duration) || vidEl.duration <= 0) return;
     HistoryManager.saveProgress(
       state.anime,
       seasonNum,
       activeEp,
-      vidEl.currentTime,
+      curPos,
       vidEl.duration,
       { seasonId }
     );
   });
 
   vidEl.addEventListener('pause', () => {
+    flushWatchTimeBuffers(true);
+    activeVideoLastTickPos = vidEl.currentTime || 0;
     if (!state.anime?.id || !Number.isFinite(vidEl.duration) || vidEl.duration <= 0) return;
     HistoryManager.saveProgress(
       state.anime,
@@ -1246,6 +1320,7 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
   });
 
   vidEl.addEventListener('ended', () => {
+    flushWatchTimeBuffers(true);
     if (state.anime?.id && Number.isFinite(vidEl.duration) && vidEl.duration > 0) {
       HistoryManager.saveProgress(
         state.anime,
@@ -1283,7 +1358,9 @@ export function toggleEpisodioVistoPlayer(): void {
   const sId = currentSeason?.id;
   if (!sId) return;
   const nextState = !AnimeWatchedManager.isWatched(sId, state.epActual);
-  AnimeWatchedManager.markWatched(sId, state.epActual, nextState);
+  AnimeWatchedManager.markWatched(sId, state.epActual, nextState, {
+    totalEpisodes: Number(currentSeason.totalEpisodes || state.anime?.episodes || 0)
+  });
   actualizarEstadoVistoPlayerUI();
   renderDetalleEpisodios();
   showToast(nextState ? `Episodio ${state.epActual} marcado como visto ✓` : `Episodio ${state.epActual} desmarcado`);
@@ -1326,7 +1403,7 @@ export function abrirReproductor(ep: number): void {
   nWin.Store?.setActiveEpisode?.(ep);
   updatePlayerEpisodeTitlesUI(ep);
 
-  HistoryManager.save(state.anime, currentSeason.seasonNumber || 1, ep);
+  HistoryManager.save(state.anime, currentSeason.seasonNumber || 1, ep, currentSeason.id);
 
   updatePlayerNavButtons();
   actualizarEstadoVistoPlayerUI();
@@ -1357,6 +1434,7 @@ export function navegarEpisodioPlayer(offset: number): void {
 
 export function cerrarReproductor(): void {
   flushPlayerProgress();
+  resetWatchTimeTrackers();
   cancelUpNextCountdown();
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
@@ -1508,7 +1586,7 @@ export function cambiarEpisodioRep(ep: number): void {
   nWin.Store?.setActiveEpisode?.(ep);
   updatePlayerEpisodeTitlesUI(ep);
 
-  HistoryManager.save(state.anime, currentSeason.seasonNumber || 1, ep);
+  HistoryManager.save(state.anime, currentSeason.seasonNumber || 1, ep, currentSeason.id);
   updatePlayerNavButtons();
   actualizarEstadoVistoPlayerUI();
   renderReproductorEpisodes();
@@ -1830,11 +1908,15 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   syncMediaSessionMetadata(activeEpSnapshot);
   updatePipButtonUI();
 
+  resetWatchTimeTrackers();
   const iframeEl = document.getElementById('video-player-iframe') as HTMLIFrameElement | null;
   if (iframeEl) {
     let settled = false;
     iframeEl.onload = () => {
       settled = true;
+      const now = Date.now();
+      activeIframeLoadedAtMs = now;
+      activeIframeLastFlushedAtMs = document.visibilityState === 'visible' ? now : null;
       if (_playerWatchdogTimer) {
         clearTimeout(_playerWatchdogTimer);
         _playerWatchdogTimer = null;
@@ -1845,6 +1927,16 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         mostrarAvisoCambioServidorVideo('Este servidor tarda en responder.');
       }
     }, 7000);
+  }
+  if (!_playerVisibilityBound) {
+    _playerVisibilityBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushPlayerProgress();
+      } else if (activeIframeLoadedAtMs !== null) {
+        activeIframeLastFlushedAtMs = Date.now();
+      }
+    });
   }
 }
 
@@ -2072,7 +2164,8 @@ export async function descargarEpisodioActual(): Promise<void> {
           });
           await DownloadManager.updateBadge();
           if (res.kind === 'anime-video') {
-            showToast(`✅ Archivo .MP4 descargado: ${cleanSeriesTitle} T${seasonNum} Ep ${state.epActual}`);
+            nWin.renderDetalleEpisodios?.();
+            showToast(`Archivo .MP4 descargado: ${cleanSeriesTitle} T${seasonNum} Ep ${state.epActual}`);
             return;
           }
         }

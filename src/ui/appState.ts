@@ -2,8 +2,30 @@ import {
   shouldMarkEpisodeCompleted
 } from '../utils/playerResume.ts';
 import { generarPortadaSVG } from '../utils/sanitize.ts';
+import {
+  type AnimeListStatus,
+  compactAnimeStorageEntry,
+  countUniqueWatchedEpisodes,
+  countWatchedForAnime,
+  getCategoryMeta,
+  mergeAnimeFavoriteMetadata,
+  normalizeAnimeListStatus,
+  resolveAutoListStatusTransition
+} from '../utils/profileStats.ts';
+import {
+  compactFavoritesArray,
+  compactMangaEntry,
+  hasBloatedAnimeMetadata,
+  pruneOldestApiCaches,
+  safeStorageSetItem
+} from '../utils/storageQuota.ts';
+import {
+  DEFAULT_AVATAR_URL,
+  isValidStoredAvatar
+} from '../utils/avatarHelpers.ts';
 
 export { generarPortadaSVG };
+export type { AnimeListStatus };
 
 export const ANILIST_URL = 'https://graphql.anilist.co';
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -100,6 +122,7 @@ export interface NyWindow extends Window {
   capitulosLectorList?: any[];
   mangaUiState?: any;
   refreshOfflineMangaDetailState?: (manga?: any, rerender?: boolean) => Promise<any>;
+  renderDetalleEpisodios?: () => void;
 }
 
 export const nWin = window as unknown as NyWindow;
@@ -145,6 +168,7 @@ export const state: {
 export interface UiHooks {
   renderContinuarViendo: () => void;
   renderFavoritos: () => void;
+  renderProfileUI: () => void;
   renderEmisionDiasChips: () => void;
   renderEmisionDia: (diaIdx: number) => void;
   renderContinuarLeyendoManga: () => void;
@@ -179,6 +203,7 @@ const asyncNoop = async () => {};
 export const uiHooks: UiHooks = {
   renderContinuarViendo: noop,
   renderFavoritos: noop,
+  renderProfileUI: noop,
   renderEmisionDiasChips: noop,
   renderEmisionDia: noop,
   renderContinuarLeyendoManga: noop,
@@ -540,28 +565,42 @@ export const CacheManager = {
   set(key: string, value: unknown, ttl = CACHE_TTL_MS): void {
     try {
       const item = { value, expiry: Date.now() + ttl };
-      localStorage.setItem('nyanime_cache_' + key, JSON.stringify(item));
+      const serialized = JSON.stringify(item);
+      if (serialized.length > 180_000) return;
+      pruneOldestApiCaches(localStorage, 18);
+      localStorage.setItem('nyanime_cache_' + key, serialized);
     } catch {
-      // ignore storage quota errors
+      // ignore storage quota errors for disposable API caches
     }
   }
 };
 
+let lastWatchTimeSyncAt = 0;
+
 export const UserManager = {
   KEY: 'nyanime_user_profile',
   getUser() {
+    const ledgerCount = countUniqueWatchedEpisodes(AnimeWatchedManager.getAll());
     try {
       const raw = localStorage.getItem(this.KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const realSeconds =
+          typeof parsed.stats?.totalSecondsWatched === 'number'
+            ? Math.max(0, Math.floor(parsed.stats.totalSecondsWatched))
+            : 0;
+        const episodesWatched = Math.max(ledgerCount, Math.max(0, Math.floor(Number(parsed.stats?.episodesWatched || 0))));
+        const cleanAvatar = isValidStoredAvatar(parsed.avatar) ? String(parsed.avatar) : DEFAULT_AVATAR_URL;
         return {
           username: parsed.username || 'Invitado',
-          avatar: parsed.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
+          avatar: cleanAvatar,
+          profileUpdatedAt: Math.max(0, Math.floor(Number(parsed.profileUpdatedAt || 0))),
           role: parsed.role || 'FREE',
           stats: {
-            episodesWatched: Number(parsed.stats?.episodesWatched || 0),
-            totalMinutes: Number(parsed.stats?.totalMinutes || 0),
-            completedAnimes: Number(parsed.stats?.completedAnimes || 0)
+            episodesWatched: ledgerCount > 0 || parsed.stats?.totalSecondsWatched !== undefined ? ledgerCount : episodesWatched,
+            totalMinutes: Math.floor(realSeconds / 60),
+            totalSecondsWatched: realSeconds,
+            completedAnimes: Math.max(0, Math.floor(Number(parsed.stats?.completedAnimes || 0)))
           }
         };
       }
@@ -570,27 +609,84 @@ export const UserManager = {
     }
     return {
       username: 'Invitado',
-      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
+      avatar: DEFAULT_AVATAR_URL,
+      profileUpdatedAt: 0,
       role: 'FREE',
       stats: {
-        episodesWatched: 0,
+        episodesWatched: ledgerCount,
         totalMinutes: 0,
+        totalSecondsWatched: 0,
         completedAnimes: 0
       }
     };
   },
   saveUser(user: any, skipSync = false): void {
-    localStorage.setItem(this.KEY, JSON.stringify(user));
+    const safeSeconds =
+      typeof user?.stats?.totalSecondsWatched === 'number'
+        ? Math.max(0, Math.floor(user.stats.totalSecondsWatched))
+        : Math.max(0, Math.floor(Number(user?.stats?.totalMinutes || 0) * 60));
+    const safeAvatar = isValidStoredAvatar(user?.avatar) ? String(user.avatar) : DEFAULT_AVATAR_URL;
+    const normalized = {
+      ...user,
+      username: String(user?.username || 'Invitado').trim().slice(0, 80) || 'Invitado',
+      avatar: safeAvatar,
+      profileUpdatedAt: Math.max(0, Math.floor(Number(user?.profileUpdatedAt || 0))),
+      stats: {
+        ...(user?.stats || {}),
+        episodesWatched: Math.max(0, Math.floor(Number(user?.stats?.episodesWatched || 0))),
+        totalSecondsWatched: safeSeconds,
+        totalMinutes: Math.floor(safeSeconds / 60),
+        completedAnimes: Math.max(0, Math.floor(Number(user?.stats?.completedAnimes || 0)))
+      }
+    };
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(normalized))) {
+      showToast('Espacio local lleno · No se pudo guardar tu perfil localmente.');
+    }
     this.renderProfile();
     if (!skipSync && nWin.firebaseSync?.scheduleSync) {
       nWin.firebaseSync.scheduleSync('profile');
     }
   },
-  addEpisodeWatch(): void {
+  addRealWatchSeconds(deltaSeconds: number, forceSync = false): void {
+    const cleanDelta = Number(deltaSeconds);
+    if (!Number.isFinite(cleanDelta) || cleanDelta <= 0) return;
+    const rounded = Math.max(1, Math.round(cleanDelta));
     const user = this.getUser();
-    user.stats.episodesWatched = (user.stats.episodesWatched || 0) + 1;
-    user.stats.totalMinutes = (user.stats.totalMinutes || 0) + 24;
-    this.saveUser(user);
+    const nextSeconds = Math.max(0, Math.floor(user.stats.totalSecondsWatched || 0)) + rounded;
+    user.stats.totalSecondsWatched = nextSeconds;
+    user.stats.totalMinutes = Math.floor(nextSeconds / 60);
+
+    const now = Date.now();
+    const shouldSync = forceSync || now - lastWatchTimeSyncAt >= 20000;
+    if (shouldSync) lastWatchTimeSyncAt = now;
+    this.saveUser(user, !shouldSync);
+  },
+  syncWatchedStatsFromLedger(skipSync = false): void {
+    const watchedMap = AnimeWatchedManager.getAll();
+    const uniqueEps = countUniqueWatchedEpisodes(watchedMap);
+    const favs = FavoritesManager.getAll();
+    let completedCount = 0;
+    for (const f of favs) {
+      const prog = countWatchedForAnime(f, watchedMap);
+      if (f.listStatus === 'completed' || (prog.totalEpisodes > 0 && prog.watchedCount >= prog.totalEpisodes)) {
+        completedCount += 1;
+      }
+    }
+    const user = this.getUser();
+    const changed =
+      user.stats.episodesWatched !== uniqueEps ||
+      user.stats.completedAnimes !== completedCount;
+    user.stats.episodesWatched = uniqueEps;
+    user.stats.completedAnimes = completedCount;
+    if (changed) {
+      this.saveUser(user, skipSync);
+    } else {
+      this.renderProfile();
+    }
+  },
+  addEpisodeWatch(): void {
+    // Reemplazado por seguimiento deduplicado de episodios y tiempo real de reproducción.
+    this.syncWatchedStatsFromLedger();
   },
   getTotalChaptersRead(): number {
     let total = 0;
@@ -608,92 +704,13 @@ export const UserManager = {
     return total;
   },
   renderProfile(): void {
+    if (uiHooks.renderProfileUI !== noop) {
+      uiHooks.renderProfileUI();
+      return;
+    }
     const user = this.getUser();
-    const avatarEl = document.getElementById('user-avatar-img') as HTMLImageElement | null;
     const nameEl = document.getElementById('user-display-name');
-    const roleEl = document.getElementById('user-role-badge');
-    const epEl = document.getElementById('stat-episodes');
-    const hrEl = document.getElementById('stat-hours');
-    const favEl = document.getElementById('stat-favorites');
-
-    const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-    const isLoggedIn = Boolean(fbUser && !fbUser.isAnonymous);
-    const activeUser = isLoggedIn ? fbUser : user;
-    const stats = user?.stats || { episodesWatched: 0, totalMinutes: 0 };
-    const epsCount = Number(stats.episodesWatched || 0);
-    const chapsRead = this.getTotalChaptersRead();
-    const rankInfo = nWin.NyAnimeUtils?.computeUserRank
-      ? nWin.NyAnimeUtils.computeUserRank(epsCount, chapsRead, isLoggedIn ? user.role : 'FREE')
-      : { tier: 'NOVATO', label: 'Novato', icon: '🌱' };
-    const badgeClass = rankInfo.tier === 'VIP'
-      ? 'badge-vip'
-      : rankInfo.tier === 'LEYENDA'
-        ? 'badge-leyenda'
-        : rankInfo.tier === 'OTAKU'
-          ? 'badge-otaku'
-          : 'badge-free';
-
-    if (avatarEl) {
-      avatarEl.src = safeImg(user.avatar || activeUser.avatar || activeUser.photoURL, 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo');
-      avatarEl.className = `profile-avatar ${badgeClass === 'badge-vip' ? 'vip-avatar' : ''}`;
-    }
-    if (nameEl) nameEl.textContent = (isLoggedIn ? (fbUser.displayName || user.username) : user.username) || 'Invitado';
-    if (roleEl) {
-      roleEl.className = `profile-role-badge ${badgeClass}`;
-      roleEl.textContent = `${rankInfo.icon} Rango: ${rankInfo.label}`;
-    }
-    if (epEl) epEl.textContent = String(stats.episodesWatched || 0);
-    if (hrEl) hrEl.textContent = `${Math.round((stats.totalMinutes || 0) / 60)}h`;
-
-    const totalFavs = FavoritesManager.getAll().length + MangaFavoritesManager.getAll().length;
-    if (favEl) favEl.textContent = String(totalFavs);
-
-    const commAvatar = document.getElementById('comment-user-avatar') as HTMLImageElement | null;
-    if (commAvatar) commAvatar.src = safeImg(user.avatar || activeUser.avatar || activeUser.photoURL, 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo');
-
-    const guestView = document.getElementById('auth-guest-view');
-    const loggedView = document.getElementById('auth-logged-view');
-    const emailEl = document.getElementById('auth-user-email');
-    const providerEl = document.getElementById('auth-provider-label');
-    const verifyBanner = document.getElementById('auth-verify-banner');
-
-    if (isLoggedIn && fbUser.email) {
-      if (guestView) guestView.classList.add('hide');
-      if (loggedView) loggedView.classList.remove('hide');
-      if (emailEl) emailEl.textContent = fbUser.email;
-      if (providerEl) {
-        providerEl.textContent = fbUser.providerId === 'google.com'
-          ? 'Autenticado con Google ✓'
-          : (fbUser.emailVerified ? 'Autenticado con Correo ✓' : 'Cuenta de Correo · Verificación pendiente');
-      }
-      if (verifyBanner) {
-        verifyBanner.classList.toggle('hide', fbUser.providerId === 'google.com' || Boolean(fbUser.emailVerified));
-      }
-    } else {
-      if (guestView) guestView.classList.remove('hide');
-      if (loggedView) loggedView.classList.add('hide');
-      if (verifyBanner) verifyBanner.classList.add('hide');
-    }
-
-    const syncBadge = document.getElementById('sync-status-badge');
-    const syncText = document.getElementById('sync-status-text');
-    const syncLast = document.getElementById('sync-last-time');
-    if (syncBadge && syncText) {
-      if (isLoggedIn && navigator.onLine) {
-        syncBadge.className = 'sync-pill online';
-        syncText.textContent = nWin.firebaseSync?.isSyncing?.() ? 'Sincronizando...' : 'En la Nube ✓';
-      } else {
-        syncBadge.className = 'sync-pill offline';
-        syncText.textContent = isLoggedIn ? 'Sin Conexión' : 'Modo Local';
-      }
-    }
-    if (syncLast) {
-      if (nWin.firebaseSync?.getHumanTimeSinceLastSync) {
-        syncLast.textContent = nWin.firebaseSync.getHumanTimeSinceLastSync();
-      } else {
-        syncLast.textContent = isLoggedIn ? 'Hace un momento' : 'Solo local';
-      }
-    }
+    if (nameEl) nameEl.textContent = user.username || 'Invitado';
   }
 };
 
@@ -701,7 +718,14 @@ export const FavoritesManager = {
   KEY: 'nyanime_favorites_v2',
   getAll(): any[] {
     try {
-      return JSON.parse(localStorage.getItem(this.KEY) || '[]') || [];
+      const raw = JSON.parse(localStorage.getItem(this.KEY) || '[]') || [];
+      if (!Array.isArray(raw)) return [];
+      const hadBloat = raw.some((item) => hasBloatedAnimeMetadata(item));
+      const normalized = compactFavoritesArray(raw);
+      if (hadBloat && normalized.length > 0) {
+        safeStorageSetItem(this.KEY, JSON.stringify(normalized));
+      }
+      return normalized;
     } catch {
       return [];
     }
@@ -709,41 +733,164 @@ export const FavoritesManager = {
   isFavorite(id: number | string): boolean {
     return this.getAll().some(item => String(item.id) === String(id));
   },
-  toggle(anime: any): void {
-    let list = this.getAll();
-    const exists = list.some(item => String(item.id) === String(anime.id));
-    if (exists) {
-      list = list.filter(item => String(item.id) !== String(anime.id));
-      showToast(`Eliminado de Favoritos: ${anime.title?.english || anime.title?.romaji}`);
-    } else {
-      list.unshift(anime);
-      showToast(`Añadido a Favoritos: ${anime.title?.english || anime.title?.romaji}`);
+  getStatus(id: number | string): AnimeListStatus | null {
+    const found = this.getAll().find(item => String(item.id) === String(id));
+    if (!found) return null;
+    return normalizeAnimeListStatus(found.listStatus, 'plan_to_watch');
+  },
+  getByStatus(status: AnimeListStatus | 'all'): any[] {
+    const all = this.getAll();
+    if (status === 'all') return all;
+    return all.filter(item => normalizeAnimeListStatus(item.listStatus, 'plan_to_watch') === status);
+  },
+  getCounts(): Record<AnimeListStatus | 'all', number> {
+    const counts: Record<AnimeListStatus | 'all', number> = {
+      all: 0,
+      watching: 0,
+      plan_to_watch: 0,
+      completed: 0,
+      on_hold: 0,
+      dropped: 0
+    };
+    const all = this.getAll();
+    counts.all = all.length;
+    for (const item of all) {
+      const s = normalizeAnimeListStatus(item.listStatus, 'plan_to_watch');
+      counts[s] += 1;
     }
-    localStorage.setItem(this.KEY, JSON.stringify(list));
-    if (exists && nWin.firebaseSync?.deleteFavoriteAnime) {
-      nWin.firebaseSync.deleteFavoriteAnime(anime.id).catch(() => {});
-    } else if (nWin.firebaseSync?.scheduleSync) {
-      nWin.firebaseSync.scheduleSync('favorites');
+    return counts;
+  },
+  setStatus(anime: any, nextStatus: AnimeListStatus, options: { silent?: boolean; skipSync?: boolean } = {}): void {
+    if (!anime?.id) return;
+    const cleanStatus = normalizeAnimeListStatus(nextStatus, 'watching');
+    const now = Date.now();
+    const list = this.getAll();
+    const idx = list.findIndex(item => String(item.id) === String(anime.id));
+    if (idx >= 0) {
+      list[idx] = mergeAnimeFavoriteMetadata(list[idx], anime, cleanStatus, now);
+    } else {
+      list.unshift(mergeAnimeFavoriteMetadata(null, anime, cleanStatus, now));
+    }
+    const saved = safeStorageSetItem(this.KEY, JSON.stringify(list));
+    if (!saved) {
+      showToast('No hay espacio local suficiente. Libera descargas o caché e inténtalo de nuevo.');
+      return;
+    }
+    if (!options.silent) {
+      const meta = getCategoryMeta(cleanStatus);
+      const title = list[idx >= 0 ? idx : 0]?.title?.english || list[idx >= 0 ? idx : 0]?.title?.romaji || 'Anime';
+      showToast(`${title} → ${meta.label}`);
+    }
+    if (!options.skipSync && nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('favorites_status');
     }
     uiHooks.updateFavoriteButton(anime.id);
     uiHooks.renderFavoritos();
-    UserManager.renderProfile();
+    UserManager.syncWatchedStatsFromLedger(true);
+  },
+  remove(id: number | string, options: { silent?: boolean } = {}): boolean {
+    if (!id) return false;
+    const list = this.getAll();
+    const target = list.find(item => String(item.id) === String(id));
+    if (!target) return false;
+    const nextList = list.filter(item => String(item.id) !== String(id));
+    if (!safeStorageSetItem(this.KEY, JSON.stringify(nextList))) {
+      showToast('No hay espacio local suficiente para actualizar tu lista.');
+      return false;
+    }
+    if (!options.silent) {
+      const title = target.title?.english || target.title?.romaji || 'Anime';
+      showToast(`Eliminado de tu Biblioteca: ${title}`);
+    }
+    if (nWin.firebaseSync?.deleteFavoriteAnime) {
+      nWin.firebaseSync.deleteFavoriteAnime(id).catch(() => {});
+    } else if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('favorites');
+    }
+    uiHooks.updateFavoriteButton(id);
+    uiHooks.renderFavoritos();
+    UserManager.syncWatchedStatsFromLedger(true);
+    return true;
+  },
+  autoUpdateStatusOnWatch(seasonOrAnimeId: number | string, totalEpisodes = 0): void {
+    if (!seasonOrAnimeId) return;
+    const list = this.getAll();
+    const idx = list.findIndex(item => String(item.id) === String(seasonOrAnimeId));
+    if (idx < 0) return;
+    const item = list[idx];
+    const currentStatus = normalizeAnimeListStatus(item.listStatus, 'plan_to_watch');
+    const prog = countWatchedForAnime(
+      { ...item, episodes: totalEpisodes > 0 ? totalEpisodes : item.episodes },
+      AnimeWatchedManager.getAll()
+    );
+    const nextStatus = resolveAutoListStatusTransition(currentStatus, prog.watchedCount, prog.totalEpisodes);
+    if (nextStatus !== currentStatus) {
+      list[idx] = {
+        ...item,
+        listStatus: nextStatus,
+        listUpdatedAt: Date.now()
+      };
+      safeStorageSetItem(this.KEY, JSON.stringify(list));
+      uiHooks.updateFavoriteButton(item.id);
+      uiHooks.renderFavoritos();
+      UserManager.renderProfile();
+      if (nWin.firebaseSync?.scheduleSync) {
+        nWin.firebaseSync.scheduleSync('favorites_auto_status');
+      }
+    }
+  },
+  toggle(anime: any, defaultStatus: AnimeListStatus = 'watching'): void {
+    if (!anime?.id) return;
+    const list = this.getAll();
+    const exists = list.some(item => String(item.id) === String(anime.id));
+    if (exists) {
+      this.remove(anime.id);
+    } else {
+      const cleanStatus = normalizeAnimeListStatus(anime.listStatus || defaultStatus, 'watching');
+      const entry = mergeAnimeFavoriteMetadata(null, anime, cleanStatus, Date.now());
+      list.unshift(entry);
+      if (!safeStorageSetItem(this.KEY, JSON.stringify(list))) {
+        showToast('No hay espacio local suficiente para guardar este anime.');
+        return;
+      }
+      const meta = getCategoryMeta(cleanStatus);
+      const title = entry.title?.english || entry.title?.romaji || 'Anime';
+      showToast(`Guardado en ${meta.label}: ${title}`);
+      if (nWin.firebaseSync?.scheduleSync) {
+        nWin.firebaseSync.scheduleSync('favorites');
+      }
+      uiHooks.updateFavoriteButton(anime.id);
+      uiHooks.renderFavoritos();
+      UserManager.syncWatchedStatsFromLedger(true);
+    }
   },
   importList(animes: any[]): number {
     const list = this.getAll();
     let added = 0;
+    let updated = 0;
+    const now = Date.now();
     animes.forEach(a => {
-      if (!list.some(x => String(x.id) === String(a.id))) {
-        list.unshift(a);
+      if (!a?.id) return;
+      const importedStatus = normalizeAnimeListStatus(a.listStatus, 'plan_to_watch');
+      const idx = list.findIndex(x => String(x.id) === String(a.id));
+      if (idx < 0) {
+        list.unshift(mergeAnimeFavoriteMetadata(null, a, importedStatus, now));
         added++;
+      } else if (a.listStatus && list[idx].listStatus !== importedStatus) {
+        list[idx] = mergeAnimeFavoriteMetadata(list[idx], a, importedStatus, now);
+        updated++;
+      }
+      const prog = Math.floor(Number(a.watchedProgress || 0));
+      if (prog > 0) {
+        AnimeWatchedManager.markUpTo(a.id, prog, { silentSync: true, totalEpisodes: Number(a.episodes || prog) });
       }
     });
-    localStorage.setItem(this.KEY, JSON.stringify(list));
-    if (added > 0 && nWin.firebaseSync?.scheduleSync) {
+    safeStorageSetItem(this.KEY, JSON.stringify(list));
+    if ((added > 0 || updated > 0) && nWin.firebaseSync?.scheduleSync) {
       nWin.firebaseSync.scheduleSync('favorites_import');
     }
     uiHooks.renderFavoritos();
-    UserManager.renderProfile();
+    UserManager.syncWatchedStatsFromLedger(true);
     return added;
   }
 };
@@ -768,10 +915,11 @@ export const MangaFavoritesManager = {
       list = list.filter(item => String(item.id) !== String(manga.id));
       showToast(`Eliminado de Mangas: ${manga.title}`);
     } else {
-      list.unshift(manga);
+      const compact = compactMangaEntry(manga) || manga;
+      list.unshift(compact);
       showToast(`Añadido a Mangas Favoritos: ${manga.title}`);
     }
-    localStorage.setItem(this.KEY, JSON.stringify(list));
+    safeStorageSetItem(this.KEY, JSON.stringify(list));
     if (exists && nWin.firebaseSync?.deleteFavoriteManga) {
       nWin.firebaseSync.deleteFavoriteManga(manga.id).catch(() => {});
     } else if (nWin.firebaseSync?.scheduleSync) {
@@ -785,25 +933,107 @@ export const MangaFavoritesManager = {
 
 export const AnimeWatchedManager = {
   KEY: 'nyanime_anime_watched_v1',
+  TS_KEY: 'nyanime_anime_watched_ts_v1',
   getAll(): Record<string, number[]> {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '{}') || {}; } catch { return {}; }
   },
+  getTimestamps(): Record<string, number> {
+    try { return JSON.parse(localStorage.getItem(this.TS_KEY) || '{}') || {}; } catch { return {}; }
+  },
   getWatchedSet(seasonId: number | string): Set<number> {
     const all = this.getAll();
-    return new Set((all[String(seasonId)] || []).map(Number));
+    return new Set((all[String(seasonId)] || []).map(Number).filter(n => Number.isFinite(n) && n >= 1));
   },
   isWatched(seasonId: number | string, ep: number): boolean {
     return this.getWatchedSet(seasonId).has(Number(ep));
   },
-  markWatched(seasonId: number | string, ep: number, watched = true): void {
+  markWatched(
+    seasonId: number | string,
+    ep: number,
+    watched = true,
+    options: { totalEpisodes?: number; silentSync?: boolean } = {}
+  ): void {
     if (!seasonId || !ep) return;
     const all = this.getAll();
+    const tsMap = this.getTimestamps();
     const key = String(seasonId);
-    const set = new Set((all[key] || []).map(Number));
-    if (watched) set.add(Number(ep));
-    else set.delete(Number(ep));
-    all[key] = Array.from(set).sort((a, b) => a - b);
-    try { localStorage.setItem(this.KEY, JSON.stringify(all)); } catch { /* ignore */ }
+    const set = new Set((all[key] || []).map(Number).filter(n => Number.isFinite(n) && n >= 1));
+    if (watched) set.add(Math.floor(Number(ep)));
+    else set.delete(Math.floor(Number(ep)));
+    const nextArr = Array.from(set).sort((a, b) => a - b);
+    all[key] = nextArr;
+    tsMap[key] = Date.now();
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify(all));
+      localStorage.setItem(this.TS_KEY, JSON.stringify(tsMap));
+    } catch { /* ignore */ }
+
+    FavoritesManager.autoUpdateStatusOnWatch(seasonId, options.totalEpisodes || 0);
+    UserManager.syncWatchedStatsFromLedger(true);
+
+    if (!options.silentSync) {
+      if (nWin.firebaseSync?.updateCloudAnimeWatchedOverwrite) {
+        nWin.firebaseSync.updateCloudAnimeWatchedOverwrite(seasonId, nextArr).catch(() => {});
+      } else if (nWin.firebaseSync?.scheduleSync) {
+        nWin.firebaseSync.scheduleSync('anime_watched');
+      }
+    }
+  },
+  markUpTo(
+    seasonId: number | string,
+    upToEp: number,
+    options: { totalEpisodes?: number; silentSync?: boolean } = {}
+  ): void {
+    const cap = Math.min(2000, Math.max(0, Math.floor(Number(upToEp || 0))));
+    if (!seasonId || cap <= 0) return;
+    const all = this.getAll();
+    const tsMap = this.getTimestamps();
+    const key = String(seasonId);
+    const set = new Set((all[key] || []).map(Number).filter(n => Number.isFinite(n) && n >= 1));
+    for (let i = 1; i <= cap; i++) set.add(i);
+    const nextArr = Array.from(set).sort((a, b) => a - b);
+    all[key] = nextArr;
+    tsMap[key] = Date.now();
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify(all));
+      localStorage.setItem(this.TS_KEY, JSON.stringify(tsMap));
+    } catch { /* ignore */ }
+
+    FavoritesManager.autoUpdateStatusOnWatch(seasonId, options.totalEpisodes || cap);
+    if (!options.silentSync) {
+      UserManager.syncWatchedStatsFromLedger(true);
+      if (nWin.firebaseSync?.updateCloudAnimeWatchedOverwrite) {
+        nWin.firebaseSync.updateCloudAnimeWatchedOverwrite(seasonId, nextArr).catch(() => {});
+      } else if (nWin.firebaseSync?.scheduleSync) {
+        nWin.firebaseSync.scheduleSync('anime_watched');
+      }
+    }
+  },
+  markAll(
+    seasonId: number | string,
+    totalEpisodes: number,
+    watched = true
+  ): void {
+    if (!seasonId || totalEpisodes <= 0) return;
+    const all = this.getAll();
+    const tsMap = this.getTimestamps();
+    const key = String(seasonId);
+    const cap = Math.min(2000, Math.floor(totalEpisodes));
+    const nextArr = watched ? Array.from({ length: cap }, (_, i) => i + 1) : [];
+    all[key] = nextArr;
+    tsMap[key] = Date.now();
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify(all));
+      localStorage.setItem(this.TS_KEY, JSON.stringify(tsMap));
+    } catch { /* ignore */ }
+
+    FavoritesManager.autoUpdateStatusOnWatch(seasonId, totalEpisodes);
+    UserManager.syncWatchedStatsFromLedger(true);
+    if (nWin.firebaseSync?.updateCloudAnimeWatchedOverwrite) {
+      nWin.firebaseSync.updateCloudAnimeWatchedOverwrite(seasonId, nextArr).catch(() => {});
+    } else if (nWin.firebaseSync?.scheduleSync) {
+      nWin.firebaseSync.scheduleSync('anime_watched');
+    }
   }
 };
 
@@ -826,7 +1056,7 @@ export const HistoryManager = {
   getAll(): AnimeHistoryEntry[] {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '[]') || []; } catch { return []; }
   },
-  save(anime: any, seasonNum: number, episodeNum: number): void {
+  save(anime: any, seasonNum: number, episodeNum: number, seasonId?: number | string): void {
     if (!anime) return;
     const prevList = this.getAll();
     const existing = prevList.find(item => String(item.anime?.id) === String(anime.id));
@@ -838,8 +1068,9 @@ export const HistoryManager = {
     const epSaved = this.getProgress(anime.id, seasonNum, episodeNum);
 
     const list = prevList.filter(item => String(item.anime?.id) !== String(anime.id));
+    const compactAnime = compactAnimeStorageEntry(anime);
     list.unshift({
-      anime,
+      anime: compactAnime,
       seasonNum,
       episodeNum,
       timestamp: Date.now(),
@@ -848,9 +1079,18 @@ export const HistoryManager = {
       completed: sameEpisode ? Boolean(existing?.completed ?? epSaved?.completed) : Boolean(epSaved?.completed)
     });
     if (list.length > 20) list.pop();
-    localStorage.setItem(this.KEY, JSON.stringify(list));
+    safeStorageSetItem(this.KEY, JSON.stringify(list));
     uiHooks.renderContinuarViendo();
-    UserManager.addEpisodeWatch();
+
+    if (FavoritesManager.getStatus(anime.id) === 'plan_to_watch') {
+      FavoritesManager.setStatus(anime, 'watching', { silent: true, skipSync: true });
+    }
+    if (seasonId && String(seasonId) !== String(anime.id) && FavoritesManager.getStatus(seasonId) === 'plan_to_watch') {
+      const seasonItem = FavoritesManager.getAll().find(item => String(item.id) === String(seasonId));
+      if (seasonItem) {
+        FavoritesManager.setStatus(seasonItem, 'watching', { silent: true, skipSync: true });
+      }
+    }
     if (nWin.firebaseSync?.scheduleSync) {
       nWin.firebaseSync.scheduleSync('history');
     }
@@ -941,7 +1181,7 @@ export const HistoryManager = {
       };
     } else {
       list.unshift({
-        anime,
+        anime: compactAnimeStorageEntry(anime),
         seasonNum,
         episodeNum,
         currentTime: cleanTime,
@@ -951,12 +1191,14 @@ export const HistoryManager = {
       });
     }
     if (list.length > 20) list.pop();
-    localStorage.setItem(this.KEY, JSON.stringify(list));
+    safeStorageSetItem(this.KEY, JSON.stringify(list));
 
     if (completed) {
       const targetSeasonId = options.seasonId || anime.id;
       if (!AnimeWatchedManager.isWatched(targetSeasonId, episodeNum)) {
-        AnimeWatchedManager.markWatched(targetSeasonId, episodeNum, true);
+        AnimeWatchedManager.markWatched(targetSeasonId, episodeNum, true, {
+          totalEpisodes: Number(anime.episodes || 0)
+        });
         uiHooks.actualizarEstadoVistoPlayerUI();
         uiHooks.renderDetalleEpisodios();
       }
@@ -995,6 +1237,7 @@ export const MangaReadStateManager = {
     const set = this.getReadChapters(mangaId);
     set.add(String(chapterNum));
     localStorage.setItem(this.getKey(mangaId), JSON.stringify(Array.from(set)));
+    UserManager.renderProfile();
     if (nWin.firebaseSync?.scheduleSync) nWin.firebaseSync.scheduleSync('manga_read');
     return true;
   },
@@ -1005,6 +1248,7 @@ export const MangaReadStateManager = {
     else set.add(strNum);
     const arr = Array.from(set);
     localStorage.setItem(this.getKey(mangaId), JSON.stringify(arr));
+    UserManager.renderProfile();
     if (nWin.firebaseSync?.updateCloudMangaProgressOverwrite) {
       const active = getActiveManga();
       nWin.firebaseSync.updateCloudMangaProgressOverwrite(mangaId, arr, active || undefined).catch(() => {});
@@ -1017,6 +1261,7 @@ export const MangaReadStateManager = {
     const set = read ? new Set((chapterNums || []).map(String)) : new Set<string>();
     const arr = Array.from(set);
     localStorage.setItem(this.getKey(mangaId), JSON.stringify(arr));
+    UserManager.renderProfile();
     if (nWin.firebaseSync?.updateCloudMangaProgressOverwrite) {
       const active = getActiveManga();
       nWin.firebaseSync.updateCloudMangaProgressOverwrite(mangaId, arr, active || undefined).catch(() => {});
@@ -1076,7 +1321,7 @@ export const MangaHistoryManager = {
       timestamp: Date.now()
     });
     if (list.length > 20) list = list.slice(0, 20);
-    localStorage.setItem(this.KEY, JSON.stringify(list));
+    safeStorageSetItem(this.KEY, JSON.stringify(list));
     uiHooks.renderContinuarLeyendoManga();
     if (nWin.firebaseSync?.scheduleSync) nWin.firebaseSync.scheduleSync('manga_history');
   },
@@ -1093,7 +1338,7 @@ export const MangaHistoryManager = {
         pageNumber: cleanPage,
         timestamp: Date.now()
       };
-      localStorage.setItem(this.KEY, JSON.stringify(list));
+      safeStorageSetItem(this.KEY, JSON.stringify(list));
       uiHooks.renderContinuarLeyendoManga();
     }
   },
@@ -1108,17 +1353,27 @@ export const MangaHistoryManager = {
 
 export const DownloadManager = {
   KEY: 'nyanime_downloads_v1',
+  activeTab: 'all' as 'all' | 'anime' | 'watch-later' | 'manga',
+  searchQuery: '',
   getAll(): any[] {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '[]') || []; } catch { return []; }
   },
   save(downloads: any[]): void {
-    localStorage.setItem(this.KEY, JSON.stringify(downloads));
+    safeStorageSetItem(this.KEY, JSON.stringify(downloads));
     void this.updateBadge();
   },
   add(item: any): void {
     const list = this.getAll();
     list.unshift(item);
     this.save(list);
+    void this.renderDownloadsModal();
+  },
+  setTab(tab: 'all' | 'anime' | 'watch-later' | 'manga'): void {
+    this.activeTab = tab;
+    void this.renderDownloadsModal();
+  },
+  setSearch(query: string): void {
+    this.searchQuery = String(query || '');
     void this.renderDownloadsModal();
   },
   async updateBadge(): Promise<void> {
@@ -1142,6 +1397,7 @@ export const DownloadManager = {
   async renderDownloadsModal(): Promise<void> {
     const container = document.getElementById('gestor-downloads-list');
     const summaryEl = document.getElementById('gestor-storage-summary');
+    const tabsEl = document.getElementById('gestor-filter-tabs');
     if (!container) return;
 
     if (nWin.NyAnimeOffline?.renderOfflineDownloadsModal) {
@@ -1210,7 +1466,7 @@ export const DownloadManager = {
       nWin.NyAnimeOffline.exportMp4 = async (offlineId: string) => {
         if (typeof nWin.NyAnimeOffline.exportOfflineAnimeToDevice === 'function') {
           const ok = await nWin.NyAnimeOffline.exportOfflineAnimeToDevice(offlineId);
-          showToast(ok ? '📥 Guardando archivo .MP4 en tu dispositivo...' : 'No se pudo exportar el archivo .MP4.');
+          showToast(ok ? 'Guardando archivo .MP4 en tu dispositivo...' : 'No se pudo exportar el archivo .MP4.');
         }
       };
       nWin.NyAnimeOffline.deleteItem = async (offlineId: string) => {
@@ -1223,9 +1479,16 @@ export const DownloadManager = {
         if (typeof nWin.refreshOfflineMangaDetailState === 'function') {
           await nWin.refreshOfflineMangaDetailState(undefined, true);
         }
-        showToast('Archivo offline eliminado del dispositivo.');
+        if (typeof nWin.renderDetalleEpisodios === 'function') {
+          nWin.renderDetalleEpisodios();
+        }
+        showToast('Elemento eliminado del almacenamiento offline.');
       };
-      await nWin.NyAnimeOffline.renderOfflineDownloadsModal(container, summaryEl);
+      await nWin.NyAnimeOffline.renderOfflineDownloadsModal(container, summaryEl, {
+        activeTab: this.activeTab,
+        query: this.searchQuery,
+        tabsContainerEl: tabsEl
+      });
       await this.updateBadge();
       return;
     }
@@ -1293,7 +1556,7 @@ export const SuggestionsManager = {
       texto,
       fecha: new Date().toISOString()
     });
-    localStorage.setItem(this.KEY, JSON.stringify(list));
+    safeStorageSetItem(this.KEY, JSON.stringify(list.slice(0, 50)));
     if (nWin.firebaseSync?.saveSuggestion) {
       nWin.firebaseSync.saveSuggestion(tipo, texto).catch(() => {});
     }

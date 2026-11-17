@@ -1,5 +1,10 @@
 import { escapeHTML, safeImageUrl } from '../utils/sanitize.ts';
 import { buildVideoDownloadProxyUrl, sanitizeDownloadFilename } from '../utils/proxySecurity.ts';
+import {
+  computeStorageMeter,
+  groupOfflineManifests,
+  type DownloadManagerFilterTab
+} from '../utils/downloadHelpers.ts';
 
 export const OFFLINE_MANGA_CACHE = 'nyanime-offline-manga-v1';
 export const OFFLINE_ANIME_CACHE = 'nyanime-offline-anime-v1';
@@ -682,6 +687,40 @@ export async function isMangaChapterDownloaded(
   );
 }
 
+export async function getOfflineEpisodesForAnime(
+  animeId: string | number,
+  seasonNumber?: number
+): Promise<Set<number>> {
+  const items = await getAllOfflineManifests();
+  const targetId = String(animeId);
+  const eps = new Set<number>();
+  for (const item of items) {
+    if (item.kind !== 'anime-video') continue;
+    if (String(item.mediaId) !== targetId) continue;
+    if (seasonNumber !== undefined && Number(item.season || 1) !== Number(seasonNumber)) continue;
+    const epNum = Number(item.episode || 0);
+    if (epNum > 0) eps.add(epNum);
+  }
+  return eps;
+}
+
+export async function deleteOfflineSeriesGroup(
+  kind: 'anime' | 'manga',
+  mediaId: string
+): Promise<number> {
+  const items = await getAllOfflineManifests();
+  const targetKind = kind === 'anime' ? 'anime-video' : 'manga';
+  const targetId = String(mediaId);
+  let removed = 0;
+  for (const item of items) {
+    if (item.kind === targetKind && String(item.mediaId) === targetId) {
+      await deleteOfflineManifestById(item.id);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 export async function downloadAnimeEpisodeOrQueue(params: {
   animeId: string | number;
   animeTitle: string;
@@ -901,71 +940,224 @@ export function formatBytesHuman(bytes: number): string {
 
 export async function renderOfflineDownloadsModal(
   containerEl: HTMLElement | null,
-  storageInfoEl?: HTMLElement | null
+  storageInfoEl?: HTMLElement | null,
+  options?: {
+    activeTab?: DownloadManagerFilterTab;
+    query?: string;
+    tabsContainerEl?: HTMLElement | null;
+  }
 ): Promise<void> {
   if (!containerEl) return;
   await ensurePersistentStorage();
   const [items, summary] = await Promise.all([getAllOfflineManifests(), getStorageSummary()]);
+  const activeTab: DownloadManagerFilterTab = options?.activeTab || 'all';
+  const query = String(options?.query || '');
+  const grouped = groupOfflineManifests(items, query);
+  const meter = computeStorageMeter(summary);
 
   if (storageInfoEl) {
-    const quotaPart = summary.quotaBytes > 0 ? ` / ${formatBytesHuman(summary.quotaBytes)} disponibles` : '';
-    const statusBadge = summary.storagePersisted
-      ? '<span class="storage-status-pill protected">Protegido contra limpieza automática ✓</span>'
-      : '<span class="storage-status-pill standard">Estándar</span>';
+    const quotaPart = meter.quotaBytes > 0 ? ` / ${formatBytesHuman(meter.quotaBytes)} disponibles` : '';
+    const statusLabel = summary.storagePersisted ? 'Almacenamiento protegido' : 'Almacenamiento estándar';
     storageInfoEl.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
-        <span style="font-weight:700; color:#fff;">Estado del dispositivo:</span>
-        ${statusBadge}
+      <div class="dl-storage-head">
+        <div>
+          <div class="dl-storage-title">Espacio Offline en Dispositivo</div>
+          <div class="dl-storage-meta tabular-nums">${formatBytesHuman(meter.offlineBytes)} guardados · ${formatBytesHuman(meter.usedBytes)} usados${quotaPart}</div>
+        </div>
+        <span class="dl-storage-state ${summary.storagePersisted ? 'protected' : 'standard'}">${statusLabel}</span>
       </div>
-      <div>💾 Offline: ${formatBytesHuman(summary.offlineBytes)} (${summary.mangaChaptersCount} caps manga, ${summary.animeFilesCount} vídeos, ${summary.watchLaterCount} ver luego) · Uso navegador: ${formatBytesHuman(summary.usageBytes)}${quotaPart}</div>
+      <div class="dl-storage-track" role="progressbar" aria-valuenow="${meter.pct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="dl-storage-fill" style="width:${meter.pct}%;"></div>
+      </div>
+      <div class="dl-storage-breakdown tabular-nums">
+        <span>${meter.animeFilesCount} ${meter.animeFilesCount === 1 ? 'episodio .MP4' : 'episodios .MP4'}</span>
+        <span aria-hidden="true">·</span>
+        <span>${meter.watchLaterCount} en Ver Luego</span>
+        <span aria-hidden="true">·</span>
+        <span>${meter.mangaChaptersCount} ${meter.mangaChaptersCount === 1 ? 'capítulo manga' : 'capítulos manga'}</span>
+      </div>
     `;
   }
 
+  if (options?.tabsContainerEl) {
+    const tabs: Array<{ id: DownloadManagerFilterTab; label: string; count: number }> = [
+      { id: 'all', label: 'Todos', count: grouped.counts.all },
+      { id: 'anime', label: 'Animes (.MP4)', count: grouped.counts.anime },
+      { id: 'watch-later', label: 'Ver Luego', count: grouped.counts.watchLater },
+      { id: 'manga', label: 'Mangas', count: grouped.counts.manga }
+    ];
+    options.tabsContainerEl.innerHTML = tabs
+      .map(
+        (t) => `
+          <button type="button" class="dl-filter-tab ${activeTab === t.id ? 'active' : ''}" data-dl-tab="${t.id}" onclick="setDownloadManagerTab('${t.id}')">
+            <span>${t.label}</span>
+            <span class="dl-tab-count tabular-nums">${t.count}</span>
+          </button>
+        `
+      )
+      .join('');
+  }
+
   if (items.length === 0) {
-    containerEl.innerHTML =
-      '<div style="text-align:center; color:var(--text-muted); font-size:12px; padding:20px;">No hay capítulos offline ni episodios guardados aún.</div>';
+    containerEl.innerHTML = `
+      <div class="dl-empty-state">
+        <div class="dl-empty-title">Sin descargas almacenadas</div>
+        <div class="dl-empty-desc">Abre cualquier anime y pulsa <strong>Descargar</strong> para guardar episodios en caché offline o exportarlos como archivo .MP4.</div>
+      </div>
+    `;
     return;
   }
 
-  containerEl.innerHTML = items
-    .map((item) => {
-      const safeId = escapeHTML(item.id);
-      const safeTitle = escapeHTML(item.title);
-      const isManga = item.kind === 'manga';
-      const isWatchLater = item.kind === 'watch-later';
-      const sub = isManga
-        ? `Cap. ${escapeHTML(item.chapterLabel || item.chapterNum)} · ${item.pageCount || 0} págs · ${formatBytesHuman(item.sizeBytes)} (Offline ✓)`
-        : isWatchLater
-          ? `T${item.season || 1} Ep.${item.episode || 1} · Guardado para ver luego (enlace externo)`
-          : `T${item.season || 1} Ep.${item.episode || 1} · ${escapeHTML(item.quality || 'HD')} · ${formatBytesHuman(item.sizeBytes)} (Offline ✓)`;
+  const showAnime = activeTab === 'all' || activeTab === 'anime';
+  const showWatchLater = activeTab === 'all' || activeTab === 'watch-later';
+  const showManga = activeTab === 'all' || activeTab === 'manga';
 
-      const coverThumb = safeImageUrl(item.cover);
-      return `
-        <div class="download-ep-row" data-offline-id="${safeId}" style="gap:10px;">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-            ${coverThumb ? `<img src="${escapeHTML(coverThumb)}" alt="" style="width:36px; height:50px; object-fit:cover; border-radius:6px; flex-shrink:0;">` : ''}
-            <div style="min-width:0;">
-              <div style="font-weight:700; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${safeTitle}</div>
-              <div style="font-size:11px; color:${isWatchLater ? '#f59e0b' : '#34d399'};">${sub}</div>
+  const sectionsHtml: string[] = [];
+
+  if (showAnime && grouped.animeGroups.length > 0) {
+    const animeCards = grouped.animeGroups
+      .map((group) => {
+        const safeMediaId = escapeHTML(group.mediaId);
+        const safeTitle = escapeHTML(group.title);
+        const coverThumb = safeImageUrl(group.cover);
+        const rowsHtml = group.items
+          .map((item) => {
+            const safeId = escapeHTML(item.id);
+            const epLabel = `T${item.season || 1} · Ep. ${item.episode || 1}`;
+            const metaText = `${escapeHTML(item.quality || 'HD')} · ${formatBytesHuman(item.sizeBytes)}`;
+            return `
+              <div class="dl-item-row" data-offline-id="${safeId}">
+                <div class="dl-item-info">
+                  <span class="dl-item-ep tabular-nums">${epLabel}</span>
+                  <span class="dl-item-meta tabular-nums">${metaText}</span>
+                </div>
+                <div class="dl-item-actions">
+                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Reproducir</button>
+                  <button type="button" class="dl-action-btn" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Guardar archivo .MP4 en tu dispositivo">Guardar .MP4</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${escapeHTML(epLabel)}">Eliminar</button>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        return `
+          <section class="dl-group-card" data-group-kind="anime" data-media-id="${safeMediaId}">
+            <div class="dl-group-head">
+              ${
+                coverThumb
+                  ? `<img src="${escapeHTML(coverThumb)}" alt="${safeTitle}" class="dl-group-cover" referrerpolicy="no-referrer">`
+                  : `<div class="dl-group-cover dl-group-cover-fallback" aria-hidden="true">TV</div>`
+              }
+              <div class="dl-group-title-wrap">
+                <div class="dl-group-title">${safeTitle}</div>
+                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'episodio' : 'episodios'} · ${formatBytesHuman(group.totalBytes)}</div>
+              </div>
+              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('anime', '${safeMediaId}')">Borrar serie</button>
+            </div>
+            <div class="dl-group-items">${rowsHtml}</div>
+          </section>
+        `;
+      })
+      .join('');
+    sectionsHtml.push(`<div class="dl-section-label">Animes descargados</div>${animeCards}`);
+  }
+
+  if (showWatchLater && grouped.watchLaterItems.length > 0) {
+    const wlRows = grouped.watchLaterItems
+      .map((item) => {
+        const safeId = escapeHTML(item.id);
+        const safeTitle = escapeHTML(normalizeSeriesGroupTitle(item.title));
+        const coverThumb = safeImageUrl(item.cover);
+        return `
+          <div class="dl-item-row dl-item-row-card" data-offline-id="${safeId}">
+            <div class="dl-item-left">
+              ${
+                coverThumb
+                  ? `<img src="${escapeHTML(coverThumb)}" alt="${safeTitle}" class="dl-mini-cover" referrerpolicy="no-referrer">`
+                  : `<div class="dl-mini-cover dl-group-cover-fallback" aria-hidden="true">WL</div>`
+              }
+              <div class="dl-item-info-col">
+                <div class="dl-item-title">${safeTitle}</div>
+                <div class="dl-item-meta tabular-nums">T${item.season || 1} · Ep. ${item.episode || 1} · Enlace externo (sin descarga directa)</div>
+              </div>
+            </div>
+            <div class="dl-item-actions">
+              ${item.url ? `<button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Abrir</button>` : ''}
+              <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${safeTitle}">Eliminar</button>
             </div>
           </div>
-          <div style="display:flex; gap:6px; flex-shrink:0;">
-            ${
-              isManga
-                ? `<button type="button" class="chip active" style="padding:5px 10px; font-size:11px;" onclick="window.NyAnimeOffline.openItem('${safeId}')">Leer</button>`
-                : item.kind === 'anime-video'
-                  ? `<button type="button" class="chip active" style="padding:5px 10px; font-size:11px;" onclick="window.NyAnimeOffline.openItem('${safeId}')">▶ Ver Offline</button>
-                     <button type="button" class="chip" style="padding:5px 10px; font-size:11px; border-color:rgba(52,211,153,0.4); color:#34d399;" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Guardar archivo .MP4 en tu dispositivo">📥 .MP4</button>`
-                  : item.url
-                    ? `<button type="button" class="chip" style="padding:5px 10px; font-size:11px;" onclick="window.NyAnimeOffline.openItem('${safeId}')">Abrir</button>`
-                    : ''
-            }
-            <button type="button" class="chip" style="padding:5px 9px; font-size:11px; border-color:rgba(255,26,64,0.35); color:#ff4d6d;" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" title="Eliminar de dispositivo">🗑️</button>
-          </div>
-        </div>
-      `;
-    })
-    .join('');
+        `;
+      })
+      .join('');
+    sectionsHtml.push(`<div class="dl-section-label">Guardados en Ver Luego</div><div class="dl-flat-stack">${wlRows}</div>`);
+  }
+
+  if (showManga && grouped.mangaGroups.length > 0) {
+    const mangaCards = grouped.mangaGroups
+      .map((group) => {
+        const safeMediaId = escapeHTML(group.mediaId);
+        const safeTitle = escapeHTML(group.title);
+        const coverThumb = safeImageUrl(group.cover);
+        const rowsHtml = group.items
+          .map((item) => {
+            const safeId = escapeHTML(item.id);
+            const capLabel = `Cap. ${escapeHTML(item.chapterLabel || item.chapterNum || 1)}`;
+            const metaText = `${item.pageCount || 0} págs · ${formatBytesHuman(item.sizeBytes)}`;
+            return `
+              <div class="dl-item-row" data-offline-id="${safeId}">
+                <div class="dl-item-info">
+                  <span class="dl-item-ep tabular-nums">${capLabel}</span>
+                  <span class="dl-item-meta tabular-nums">${metaText}</span>
+                </div>
+                <div class="dl-item-actions">
+                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Leer</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${capLabel}">Eliminar</button>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        return `
+          <section class="dl-group-card" data-group-kind="manga" data-media-id="${safeMediaId}">
+            <div class="dl-group-head">
+              ${
+                coverThumb
+                  ? `<img src="${escapeHTML(coverThumb)}" alt="${safeTitle}" class="dl-group-cover" referrerpolicy="no-referrer">`
+                  : `<div class="dl-group-cover dl-group-cover-fallback" aria-hidden="true">MG</div>`
+              }
+              <div class="dl-group-title-wrap">
+                <div class="dl-group-title">${safeTitle}</div>
+                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'capítulo' : 'capítulos'} · ${formatBytesHuman(group.totalBytes)}</div>
+              </div>
+              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('manga', '${safeMediaId}')">Borrar manga</button>
+            </div>
+            <div class="dl-group-items">${rowsHtml}</div>
+          </section>
+        `;
+      })
+      .join('');
+    sectionsHtml.push(`<div class="dl-section-label">Mangas guardados offline</div>${mangaCards}`);
+  }
+
+  if (sectionsHtml.length === 0) {
+    containerEl.innerHTML = `
+      <div class="dl-empty-state">
+        <div class="dl-empty-title">Sin coincidencias</div>
+        <div class="dl-empty-desc">No se encontraron elementos en esta categoría con el filtro actual.</div>
+      </div>
+    `;
+    return;
+  }
+
+  containerEl.innerHTML = sectionsHtml.join('');
+}
+
+function normalizeSeriesGroupTitle(rawTitle: string): string {
+  return String(rawTitle || 'Serie')
+    .replace(/\s*\(T\d+\)\s*$/i, '')
+    .trim() || 'Serie';
 }
 
 export async function clearAllOfflineStorage(): Promise<void> {

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterZombieHistoryEntries,
+  resolveAnimeWatchedMerge,
+  resolveFavoriteStatusSync,
   resolveFavoritesMerge,
-  resolveMangaReadChapters
+  resolveMangaReadChapters,
+  resolveUserProfileSync
 } from '../utils/syncLogic.ts';
 
 describe('syncLogic - Tombstone & Conflict Resolution', () => {
@@ -74,5 +77,75 @@ describe('syncLogic - Tombstone & Conflict Resolution', () => {
 
     expect(zombieCloudIds).toEqual(['old_anime', 'exact_cutoff']);
     expect(validCloudEntries).toEqual([{ id: 'new_anime', timestamp: 5100 }]);
+  });
+
+  it('resolves favorite listStatus using newest listUpdatedAt timestamp', () => {
+    const localNewer = resolveFavoriteStatusSync({
+      localStatus: 'completed',
+      localUpdatedAt: 9000,
+      cloudStatus: 'watching',
+      cloudUpdatedAt: 5000
+    });
+    expect(localNewer).toEqual({ listStatus: 'completed', listUpdatedAt: 9000, winner: 'cloud' });
+
+    const cloudNewer = resolveFavoriteStatusSync({
+      localStatus: 'plan_to_watch',
+      localUpdatedAt: 1000,
+      cloudStatus: 'on_hold',
+      cloudUpdatedAt: 8000
+    });
+    expect(cloudNewer).toEqual({ listStatus: 'on_hold', listUpdatedAt: 8000, winner: 'local' });
+  });
+
+  it('respects explicit local unmarking / overwrite of anime watched episodes', () => {
+    const unmarked = resolveAnimeWatchedMerge({
+      localEpisodes: [1, 3],
+      cloudEpisodes: [1, 2, 3],
+      localUpdatedAt: 5000,
+      cloudUpdatedAt: 5000,
+      explicitLocalWrite: true
+    });
+    expect(unmarked).toEqual([1, 3]);
+
+    const cloudNewer = resolveAnimeWatchedMerge({
+      localEpisodes: [1],
+      cloudEpisodes: [1, 2, 3, 4],
+      localUpdatedAt: 1000,
+      cloudUpdatedAt: 6000,
+      explicitLocalWrite: false
+    });
+    expect(cloudNewer).toEqual([1, 2, 3, 4]);
+  });
+
+  it('resolves profile displayName and custom avatar using newest profileUpdatedAt timestamp', () => {
+    const localNewer = resolveUserProfileSync({
+      localName: 'SatoruCustom',
+      localAvatar: 'data:image/jpeg;base64,/9j/LOCAL==',
+      localProfileUpdatedAt: 9000,
+      cloudName: 'OldCloudName',
+      cloudAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
+      cloudProfileUpdatedAt: 4000
+    });
+    expect(localNewer).toEqual({
+      displayName: 'SatoruCustom',
+      avatar: 'data:image/jpeg;base64,/9j/LOCAL==',
+      profileUpdatedAt: 9000,
+      source: 'local'
+    });
+
+    const cloudNewer = resolveUserProfileSync({
+      localName: 'Invitado',
+      localAvatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
+      localProfileUpdatedAt: 1000,
+      cloudName: 'CloudOtaku',
+      cloudAvatar: 'data:image/jpeg;base64,/9j/CLOUD==',
+      cloudProfileUpdatedAt: 8000
+    });
+    expect(cloudNewer).toEqual({
+      displayName: 'CloudOtaku',
+      avatar: 'data:image/jpeg;base64,/9j/CLOUD==',
+      profileUpdatedAt: 8000,
+      source: 'cloud'
+    });
   });
 });

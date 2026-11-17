@@ -109,9 +109,18 @@ import {
   importarBackupJSON,
   iniciarSesionGoogle,
   limpiarDescargasCompletadas,
+  setDownloadManagerTab,
+  setDownloadManagerSearch,
+  eliminarGrupoOffline,
+  solicitarLimpiarDescargas,
+  cancelarLimpiarDescargas,
+  confirmarLimpiarDescargas,
   recuperarContrasena,
   reenviarVerificacionCorreo,
   setupAvatarOptions,
+  seleccionarFotoGaleriaAvatar,
+  onAvatarGalleryFileChange,
+  restaurarAvatarPredeterminado,
   sincronizarListaExterna,
   submitAuthEmail,
   toggleAuthModalMode
@@ -232,14 +241,22 @@ import {
 import {
   abrirDetalle,
   abrirModalDescargaTemporada,
+  actualizarResumenSeleccionDescarga,
+  aplicarFiltroDescargaEpisodios,
+  cambiarCategoriaDetalleAnime,
   cancelarDescargaTemporada,
   cerrarDetalle,
+  filtrarListaEpisodiosDescarga,
   iniciarDescargaLote,
   iniciarOContinuarAnime,
   renderDetalleEpisodios,
+  seleccionarRangoDescarga,
   seleccionarTemporadaDetalle,
   toggleCrunchySeasonMenu,
+  toggleEpisodeMarkMode,
   toggleFavoriteCurrentAnime,
+  toggleDetalleLibraryMenu,
+  quitarAnimeDetalleDeBiblioteca,
   toggleTodosEpisodiosDescarga,
   updateFavoriteButton
 } from './ui/animeDetailView.ts';
@@ -268,7 +285,20 @@ import {
   videoSourceManager
 } from './ui/playerView.ts';
 
-import { handleAndroidBackButton, initApp } from './ui/profileView.ts';
+import {
+  abrirAnimeDesdePerfil,
+  abrirMangaDesdePerfil,
+  cambiarCategoriaAnimeEnPerfil,
+  cambiarSubTabPerfil,
+  eliminarAnimeDeBibliotecaPerfil,
+  eliminarMangaDeBibliotecaPerfil,
+  handleAndroidBackButton,
+  initApp,
+  onProfileLibrarySearchInput,
+  onProfileLibrarySortChange,
+  renderProfileUI,
+  setProfileLibraryFilter
+} from './ui/profileView.ts';
 
 interface MainWindow extends Window {
   [key: string]: any;
@@ -401,7 +431,8 @@ Object.assign(uiHooks, {
   flushMangaReaderPage,
   abrirModalAuthEmail,
   abrirModalDescargas,
-  initSearchDirectoryFilters
+  initSearchDirectoryFilters,
+  renderProfileUI
 });
 
 // Expose global managers & handlers for Firebase bridge and inline HTML events
@@ -439,8 +470,17 @@ Object.assign(mWin, {
   abrirImportarBackupJSON,
   importarBackupJSON,
   abrirModalDescargas,
+  setDownloadManagerTab,
+  setDownloadManagerSearch,
+  eliminarGrupoOffline,
+  solicitarLimpiarDescargas,
+  cancelarLimpiarDescargas,
+  confirmarLimpiarDescargas,
   limpiarDescargasCompletadas,
   abrirModalAvatar,
+  seleccionarFotoGaleriaAvatar,
+  onAvatarGalleryFileChange,
+  restaurarAvatarPredeterminado,
   guardarPerfilUsuario,
   abrirModalVip,
   abrirModalImportarMAL,
@@ -532,17 +572,38 @@ Object.assign(mWin, {
   handleMangaImgError,
   reintentarPaginaIndividual,
   cambiarAVersionInglesCapitulo,
+  // Profile & Library Management
+  cambiarSubTabPerfil,
+  setProfileLibraryFilter,
+  onProfileLibrarySearchInput,
+  onProfileLibrarySortChange,
+  cambiarCategoriaAnimeEnPerfil,
+  eliminarAnimeDeBibliotecaPerfil,
+  eliminarMangaDeBibliotecaPerfil,
+  abrirAnimeDesdePerfil,
+  abrirMangaDesdePerfil,
+  renderProfileUI,
   // Anime Detail
   abrirDetalle,
   cerrarDetalle,
   toggleFavoriteCurrentAnime,
+  toggleDetalleLibraryMenu,
+  quitarAnimeDetalleDeBiblioteca,
+  updateFavoriteButton,
+  cambiarCategoriaDetalleAnime,
+  toggleEpisodeMarkMode,
   iniciarOContinuarAnime,
   toggleCrunchySeasonMenu,
   seleccionarTemporadaDetalle,
   abrirModalDescargaTemporada,
+  actualizarResumenSeleccionDescarga,
+  aplicarFiltroDescargaEpisodios,
+  seleccionarRangoDescarga,
+  filtrarListaEpisodiosDescarga,
   cancelarDescargaTemporada,
   toggleTodosEpisodiosDescarga,
   iniciarDescargaLote,
+  renderDetalleEpisodios,
   // Video Player
   abrirReproductor,
   cerrarReproductor,

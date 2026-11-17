@@ -101,3 +101,150 @@ export function filterZombieHistoryEntries<T extends { id: string | number; time
 
   return { validCloudEntries, zombieCloudIds };
 }
+
+export type FavoriteStatusSyncSide = 'local' | 'cloud' | 'none';
+
+export interface FavoriteStatusSyncResult {
+  listStatus: string;
+  listUpdatedAt: number;
+  winner: FavoriteStatusSyncSide;
+}
+
+/**
+ * Resuelve conflictos de categoría (listStatus) entre favorito local y en la nube
+ * usando el timestamp más reciente (`listUpdatedAt`).
+ */
+export function resolveFavoriteStatusSync(input: {
+  localStatus?: unknown;
+  localUpdatedAt?: unknown;
+  cloudStatus?: unknown;
+  cloudUpdatedAt?: unknown;
+}): FavoriteStatusSyncResult {
+  const validStatuses = new Set(['watching', 'plan_to_watch', 'completed', 'on_hold', 'dropped']);
+  const localStat = typeof input.localStatus === 'string' && validStatuses.has(input.localStatus)
+    ? input.localStatus
+    : null;
+  const cloudStat = typeof input.cloudStatus === 'string' && validStatuses.has(input.cloudStatus)
+    ? input.cloudStatus
+    : null;
+  const localTs = Math.max(0, Math.floor(Number(input.localUpdatedAt || 0)));
+  const cloudTs = Math.max(0, Math.floor(Number(input.cloudUpdatedAt || 0)));
+
+  if (!localStat && cloudStat) {
+    return { listStatus: cloudStat, listUpdatedAt: cloudTs, winner: 'local' };
+  }
+  if (localStat && !cloudStat) {
+    return { listStatus: localStat, listUpdatedAt: localTs, winner: 'cloud' };
+  }
+  if (!localStat && !cloudStat) {
+    return { listStatus: 'plan_to_watch', listUpdatedAt: 0, winner: 'none' };
+  }
+
+  if (localTs > cloudTs) {
+    return { listStatus: localStat!, listUpdatedAt: localTs, winner: 'cloud' };
+  }
+  if (cloudTs > localTs) {
+    return { listStatus: cloudStat!, listUpdatedAt: cloudTs, winner: 'local' };
+  }
+  return {
+    listStatus: localStat || cloudStat || 'plan_to_watch',
+    listUpdatedAt: Math.max(localTs, cloudTs),
+    winner: 'none'
+  };
+}
+
+export interface AnimeWatchedMergeInput {
+  localEpisodes: number[];
+  cloudEpisodes: number[];
+  localUpdatedAt: number;
+  cloudUpdatedAt: number;
+  explicitLocalWrite?: boolean;
+}
+
+/**
+ * Resuelve episodios vistos de anime sin resucitar episodios desmarcados explícitamente.
+ */
+export function resolveAnimeWatchedMerge(input: AnimeWatchedMergeInput): number[] {
+  const cleanLocal = Array.from(
+    new Set((input.localEpisodes || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1).map(Math.floor))
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 5000);
+  const cleanCloud = Array.from(
+    new Set((input.cloudEpisodes || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1).map(Math.floor))
+  )
+    .sort((a, b) => a - b)
+    .slice(0, 5000);
+
+  if (input.explicitLocalWrite && input.localUpdatedAt >= input.cloudUpdatedAt) {
+    return cleanLocal;
+  }
+  if (input.localUpdatedAt > input.cloudUpdatedAt) {
+    return cleanLocal;
+  }
+  if (input.cloudUpdatedAt > input.localUpdatedAt) {
+    return cleanCloud;
+  }
+  return Array.from(new Set([...cleanLocal, ...cleanCloud]))
+    .sort((a, b) => a - b)
+    .slice(0, 5000);
+}
+
+export interface UserProfileSyncInput {
+  localName?: string;
+  localAvatar?: string;
+  localProfileUpdatedAt?: number;
+  cloudName?: string;
+  cloudAvatar?: string;
+  cloudProfileUpdatedAt?: number;
+  fallbackName?: string;
+  fallbackAvatar?: string;
+}
+
+export interface UserProfileSyncResult {
+  displayName: string;
+  avatar: string;
+  profileUpdatedAt: number;
+  source: 'local' | 'cloud';
+}
+
+/**
+ * Resuelve el nombre y avatar de perfil entre almacenamiento local y nube
+ * respetando la edición explícita más reciente (`profileUpdatedAt`).
+ */
+export function resolveUserProfileSync(input: UserProfileSyncInput): UserProfileSyncResult {
+  const localTs = Math.max(0, Math.floor(Number(input.localProfileUpdatedAt || 0)));
+  const cloudTs = Math.max(0, Math.floor(Number(input.cloudProfileUpdatedAt || 0)));
+  const cleanLocalName = String(input.localName || '').trim();
+  const cleanCloudName = String(input.cloudName || '').trim();
+  const cleanLocalAvatar = String(input.localAvatar || '').trim();
+  const cleanCloudAvatar = String(input.cloudAvatar || '').trim();
+  const fbName = String(input.fallbackName || 'Usuario').trim() || 'Usuario';
+  const fbAvatar = String(input.fallbackAvatar || '').trim();
+
+  if (localTs > cloudTs) {
+    return {
+      displayName: cleanLocalName || cleanCloudName || fbName,
+      avatar: cleanLocalAvatar || cleanCloudAvatar || fbAvatar,
+      profileUpdatedAt: localTs,
+      source: 'local'
+    };
+  }
+
+  if (cloudTs > localTs) {
+    return {
+      displayName: cleanCloudName || cleanLocalName || fbName,
+      avatar: cleanCloudAvatar || cleanLocalAvatar || fbAvatar,
+      profileUpdatedAt: cloudTs,
+      source: 'cloud'
+    };
+  }
+
+  return {
+    displayName: cleanCloudName || cleanLocalName || fbName,
+    avatar: cleanCloudAvatar || cleanLocalAvatar || fbAvatar,
+    profileUpdatedAt: Math.max(localTs, cloudTs),
+    source: cleanCloudName || cleanCloudAvatar ? 'cloud' : 'local'
+  };
+}
+

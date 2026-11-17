@@ -559,7 +559,7 @@ export default defineConfig(({ command }) => {
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
           globIgnores: ['assets/aistudio/**', 'assets/aistudio/**/*', 'legacy_archive/**', 'legacy_archive/**/*'],
-          maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           cleanupOutdatedCaches: true,
           navigateFallback: isBuild ? 'index.html' : null,
           navigateFallbackDenylist: [/^\/api\//],

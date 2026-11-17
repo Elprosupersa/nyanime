@@ -34,9 +34,23 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import {
   filterZombieHistoryEntries,
+  resolveAnimeWatchedMerge,
+  resolveFavoriteStatusSync,
   resolveFavoritesMerge,
-  resolveMangaReadChapters
+  resolveMangaReadChapters,
+  resolveUserProfileSync
 } from './utils/syncLogic.ts';
+import { normalizeAnimeListStatus } from './utils/profileStats.ts';
+import {
+  DEFAULT_AVATAR_URL,
+  sanitizeAvatarForAuthPhotoUrl,
+  sanitizeAvatarForCloud
+} from './utils/avatarHelpers.ts';
+import {
+  compactFavoritesArray,
+  compactHistoryArray,
+  safeStorageSetItem
+} from './utils/storageQuota.ts';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -180,10 +194,17 @@ interface NyAnimeWindow extends Window {
     getUser: () => {
       username?: string;
       avatar?: string;
+      profileUpdatedAt?: number;
       role?: string;
-      stats?: { episodesWatched?: number; totalMinutes?: number; completedAnimes?: number };
+      stats?: {
+        episodesWatched?: number;
+        totalMinutes?: number;
+        totalSecondsWatched?: number;
+        completedAnimes?: number;
+      };
     };
     saveUser: (user: Record<string, unknown>, skipSync?: boolean) => void;
+    syncWatchedStatsFromLedger?: (skipSync?: boolean) => void;
     renderProfile: () => void;
   };
   FavoritesManager?: {
@@ -193,6 +214,12 @@ interface NyAnimeWindow extends Window {
   MangaFavoritesManager?: {
     KEY: string;
     getAll: () => Array<Record<string, unknown>>;
+  };
+  AnimeWatchedManager?: {
+    KEY: string;
+    TS_KEY?: string;
+    getAll: () => Record<string, number[]>;
+    getTimestamps?: () => Record<string, number>;
   };
   HistoryManager?: {
     KEY: string;
@@ -215,6 +242,7 @@ interface NyAnimeWindow extends Window {
   renderContinuarViendo?: () => void;
   renderContinuarLeyendoManga?: () => void;
   renderFavoritos?: () => void;
+  updateFavoriteButton?: (id?: number | string) => void;
   renderEmisionDiasChips?: () => void;
   showToast?: (msg: string) => void;
   FirebaseAuth?: unknown;
@@ -229,19 +257,30 @@ const win = window as unknown as NyAnimeWindow;
 let currentAuthUser: User | null = auth.currentUser;
 let lastSyncTimestamp = Number(localStorage.getItem('nyanime_last_cloud_sync') || '0') || 0;
 let syncInProgress = false;
+let pendingCloudSync = false;
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function buildPublicUserShape(user: User | null) {
   if (!user) return null;
   const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
   const providerId = user.providerData?.[0]?.providerId || 'password';
+  const resolvedAvatar = sanitizeAvatarForCloud(
+    (localProfile.profileUpdatedAt || 0) > 0
+      ? localProfile.avatar || user.photoURL
+      : user.photoURL || localProfile.avatar,
+    DEFAULT_AVATAR_URL
+  );
+  const resolvedName =
+    (localProfile.profileUpdatedAt || 0) > 0 && localProfile.username && localProfile.username !== 'Invitado'
+      ? localProfile.username
+      : user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario';
   return {
     uid: user.uid,
     email: user.email || '',
-    displayName: user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario',
-    username: user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario',
-    photoURL: user.photoURL || localProfile.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
-    avatar: user.photoURL || localProfile.avatar || 'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo',
+    displayName: resolvedName,
+    username: resolvedName,
+    photoURL: resolvedAvatar,
+    avatar: resolvedAvatar,
     providerId,
     emailVerified: user.emailVerified,
     isAnonymous: user.isAnonymous,
@@ -254,18 +293,23 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
   const userRef = doc(db, 'users', user.uid);
   const localUser = win.UserManager?.getUser ? win.UserManager.getUser() : {};
   const providerId = (user.providerData?.[0]?.providerId || 'password').slice(0, 40);
-  const displayName =
-    (user.displayName || localUser.username || user.email?.split('@')[0] || 'Usuario')
-      .trim()
-      .slice(0, 80) || 'Usuario';
-  const avatar = (
-    user.photoURL ||
-    localUser.avatar ||
-    'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo'
-  ).slice(0, 500);
+  const localUpdatedAt = Math.max(0, Math.floor(Number(localUser.profileUpdatedAt || 0)));
+  const fallbackName =
+    (user.displayName || user.email?.split('@')[0] || 'Usuario').trim().slice(0, 80) || 'Usuario';
+  const localName =
+    localUser.username && localUser.username !== 'Invitado'
+      ? String(localUser.username).trim().slice(0, 80)
+      : fallbackName;
+  const fallbackAvatar = sanitizeAvatarForCloud(user.photoURL, DEFAULT_AVATAR_URL);
+  const localAvatar = sanitizeAvatarForCloud(localUser.avatar || user.photoURL, DEFAULT_AVATAR_URL);
   const email = (user.email || '').slice(0, 200);
   const episodesWatched = Math.max(0, Math.min(1000000, Math.floor(Number(localUser.stats?.episodesWatched || 0))));
-  const totalMinutes = Math.max(0, Math.min(100000000, Math.floor(Number(localUser.stats?.totalMinutes || 0))));
+  const rawLocalSeconds =
+    typeof localUser.stats?.totalSecondsWatched === 'number'
+      ? localUser.stats.totalSecondsWatched
+      : Number(localUser.stats?.totalMinutes || 0) * 60;
+  const totalSecondsWatched = Math.max(0, Math.min(6000000000, Math.floor(Number(rawLocalSeconds || 0))));
+  const totalMinutes = Math.max(0, Math.min(100000000, Math.floor(totalSecondsWatched / 60)));
 
   try {
     const snap = await getDoc(userRef);
@@ -273,11 +317,13 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
       await setDoc(userRef, {
         uid: user.uid,
         email,
-        displayName,
-        avatar,
+        displayName: localName,
+        avatar: localAvatar,
+        profileUpdatedAt: localUpdatedAt,
         providerId,
         episodesWatched,
         totalMinutes,
+        totalSecondsWatched,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -285,14 +331,33 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
       const cloudData = snap.data() as {
         displayName?: string;
         avatar?: string;
+        profileUpdatedAt?: number;
         episodesWatched?: number;
         totalMinutes?: number;
+        totalSecondsWatched?: number;
         email?: string;
       };
-      const mergedName = cloudData.displayName || displayName;
-      const mergedAvatar = cloudData.avatar || avatar;
+      const resolved = resolveUserProfileSync({
+        localName,
+        localAvatar,
+        localProfileUpdatedAt: localUpdatedAt,
+        cloudName: cloudData.displayName,
+        cloudAvatar: cloudData.avatar,
+        cloudProfileUpdatedAt: cloudData.profileUpdatedAt,
+        fallbackName,
+        fallbackAvatar
+      });
+      const mergedName = resolved.displayName.slice(0, 80) || fallbackName;
+      const mergedAvatar = sanitizeAvatarForCloud(resolved.avatar, fallbackAvatar);
+      const mergedProfileUpdatedAt = resolved.profileUpdatedAt;
+
       const mergedEp = Math.max(episodesWatched, Number(cloudData.episodesWatched || 0));
-      const mergedMin = Math.max(totalMinutes, Number(cloudData.totalMinutes || 0));
+      const cloudSeconds =
+        typeof cloudData.totalSecondsWatched === 'number'
+          ? Math.max(0, Math.floor(cloudData.totalSecondsWatched))
+          : Math.max(0, Math.floor(Number(cloudData.totalMinutes || 0) * 60));
+      const mergedSeconds = Math.max(totalSecondsWatched, cloudSeconds);
+      const mergedMin = Math.floor(mergedSeconds / 60);
 
       if (win.UserManager?.saveUser) {
         win.UserManager.saveUser(
@@ -300,10 +365,12 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
             ...localUser,
             username: mergedName,
             avatar: mergedAvatar,
+            profileUpdatedAt: mergedProfileUpdatedAt,
             stats: {
               ...(localUser.stats || {}),
               episodesWatched: mergedEp,
-              totalMinutes: mergedMin
+              totalMinutes: mergedMin,
+              totalSecondsWatched: mergedSeconds
             }
           },
           true
@@ -311,17 +378,23 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
       }
 
       if (
+        mergedName !== cloudData.displayName ||
+        mergedAvatar !== cloudData.avatar ||
+        mergedProfileUpdatedAt !== Number(cloudData.profileUpdatedAt || 0) ||
         mergedEp !== cloudData.episodesWatched ||
         mergedMin !== cloudData.totalMinutes ||
+        mergedSeconds !== cloudData.totalSecondsWatched ||
         email !== cloudData.email
       ) {
         await updateDoc(userRef, {
-          displayName: mergedName.slice(0, 80),
-          avatar: mergedAvatar.slice(0, 500),
+          displayName: mergedName,
+          avatar: mergedAvatar,
+          profileUpdatedAt: mergedProfileUpdatedAt,
           email,
           providerId,
           episodesWatched: mergedEp,
           totalMinutes: mergedMin,
+          totalSecondsWatched: mergedSeconds,
           updatedAt: serverTimestamp()
         });
       }
@@ -329,6 +402,38 @@ async function ensureUserProfileInFirestore(user: User): Promise<void> {
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, userPath);
   }
+}
+
+function buildSanitizedFavoritePayload(uid: string, animeId: number, item: Record<string, unknown>) {
+  const listStatus = normalizeAnimeListStatus(item.listStatus, 'plan_to_watch');
+  const listUpdatedAt = Math.max(0, Math.floor(Number(item.listUpdatedAt || Date.now())));
+  const rawTitle = typeof item.title === 'object' && item.title ? (item.title as Record<string, unknown>) : {};
+  const rawCover = typeof item.coverImage === 'object' && item.coverImage ? (item.coverImage as Record<string, unknown>) : {};
+  const payload: Record<string, unknown> = {
+    uid,
+    animeId: Math.floor(animeId),
+    title: {
+      romaji: String(rawTitle.romaji || rawTitle.english || (typeof item.title === 'string' ? item.title : 'Anime')).slice(0, 240),
+      english: String(rawTitle.english || rawTitle.romaji || (typeof item.title === 'string' ? item.title : 'Anime')).slice(0, 240)
+    },
+    coverImage: {
+      extraLarge: String(rawCover.extraLarge || rawCover.large || '').slice(0, 600),
+      large: String(rawCover.large || rawCover.extraLarge || '').slice(0, 600)
+    },
+    listStatus,
+    listUpdatedAt,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+  if (typeof item.format === 'string' && item.format) payload.format = item.format.slice(0, 40);
+  if (typeof item.status === 'string' && item.status) payload.status = item.status.slice(0, 40);
+  if (typeof item.episodes === 'number' && Number.isFinite(item.episodes) && item.episodes >= 0) {
+    payload.episodes = Math.floor(item.episodes);
+  }
+  if (Array.isArray(item.genres)) {
+    payload.genres = item.genres.filter((g) => typeof g === 'string' && g.trim()).slice(0, 20);
+  }
+  return payload;
 }
 
 async function syncFavoritesBidirectional(uid: string): Promise<void> {
@@ -344,9 +449,9 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
       }
     });
 
-    const localList = win.FavoritesManager?.getAll ? win.FavoritesManager.getAll() : [];
+    const initialLocalList = win.FavoritesManager?.getAll ? win.FavoritesManager.getAll() : [];
     const localMap = new Map<string, Record<string, unknown>>();
-    for (const item of localList) {
+    for (const item of initialLocalList) {
       const animeId = Number(item.id);
       if (animeId) localMap.set(sanitizeDocId(animeId), item);
     }
@@ -366,41 +471,170 @@ async function syncFavoritesBidirectional(uid: string): Promise<void> {
       const item = localMap.get(docId);
       if (!item) continue;
       const animeId = Number(item.id);
-      const payload: Record<string, unknown> = {
-        uid,
-        animeId: Math.floor(animeId),
-        title: typeof item.title === 'object' && item.title ? item.title : { romaji: String(item.title || 'Anime') },
-        coverImage: typeof item.coverImage === 'object' && item.coverImage ? item.coverImage : { large: '' },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-      if (typeof item.format === 'string' && item.format) payload.format = item.format.slice(0, 40);
-      if (typeof item.status === 'string' && item.status) payload.status = item.status.slice(0, 40);
-      if (typeof item.episodes === 'number' && item.episodes >= 0) payload.episodes = Math.floor(item.episodes);
-      if (Array.isArray(item.genres)) payload.genres = item.genres.slice(0, 20);
+      const payload = buildSanitizedFavoritePayload(uid, animeId, item);
       await setDoc(doc(db, 'users', uid, 'favorites', docId), payload);
     }
 
-    let changedLocal = false;
+    const pullToLocal: Array<Record<string, unknown>> = [];
     for (const docId of mergePlan.toKeepLocal) {
-      if (!localMap.has(docId)) {
-        const cloudItem = cloudMap.get(docId);
-        if (!cloudItem) continue;
-        localList.push({
+      const localItem = localMap.get(docId);
+      const cloudItem = cloudMap.get(docId);
+      if (!localItem && cloudItem) {
+        pullToLocal.push({
           id: Number(cloudItem.animeId),
           title: cloudItem.title,
           coverImage: cloudItem.coverImage,
           format: cloudItem.format || 'TV',
           status: cloudItem.status || 'FINISHED',
           episodes: cloudItem.episodes || null,
-          genres: cloudItem.genres || []
+          genres: cloudItem.genres || [],
+          listStatus: normalizeAnimeListStatus(cloudItem.listStatus, 'plan_to_watch'),
+          listUpdatedAt: Math.max(0, Math.floor(Number(cloudItem.listUpdatedAt || 0)))
         });
-        changedLocal = true;
+      } else if (localItem && cloudItem) {
+        const synced = resolveFavoriteStatusSync({
+          localStatus: localItem.listStatus,
+          localUpdatedAt: localItem.listUpdatedAt,
+          cloudStatus: cloudItem.listStatus,
+          cloudUpdatedAt: cloudItem.listUpdatedAt
+        });
+        if (synced.winner === 'local') {
+          pullToLocal.push({
+            ...localItem,
+            listStatus: synced.listStatus,
+            listUpdatedAt: synced.listUpdatedAt
+          });
+        } else if (synced.winner === 'cloud') {
+          const favRef = doc(db, 'users', uid, 'favorites', docId);
+          try {
+            await updateDoc(favRef, {
+              listStatus: synced.listStatus,
+              listUpdatedAt: synced.listUpdatedAt,
+              updatedAt: serverTimestamp()
+            });
+          } catch {
+            const cleanPayload = buildSanitizedFavoritePayload(uid, Number(localItem.id), {
+              ...localItem,
+              listStatus: synced.listStatus,
+              listUpdatedAt: synced.listUpdatedAt
+            });
+            await setDoc(favRef, cleanPayload);
+          }
+        }
       }
     }
 
-    if (changedLocal && win.FavoritesManager?.KEY) {
-      localStorage.setItem(win.FavoritesManager.KEY, JSON.stringify(localList));
+    if (pullToLocal.length > 0 && win.FavoritesManager?.KEY) {
+      // Re-read latest local list so edits made mid-sync are never overwritten by a stale pre-await snapshot
+      const latestLocal = win.FavoritesManager?.getAll ? win.FavoritesManager.getAll() : [];
+      const deletedSet = new Set(readIdSet(TOMBSTONE_KEYS.deletedAnimeFavs));
+      let changedLocal = false;
+
+      for (const incomingItem of pullToLocal) {
+        const docId = sanitizeDocId(incomingItem.id);
+        if (deletedSet.has(docId)) continue;
+        const existingIdx = latestLocal.findIndex((x) => sanitizeDocId(x.id) === docId);
+        if (existingIdx < 0) {
+          latestLocal.push(incomingItem);
+          changedLocal = true;
+        } else {
+          const curTs = Math.max(0, Math.floor(Number(latestLocal[existingIdx].listUpdatedAt || 0)));
+          const incTs = Math.max(0, Math.floor(Number(incomingItem.listUpdatedAt || 0)));
+          if (incTs > curTs) {
+            latestLocal[existingIdx] = {
+              ...latestLocal[existingIdx],
+              listStatus: incomingItem.listStatus,
+              listUpdatedAt: incTs
+            };
+            changedLocal = true;
+          }
+        }
+      }
+
+      if (changedLocal) {
+        safeStorageSetItem(
+          win.FavoritesManager.KEY,
+          JSON.stringify(compactFavoritesArray(latestLocal))
+        );
+      }
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+async function syncAnimeWatchedBidirectional(uid: string): Promise<void> {
+  const path = `users/${uid}/anime_watched`;
+  try {
+    const colRef = collection(db, 'users', uid, 'anime_watched');
+    const snap = await getDocs(colRef);
+    const cloudMap = new Map<string, Record<string, unknown>>();
+    snap.forEach((d) => {
+      const data = d.data();
+      if (data.seasonId) {
+        cloudMap.set(String(data.seasonId), data);
+      }
+    });
+
+    const localMap = win.AnimeWatchedManager?.getAll ? { ...win.AnimeWatchedManager.getAll() } : {};
+    const localTsMap = win.AnimeWatchedManager?.getTimestamps ? { ...win.AnimeWatchedManager.getTimestamps() } : {};
+    const allSeasonKeys = new Set<string>([
+      ...Object.keys(localMap).map((k) => sanitizeDocId(k)),
+      ...Array.from(cloudMap.keys())
+    ]);
+
+    let localChanged = false;
+    for (const seasonKey of allSeasonKeys) {
+      if (!seasonKey) continue;
+      const localRaw = localMap[seasonKey] || [];
+      const cloudItem = cloudMap.get(seasonKey);
+      const cloudRaw = Array.isArray(cloudItem?.watchedEpisodes)
+        ? (cloudItem!.watchedEpisodes as number[])
+        : [];
+      const localTs = Math.max(0, Math.floor(Number(localTsMap[seasonKey] || 0)));
+      const cloudTs = Math.max(0, Math.floor(Number(cloudItem?.updatedAtMs || 0)));
+
+      const resolved = resolveAnimeWatchedMerge({
+        localEpisodes: localRaw,
+        cloudEpisodes: cloudRaw,
+        localUpdatedAt: localTs,
+        cloudUpdatedAt: cloudTs,
+        explicitLocalWrite: localTs > 0
+      });
+
+      const localNorm = Array.from(new Set(localRaw.map(Number).filter((n) => Number.isFinite(n) && n >= 1))).sort((a, b) => a - b);
+      const cloudNorm = Array.from(new Set(cloudRaw.map(Number).filter((n) => Number.isFinite(n) && n >= 1))).sort((a, b) => a - b);
+
+      if (JSON.stringify(resolved) !== JSON.stringify(localNorm)) {
+        localMap[seasonKey] = resolved;
+        localTsMap[seasonKey] = Math.max(localTs, cloudTs, Date.now());
+        localChanged = true;
+      }
+
+      const targetMs = Math.max(localTs, cloudTs, resolved.length > 0 ? Date.now() : 0);
+      if (!cloudItem && resolved.length > 0) {
+        await setDoc(doc(db, 'users', uid, 'anime_watched', seasonKey), {
+          uid,
+          seasonId: seasonKey,
+          watchedEpisodes: resolved,
+          updatedAtMs: targetMs,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      } else if (cloudItem && (JSON.stringify(resolved) !== JSON.stringify(cloudNorm) || localTs > cloudTs)) {
+        await updateDoc(doc(db, 'users', uid, 'anime_watched', seasonKey), {
+          watchedEpisodes: resolved,
+          updatedAtMs: targetMs,
+          updatedAt: serverTimestamp()
+        });
+      }
+    }
+
+    if (localChanged && win.AnimeWatchedManager?.KEY) {
+      localStorage.setItem(win.AnimeWatchedManager.KEY, JSON.stringify(localMap));
+      if (win.AnimeWatchedManager.TS_KEY) {
+        localStorage.setItem(win.AnimeWatchedManager.TS_KEY, JSON.stringify(localTsMap));
+      }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
@@ -478,7 +712,7 @@ async function syncMangaFavoritesBidirectional(uid: string): Promise<void> {
     }
 
     if (changedLocal && win.MangaFavoritesManager?.KEY) {
-      localStorage.setItem(win.MangaFavoritesManager.KEY, JSON.stringify(localList));
+      safeStorageSetItem(win.MangaFavoritesManager.KEY, JSON.stringify(localList));
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
@@ -594,7 +828,10 @@ async function syncHistoryBidirectional(uid: string): Promise<void> {
 
     if (changedLocal && win.HistoryManager?.KEY) {
       localList.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-      localStorage.setItem(win.HistoryManager.KEY, JSON.stringify(localList.slice(0, 20)));
+      safeStorageSetItem(
+        win.HistoryManager.KEY,
+        JSON.stringify(compactHistoryArray(localList.slice(0, 20)))
+      );
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
@@ -822,8 +1059,13 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
 
 async function runFullCloudSync(): Promise<void> {
   const user = auth.currentUser;
-  if (!user || syncInProgress) return;
+  if (!user) return;
+  if (syncInProgress) {
+    pendingCloudSync = true;
+    return;
+  }
   syncInProgress = true;
+  pendingCloudSync = false;
 
   const badge = document.getElementById('sync-status-badge');
   const text = document.getElementById('sync-status-text');
@@ -834,11 +1076,13 @@ async function runFullCloudSync(): Promise<void> {
     await ensureUserProfileInFirestore(user);
     await Promise.all([
       syncFavoritesBidirectional(user.uid),
+      syncAnimeWatchedBidirectional(user.uid),
       syncMangaFavoritesBidirectional(user.uid),
       syncHistoryBidirectional(user.uid),
       syncMangaProgressBidirectional(user.uid),
       syncSettingsBidirectional(user.uid)
     ]);
+    win.UserManager?.syncWatchedStatsFromLedger?.(true);
 
     lastSyncTimestamp = Date.now();
     localStorage.setItem('nyanime_last_cloud_sync', String(lastSyncTimestamp));
@@ -846,6 +1090,7 @@ async function runFullCloudSync(): Promise<void> {
     win.renderContinuarViendo?.();
     win.renderContinuarLeyendoManga?.();
     win.renderFavoritos?.();
+    win.updateFavoriteButton?.();
     win.renderEmisionDiasChips?.();
     win.UserManager?.renderProfile();
   } catch (err) {
@@ -853,6 +1098,10 @@ async function runFullCloudSync(): Promise<void> {
   } finally {
     syncInProgress = false;
     win.UserManager?.renderProfile();
+    if (pendingCloudSync) {
+      pendingCloudSync = false;
+      void runFullCloudSync();
+    }
   }
 }
 
@@ -927,11 +1176,10 @@ export const FirebaseCommentsBridge = {
       (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario')
         .trim()
         .slice(0, 80) || 'Usuario';
-    const avatar = (
-      user.photoURL ||
-      localProfile.avatar ||
-      'https://api.dicebear.com/7.x/bottts/svg?seed=Gojo'
-    ).slice(0, 500);
+    const avatar = sanitizeAvatarForCloud(
+      localProfile.avatar || user.photoURL,
+      DEFAULT_AVATAR_URL
+    );
     const cleanText = text.trim().slice(0, 500);
     if (cleanText.length < 2) {
       throw new Error('El comentario debe tener al menos 2 caracteres.');
@@ -1034,14 +1282,27 @@ export const FirebaseAuthBridge = {
     }
   },
 
-  async updateAuthProfile(displayName: string, photoURL: string) {
+  async updateAuthProfile(displayName: string, photoURL: string, profileUpdatedAt?: number) {
     const user = auth.currentUser;
     if (!user) return;
     try {
+      const authPhoto = sanitizeAvatarForAuthPhotoUrl(photoURL);
       await updateProfile(user, {
         displayName: displayName.slice(0, 80),
-        photoURL: photoURL.slice(0, 500)
+        ...(authPhoto ? { photoURL: authPhoto } : {})
       });
+      if (win.UserManager?.getUser && win.UserManager?.saveUser) {
+        const cur = win.UserManager.getUser();
+        win.UserManager.saveUser(
+          {
+            ...cur,
+            username: displayName.slice(0, 80),
+            avatar: sanitizeAvatarForCloud(photoURL, DEFAULT_AVATAR_URL),
+            profileUpdatedAt: Math.max(Number(profileUpdatedAt || 0), Number(cur.profileUpdatedAt || 0), Date.now())
+          },
+          true
+        );
+      }
       await ensureUserProfileInFirestore(user);
     } catch (err) {
       console.warn('Error updating Firebase user profile:', err);
@@ -1238,6 +1499,45 @@ export const FirebaseSyncBridge = {
     }
   },
 
+  async updateCloudAnimeWatchedOverwrite(
+    seasonId: number | string,
+    watchedEpisodes: number[]
+  ) {
+    const docId = sanitizeDocId(seasonId);
+    const now = Date.now();
+    const cleanEps = Array.from(
+      new Set((watchedEpisodes || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1).map(Math.floor))
+    )
+      .sort((a, b) => a - b)
+      .slice(0, 5000);
+
+    const user = auth.currentUser;
+    if (!user) return;
+    const path = `users/${user.uid}/anime_watched/${docId}`;
+    try {
+      const ref = doc(db, 'users', user.uid, 'anime_watched', docId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        await updateDoc(ref, {
+          watchedEpisodes: cleanEps,
+          updatedAtMs: now,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await setDoc(ref, {
+          uid: user.uid,
+          seasonId: docId,
+          watchedEpisodes: cleanEps,
+          updatedAtMs: now,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
   async saveSuggestion(tipo: string, texto: string) {
     const user = auth.currentUser;
     if (!user) return;
@@ -1260,9 +1560,10 @@ export const FirebaseSyncBridge = {
     const mangaFavorites = win.MangaFavoritesManager?.getAll ? win.MangaFavoritesManager.getAll() : [];
     const history = win.HistoryManager?.getAll ? win.HistoryManager.getAll() : [];
     const mangaHistory = win.MangaHistoryManager?.getAll ? win.MangaHistoryManager.getAll() : [];
+    const animeWatched = win.AnimeWatchedManager?.getAll ? win.AnimeWatchedManager.getAll() : {};
     const scheduleReminders = win.ScheduleReminderManager?.getAll ? win.ScheduleReminderManager.getAll() : [];
     return {
-      schemaVersion: '2.3.0',
+      schemaVersion: '2.4.0',
       exportedAt: new Date().toISOString(),
       app: 'NyAnime TV',
       firebaseUid: auth.currentUser?.uid || null,
@@ -1271,6 +1572,7 @@ export const FirebaseSyncBridge = {
         mangaFavorites,
         history,
         mangaHistory,
+        animeWatched,
         scheduleReminders,
         readerSettings: win.getReaderSettings ? win.getReaderSettings() : {},
         userProfile: win.UserManager?.getUser ? win.UserManager.getUser() : {}
@@ -1281,19 +1583,28 @@ export const FirebaseSyncBridge = {
   async importBackupJSON(json: Record<string, unknown>) {
     const data = (json.data || json) as Record<string, unknown>;
     if (Array.isArray(data.favorites) && win.FavoritesManager?.KEY) {
-      localStorage.setItem(win.FavoritesManager.KEY, JSON.stringify(data.favorites));
+      safeStorageSetItem(
+        win.FavoritesManager.KEY,
+        JSON.stringify(compactFavoritesArray(data.favorites))
+      );
     }
     if (Array.isArray(data.mangaFavorites) && win.MangaFavoritesManager?.KEY) {
-      localStorage.setItem(win.MangaFavoritesManager.KEY, JSON.stringify(data.mangaFavorites));
+      safeStorageSetItem(win.MangaFavoritesManager.KEY, JSON.stringify(data.mangaFavorites));
     }
     if (Array.isArray(data.history) && win.HistoryManager?.KEY) {
-      localStorage.setItem(win.HistoryManager.KEY, JSON.stringify(data.history));
+      safeStorageSetItem(
+        win.HistoryManager.KEY,
+        JSON.stringify(compactHistoryArray(data.history))
+      );
     }
     if (Array.isArray(data.mangaHistory) && win.MangaHistoryManager?.KEY) {
-      localStorage.setItem(win.MangaHistoryManager.KEY, JSON.stringify(data.mangaHistory));
+      safeStorageSetItem(win.MangaHistoryManager.KEY, JSON.stringify(data.mangaHistory));
+    }
+    if (data.animeWatched && typeof data.animeWatched === 'object' && win.AnimeWatchedManager?.KEY) {
+      safeStorageSetItem(win.AnimeWatchedManager.KEY, JSON.stringify(data.animeWatched));
     }
     if (Array.isArray(data.scheduleReminders) && win.ScheduleReminderManager?.KEY) {
-      localStorage.setItem(win.ScheduleReminderManager.KEY, JSON.stringify(data.scheduleReminders));
+      safeStorageSetItem(win.ScheduleReminderManager.KEY, JSON.stringify(data.scheduleReminders));
     }
     if (data.readerSettings && win.applyReaderSettingsFromCloud) {
       win.applyReaderSettingsFromCloud(data.readerSettings as ReaderSettingsShape);
@@ -1301,6 +1612,7 @@ export const FirebaseSyncBridge = {
     if (data.userProfile && win.UserManager?.saveUser) {
       win.UserManager.saveUser(data.userProfile as Record<string, unknown>);
     }
+    win.UserManager?.syncWatchedStatsFromLedger?.(true);
     if (auth.currentUser) {
       await runFullCloudSync();
     }

@@ -8,10 +8,22 @@ import {
   UserManager,
   cerrarModales,
   nWin,
+  safeImg,
   showToast,
   state,
   uiHooks
 } from './appState.ts';
+import { formatWatchDuration } from '../utils/profileStats.ts';
+import {
+  DEFAULT_AVATAR_URL,
+  compressAvatarImageInBrowser,
+  isDataImageAvatar
+} from '../utils/avatarHelpers.ts';
+import {
+  compactFavoritesArray,
+  compactMangaEntry,
+  safeStorageSetItem
+} from '../utils/storageQuota.ts';
 
 const MODALS_MARKUP = `
   <!-- MODAL: SELECTOR DE FUENTES MIHON -->
@@ -66,83 +78,170 @@ const MODALS_MARKUP = `
     </div>
   </div>
 
-  <!-- MODAL: DESCARGA DE TEMPORADA COMPLETA -->
+  <!-- MODAL: DESCARGA DE ANIME POR EPISODIOS -->
   <div class="ny-dialog" id="modal-descarga-temporada" onclick="cerrarModales(event)">
-    <div class="ny-sheet" onclick="event.stopPropagation()">
-      <div class="ny-dialog-header">
-        <div class="ny-dialog-title">⚡ Descarga en Lote de Temporada</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+    <div class="ny-sheet ny-sheet-wide dl-modal-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header dl-sheet-header">
+        <div>
+          <div class="ny-dialog-title">Descargar Episodios</div>
+          <div class="dl-sheet-subtitle" id="descarga-temporada-subtitle">Selecciona episodios para guardar offline o en .MP4</div>
+        </div>
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar modal de descarga">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="dl-sheet-body">
+        <div class="dl-series-hero">
+          <img id="dl-series-cover" src="" alt="" class="dl-series-cover hide" referrerpolicy="no-referrer">
+          <div class="dl-series-hero-info">
+            <div class="dl-series-hero-title" id="descarga-temporada-title">Cargando anime...</div>
+            <div class="dl-series-hero-meta tabular-nums" id="descarga-temporada-info">0 episodios</div>
+          </div>
+          <div class="dl-selection-count tabular-nums" id="dl-selection-summary">0 seleccionados</div>
+        </div>
+
+        <div id="season-dl-progress-box" class="dl-progress-panel hide">
+          <div class="dl-progress-head">
+            <span id="season-dl-progress-text" class="dl-progress-label">Preparando descarga...</span>
+            <span id="season-dl-progress-pct" class="dl-progress-pct tabular-nums">0%</span>
+          </div>
+          <div class="dl-progress-track">
+            <div id="season-dl-progress-bar" class="dl-progress-fill"></div>
+          </div>
+          <div class="dl-progress-actions">
+            <button type="button" class="dl-cancel-btn" onclick="cancelarDescargaTemporada()">Cancelar descarga</button>
+          </div>
+        </div>
+
+        <div class="dl-picker-toolbar">
+          <div class="dl-picker-quick-actions" role="group" aria-label="Selección rápida de episodios">
+            <button type="button" class="dl-tool-btn active" data-dl-mode="all" onclick="aplicarFiltroDescargaEpisodios('all')">Todos</button>
+            <button type="button" class="dl-tool-btn" data-dl-mode="none" onclick="aplicarFiltroDescargaEpisodios('none')">Ninguno</button>
+            <button type="button" class="dl-tool-btn" data-dl-mode="unwatched" onclick="aplicarFiltroDescargaEpisodios('unwatched')">Sin ver</button>
+            <button type="button" class="dl-tool-btn" data-dl-mode="not-downloaded" onclick="aplicarFiltroDescargaEpisodios('not-downloaded')">No descargados</button>
+          </div>
+          <div class="dl-ep-search-wrap">
+            <input type="search" id="dl-ep-filter-input" class="dl-ep-search-input" placeholder="Buscar ep. (ej. 12)" aria-label="Filtrar número de episodio" oninput="filtrarListaEpisodiosDescarga(this.value)">
+          </div>
+        </div>
+
+        <div class="dl-range-row hide" id="dl-range-chips" aria-label="Rangos de episodios"></div>
+
+        <div class="dl-ep-grid" id="descarga-ep-list"></div>
+
+        <div class="dl-config-grid">
+          <label class="dl-config-field">
+            <span class="dl-config-label">Audio preferido</span>
+            <select id="select-audio-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
+              <option value="SUB">Sub Español</option>
+              <option value="DUB">Audio Latino</option>
+            </select>
+          </label>
+          <label class="dl-config-field">
+            <span class="dl-config-label">Calidad</span>
+            <select id="select-calidad-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
+              <option value="1080p">1080p Full HD (.MP4)</option>
+              <option value="720p">720p HD Rápido (.MP4)</option>
+            </select>
+          </label>
+          <label class="dl-config-field">
+            <span class="dl-config-label">Destino</span>
+            <select id="select-destino-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
+              <option value="both">Caché offline + Archivo .MP4</option>
+              <option value="cache">Solo caché offline en la app</option>
+            </select>
+          </label>
         </div>
       </div>
-      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;" id="descarga-temporada-info">Selecciona los capítulos que deseas descargar en .MP4:</div>
 
-      <div id="season-dl-progress-box" class="hide" style="background:rgba(255,26,64,0.08); border:1px solid rgba(255,26,64,0.3); border-radius:12px; padding:12px; margin-bottom:12px;">
-        <div id="season-dl-progress-text" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:8px;">Preparando descarga de episodios .MP4...</div>
-        <div style="width:100%; height:6px; background:rgba(255,255,255,0.1); border-radius:999px; overflow:hidden; margin-bottom:10px;">
-          <div id="season-dl-progress-bar" style="width:0%; height:100%; background:var(--primary); transition:width 0.15s ease;"></div>
-        </div>
-        <button type="button" class="chip" style="width:100%; justify-content:center; border-color:rgba(255,26,64,0.4); color:#ff4d6d;" onclick="cancelarDescargaTemporada()">Cancelar descarga</button>
+      <div class="dl-sheet-footer">
+        <div class="dl-footer-summary tabular-nums" id="dl-footer-summary">0 episodios seleccionados</div>
+        <button type="button" id="btn-start-season-dl" class="btn-download-season dl-primary-cta" onclick="iniciarDescargaLote()">
+          Descargar episodios
+        </button>
       </div>
-
-      <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-        <button type="button" class="chip active" onclick="toggleTodosEpisodiosDescarga(true)">Seleccionar Todos</button>
-        <button type="button" class="chip" onclick="toggleTodosEpisodiosDescarga(false)">Deseleccionar</button>
-      </div>
-
-      <div class="download-ep-list" id="descarga-ep-list"></div>
-
-      <div style="margin-bottom:15px;">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">CALIDAD Y SERVIDOR</div>
-        <div style="display:flex; gap:8px;">
-          <select id="select-calidad-descarga" style="flex:1; background:var(--bg-card); color:white; border:1px solid var(--border-color); padding:8px; border-radius:10px; font-family:inherit; font-size:12px;">
-            <option value="1080p">1080p Full HD (.MP4 Directo · MP4Upload / YourUpload)</option>
-            <option value="720p">720p HD Rápido (.MP4)</option>
-          </select>
-        </div>
-      </div>
-
-      <button type="button" id="btn-start-season-dl" class="btn-download-season" style="width:100%; justify-content:center; padding:12px;" onclick="iniciarDescargaLote()">
-        🚀 Descargar Episodios Seleccionados (.MP4)
-      </button>
     </div>
   </div>
 
   <!-- MODAL: GESTOR DE DESCARGAS -->
   <div class="ny-dialog" id="modal-gestor-descargas" onclick="cerrarModales(event)">
-    <div class="ny-sheet" onclick="event.stopPropagation()">
-      <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📥 Gestor de Descargas</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+    <div class="ny-sheet ny-sheet-wide dl-modal-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header dl-sheet-header">
+        <div>
+          <div class="ny-dialog-title">Gestor de Descargas</div>
+          <div class="dl-sheet-subtitle">Reproduce capítulos offline o exporta archivos .MP4</div>
+        </div>
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar gestor de descargas">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+
+      <div class="dl-sheet-body">
+        <div id="gestor-storage-summary" class="dl-storage-card">
+          Calculando almacenamiento offline...
+        </div>
+
+        <div class="dl-manager-controls">
+          <div class="dl-filter-tabs" id="gestor-filter-tabs" role="tablist" aria-label="Filtrar descargas por tipo"></div>
+          <input type="search" id="gestor-search-input" class="dl-manager-search" placeholder="Buscar por título o episodio..." aria-label="Buscar descargas guardadas" oninput="setDownloadManagerSearch(this.value)">
+        </div>
+
+        <div class="dl-manager-list" id="gestor-downloads-list">
+          <div class="dl-empty-state">Cargando descargas...</div>
         </div>
       </div>
-      <div id="gestor-storage-summary" style="font-size:11.5px; color:var(--text-muted); background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:10px; padding:9px 12px; margin-bottom:10px;">
-        Calculando almacenamiento offline...
+
+      <div class="dl-sheet-footer dl-manager-footer">
+        <button type="button" id="btn-clear-all-dl" class="dl-clear-trigger-btn" onclick="solicitarLimpiarDescargas()">
+          Vaciar almacenamiento offline
+        </button>
+        <div id="dl-clear-confirm-box" class="dl-confirm-bar hide">
+          <span class="dl-confirm-text">¿Eliminar todas las descargas?</span>
+          <div class="dl-confirm-actions">
+            <button type="button" class="dl-action-btn" onclick="cancelarLimpiarDescargas()">Cancelar</button>
+            <button type="button" class="dl-action-btn danger-solid" onclick="confirmarLimpiarDescargas()">Sí, eliminar todo</button>
+          </div>
+        </div>
       </div>
-      <div class="download-ep-list" id="gestor-downloads-list">
-        <div style="text-align:center; color:var(--text-muted); font-size:12px; padding:20px;">No hay descargas activas.</div>
-      </div>
-      <button class="chip" style="width:100%; margin-top:10px;" onclick="limpiarDescargasCompletadas()">Eliminar Todo del Dispositivo</button>
     </div>
   </div>
 
-  <!-- MODAL: CAMBIAR AVATAR -->
+  <!-- MODAL: CAMBIAR AVATAR Y PERFIL -->
   <div class="ny-dialog" id="modal-avatar" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🎭 Elegir Avatar de Anime</div>
+        <div class="ny-dialog-title">🎭 Editar Perfil y Foto</div>
         <div class="ny-dialog-close" onclick="cerrarModales()">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </div>
       </div>
+
+      <div class="avatar-custom-preview-card">
+        <img id="avatar-preview-img" class="avatar-preview-circle" src="https://api.dicebear.com/7.x/bottts/svg?seed=Gojo" alt="Vista previa de avatar">
+        <div class="avatar-preview-info">
+          <div class="avatar-preview-title">Foto de Perfil</div>
+          <div class="avatar-preview-sub" id="avatar-preview-source">Avatar predefinido</div>
+          <div class="avatar-upload-actions">
+            <button type="button" class="avatar-gallery-btn" id="btn-avatar-gallery" onclick="seleccionarFotoGaleriaAvatar()">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+              Elegir foto de galería
+            </button>
+            <button type="button" class="avatar-reset-btn hide" id="btn-avatar-reset-preset" onclick="restaurarAvatarPredeterminado()">Quitar foto</button>
+          </div>
+          <input type="file" id="input-avatar-gallery" accept="image/*" style="display:none;" onchange="onAvatarGalleryFileChange(event)">
+        </div>
+      </div>
+      <div id="avatar-upload-error" class="avatar-upload-error hide"></div>
+
+      <div class="avatar-section-label">O ELIGE UN AVATAR PREDEFINIDO</div>
       <div class="avatar-grid" id="avatar-grid-options"></div>
 
       <div style="margin-top:10px;">
-        <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">NOMBRE DE USUARIO</div>
+        <div class="avatar-section-label">NOMBRE DE USUARIO</div>
         <input type="text" id="input-edit-username" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); padding:10px 12px; border-radius:10px; color:white; font-family:inherit; font-size:13px;" placeholder="Tu Nombre">
       </div>
-      <button class="chip active" style="width:100%; margin-top:14px; padding:10px;" onclick="guardarPerfilUsuario()">Guardar Cambios</button>
+      <button type="button" class="chip active" id="btn-save-profile" style="width:100%; margin-top:14px; padding:10px;" onclick="guardarPerfilUsuario()">Guardar Cambios</button>
     </div>
   </div>
 
@@ -161,9 +260,9 @@ const MODALS_MARKUP = `
           <div id="rank-modal-summary" style="font-size:12px; color:var(--text-muted);">0 puntos de actividad</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
-          <div class="pwa-step-box" style="margin:0;"><strong>🌱 Novato</strong> (0 – 14 pts): Inicio de viaje en NyAnime TV.</div>
-          <div class="pwa-step-box" style="margin:0;"><strong>⚡ Otaku</strong> (15 – 49 pts): Maratonista habitual de anime y manga.</div>
-          <div class="pwa-step-box" style="margin:0;"><strong>👑 Leyenda</strong> (50+ pts): Coleccionista veterano verificado por actividad real.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>🌱 Explorador Novato</strong> (0 – 19 pts): Inicio de viaje en NyAnime TV.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>⚡ Otaku Activo</strong> (20 – 99 pts): Maratonista habitual de anime y manga.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>👑 Leyenda Anime</strong> (100+ pts): Coleccionista veterano verificado por actividad real.</div>
         </div>
       </div>
       <button class="oled-btn-secondary" style="width:100%; justify-content:center;" onclick="cerrarModales()">
@@ -558,7 +657,7 @@ export async function importarBackupJSON(event: Event): Promise<void> {
     } else {
       const data = json.data || json;
       if (Array.isArray(data.favorites)) {
-        localStorage.setItem('nyanime_favorites_v2', JSON.stringify(data.favorites));
+        safeStorageSetItem('nyanime_favorites_v2', JSON.stringify(compactFavoritesArray(data.favorites)));
       }
       if (data.userProfile) {
         UserManager.saveUser(data.userProfile);
@@ -580,8 +679,51 @@ export async function importarBackupJSON(event: Event): Promise<void> {
 
 export function abrirModalDescargas(): void {
   ensureModalsMounted();
+  cancelarLimpiarDescargas();
+  const searchEl = document.getElementById('gestor-search-input') as HTMLInputElement | null;
+  if (searchEl) searchEl.value = DownloadManager.searchQuery || '';
   void DownloadManager.renderDownloadsModal();
   document.getElementById('modal-gestor-descargas')?.classList.add('active');
+}
+
+export function setDownloadManagerTab(tab: 'all' | 'anime' | 'watch-later' | 'manga'): void {
+  DownloadManager.setTab(tab);
+}
+
+export function setDownloadManagerSearch(query: string): void {
+  DownloadManager.setSearch(query);
+}
+
+export async function eliminarGrupoOffline(kind: 'anime' | 'manga', mediaId: string): Promise<void> {
+  if (!nWin.NyAnimeOffline?.deleteOfflineSeriesGroup) return;
+  const removed = await nWin.NyAnimeOffline.deleteOfflineSeriesGroup(kind, mediaId);
+  await DownloadManager.renderDownloadsModal();
+  await DownloadManager.updateBadge();
+  if (state.tipoLecturaActual === 'OFFLINE') {
+    void uiHooks.cargarMangasYNovelas();
+  }
+  if (typeof nWin.refreshOfflineMangaDetailState === 'function') {
+    await nWin.refreshOfflineMangaDetailState(undefined, true);
+  }
+  if (typeof nWin.renderDetalleEpisodios === 'function') {
+    nWin.renderDetalleEpisodios();
+  }
+  showToast(removed > 0 ? `Se eliminaron ${removed} elementos de la serie.` : 'No había elementos por eliminar.');
+}
+
+export function solicitarLimpiarDescargas(): void {
+  document.getElementById('btn-clear-all-dl')?.classList.add('hide');
+  document.getElementById('dl-clear-confirm-box')?.classList.remove('hide');
+}
+
+export function cancelarLimpiarDescargas(): void {
+  document.getElementById('dl-clear-confirm-box')?.classList.add('hide');
+  document.getElementById('btn-clear-all-dl')?.classList.remove('hide');
+}
+
+export async function confirmarLimpiarDescargas(): Promise<void> {
+  cancelarLimpiarDescargas();
+  await limpiarDescargasCompletadas();
 }
 
 export async function limpiarDescargasCompletadas(): Promise<void> {
@@ -596,7 +738,25 @@ export async function limpiarDescargasCompletadas(): Promise<void> {
   if (typeof nWin.refreshOfflineMangaDetailState === 'function') {
     await nWin.refreshOfflineMangaDetailState(undefined, true);
   }
+  if (typeof nWin.renderDetalleEpisodios === 'function') {
+    nWin.renderDetalleEpisodios();
+  }
   showToast('Almacenamiento offline limpiado.');
+}
+
+function syncAvatarPreviewUI(url: string): void {
+  const cleanUrl = safeImg(url, DEFAULT_AVATAR_URL);
+  const previewImg = document.getElementById('avatar-preview-img') as HTMLImageElement | null;
+  const sourceLabel = document.getElementById('avatar-preview-source');
+  const resetBtn = document.getElementById('btn-avatar-reset-preset');
+  const isCustomGallery = isDataImageAvatar(cleanUrl);
+  if (previewImg) previewImg.src = cleanUrl;
+  if (sourceLabel) {
+    sourceLabel.textContent = isCustomGallery ? 'Foto de tu galería · Lista para guardar' : 'Avatar predefinido';
+  }
+  if (resetBtn) {
+    resetBtn.classList.toggle('hide', !isCustomGallery);
+  }
 }
 
 export function setupAvatarOptions(): void {
@@ -605,20 +765,83 @@ export function setupAvatarOptions(): void {
   if (!grid) return;
   grid.innerHTML = '';
   const user = UserManager.getUser();
-  avatarSeleccionado = user.avatar;
+  avatarSeleccionado = user.avatar || DEFAULT_AVATAR_URL;
+  syncAvatarPreviewUI(avatarSeleccionado);
 
   AVATAR_SEEDS.forEach(seed => {
     const url = `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`;
-    const opt = document.createElement('div');
-    opt.className = `avatar-option ${user.avatar === url ? 'selected' : ''}`;
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = `avatar-option ${avatarSeleccionado === url ? 'selected' : ''}`;
+    opt.setAttribute('aria-label', `Avatar ${seed}`);
     opt.onclick = () => {
       document.querySelectorAll('.avatar-option').forEach(o => o.classList.remove('selected'));
       opt.classList.add('selected');
       avatarSeleccionado = url;
+      const errEl = document.getElementById('avatar-upload-error');
+      if (errEl) {
+        errEl.classList.add('hide');
+        errEl.textContent = '';
+      }
+      syncAvatarPreviewUI(url);
     };
     opt.innerHTML = `<img src="${url}" alt="${seed}">`;
     grid.appendChild(opt);
   });
+}
+
+export function seleccionarFotoGaleriaAvatar(): void {
+  ensureModalsMounted();
+  const errEl = document.getElementById('avatar-upload-error');
+  if (errEl) {
+    errEl.classList.add('hide');
+    errEl.textContent = '';
+  }
+  const input = document.getElementById('input-avatar-gallery') as HTMLInputElement | null;
+  if (input) {
+    input.value = '';
+    input.click();
+  }
+}
+
+export async function onAvatarGalleryFileChange(event: Event): Promise<void> {
+  const input = event?.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  const btn = document.getElementById('btn-avatar-gallery') as HTMLButtonElement | null;
+  const errEl = document.getElementById('avatar-upload-error');
+  if (errEl) {
+    errEl.classList.add('hide');
+    errEl.textContent = '';
+  }
+  if (btn) btn.disabled = true;
+
+  try {
+    const compressedDataUrl = await compressAvatarImageInBrowser(file);
+    avatarSeleccionado = compressedDataUrl;
+    document.querySelectorAll('.avatar-option').forEach(o => o.classList.remove('selected'));
+    syncAvatarPreviewUI(compressedDataUrl);
+    showToast('Foto cargada · Pulsa Guardar Cambios');
+  } catch (err: any) {
+    const msg = err?.message || 'No se pudo cargar la imagen seleccionada.';
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.classList.remove('hide');
+    }
+    showToast(msg);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (input) input.value = '';
+  }
+}
+
+export function restaurarAvatarPredeterminado(): void {
+  avatarSeleccionado = DEFAULT_AVATAR_URL;
+  setupAvatarOptions();
+  const firstOpt = document.querySelector('#avatar-grid-options .avatar-option');
+  if (firstOpt) firstOpt.classList.add('selected');
+  syncAvatarPreviewUI(DEFAULT_AVATAR_URL);
 }
 
 export function abrirModalAvatar(): void {
@@ -626,19 +849,25 @@ export function abrirModalAvatar(): void {
   const user = UserManager.getUser();
   const input = document.getElementById('input-edit-username') as HTMLInputElement | null;
   if (input) input.value = user.username;
+  const errEl = document.getElementById('avatar-upload-error');
+  if (errEl) {
+    errEl.classList.add('hide');
+    errEl.textContent = '';
+  }
   setupAvatarOptions();
   document.getElementById('modal-avatar')?.classList.add('active');
 }
 
 export function guardarPerfilUsuario(): void {
   const input = document.getElementById('input-edit-username') as HTMLInputElement | null;
-  const name = input?.value.trim() || 'Invitado';
+  const name = input?.value.trim().slice(0, 80) || 'Invitado';
   const user = UserManager.getUser();
   user.username = name;
   if (avatarSeleccionado) user.avatar = avatarSeleccionado;
+  user.profileUpdatedAt = Date.now();
   UserManager.saveUser(user);
   if (nWin.FirebaseAuth?.updateAuthProfile) {
-    nWin.FirebaseAuth.updateAuthProfile(user.username, user.avatar);
+    nWin.FirebaseAuth.updateAuthProfile(user.username, user.avatar, user.profileUpdatedAt);
   }
   cerrarModales();
   showToast('Perfil actualizado correctamente');
@@ -650,6 +879,7 @@ export function abrirModalVip(): void {
   const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
   const isLoggedIn = Boolean(fbUser && !fbUser.isAnonymous);
   const eps = Number(user.stats?.episodesWatched || 0);
+  const secs = Number(user.stats?.totalSecondsWatched || 0);
   const chaps = UserManager.getTotalChaptersRead();
   const rank = nWin.NyAnimeUtils?.computeUserRank
     ? nWin.NyAnimeUtils.computeUserRank(eps, chaps, isLoggedIn ? user.role : 'FREE')
@@ -658,7 +888,9 @@ export function abrirModalVip(): void {
   const curEl = document.getElementById('rank-modal-current');
   const sumEl = document.getElementById('rank-modal-summary');
   if (curEl) curEl.textContent = `${rank.icon} Rango actual: ${rank.label}`;
-  if (sumEl) sumEl.textContent = `${eps} episodios vistos · ${chaps} capítulos leídos · ${rank.points} pts de actividad`;
+  if (sumEl) {
+    sumEl.textContent = `${eps} eps vistos · ${formatWatchDuration(secs)} reales · ${chaps} caps leídos · ${rank.points} pts`;
+  }
   document.getElementById('modal-vip')?.classList.add('active');
 }
 
@@ -709,11 +941,11 @@ export async function sincronizarListaExterna(): Promise<void> {
       const curMangas = MangaFavoritesManager.getAll();
       result.mangas.forEach((m: any) => {
         if (!curMangas.some((x) => String(x.id) === String(m.id))) {
-          curMangas.unshift(m);
+          curMangas.unshift(compactMangaEntry(m) || m);
           addedMangas++;
         }
       });
-      localStorage.setItem(MangaFavoritesManager.KEY, JSON.stringify(curMangas));
+      safeStorageSetItem(MangaFavoritesManager.KEY, JSON.stringify(curMangas));
       if (addedMangas > 0 && nWin.firebaseSync?.scheduleSync) {
         nWin.firebaseSync.scheduleSync('manga_favorites_import');
       }
