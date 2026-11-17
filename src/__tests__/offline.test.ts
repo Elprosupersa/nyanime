@@ -1,13 +1,19 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildOfflineChapterBucketsFromManifests,
   clearAllOfflineStorage,
+  deleteOfflineMangaSeries,
   deleteOfflineManifestById,
   downloadAnimeEpisodeOrQueue,
   downloadMangaChapterOffline,
   getAllOfflineManifests,
+  getCachedCoverBlobUrl,
   getOfflineAnimeVideoBlobUrl,
   getOfflineMangaChapterPages,
+  getOfflineMangaChapterPagesByAliases,
+  getOfflineMangaChaptersForSeries,
+  getOfflineMangaLibrary,
   getStorageSummary,
   isMangaChapterDownloaded,
   revokeOfflineObjectUrls
@@ -86,12 +92,16 @@ describe('offline service - CacheStorage & IndexedDB', () => {
     expect(manifest.kind).toBe('manga');
     expect(manifest.pageCount).toBe(2);
     expect(manifest.sizeBytes).toBe(1024);
-    expect(progressUpdates).toEqual([1, 2]);
+    expect(progressUpdates.sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(manifest.coverCacheKey).toBeTruthy();
 
     expect(await isMangaChapterDownloaded('solo-leveling-id', 1)).toBe(true);
 
     const offlineUrls = await getOfflineMangaChapterPages('solo-leveling-id', 1);
     expect(offlineUrls).toEqual(['blob:nyanime-test-1', 'blob:nyanime-test-2']);
+
+    const cachedCover = await getCachedCoverBlobUrl(manifest.coverCacheKey);
+    expect(cachedCover).toBe('blob:nyanime-test-3');
 
     const summary = await getStorageSummary();
     expect(summary.mangaChaptersCount).toBe(1);
@@ -100,6 +110,104 @@ describe('offline service - CacheStorage & IndexedDB', () => {
     await deleteOfflineManifestById(manifest.id);
     expect(await isMangaChapterDownloaded('solo-leveling-id', 1)).toBe(false);
     expect(await getAllOfflineManifests()).toEqual([]);
+  });
+
+  it('resolves cached manga chapters across AniList id and MangaDex dexId aliases and builds language buckets', async () => {
+    const fakePageBytes = new Uint8Array(300).fill(9);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(fakePageBytes, { status: 200, headers: { 'Content-Type': 'image/webp' } }))
+    );
+
+    await downloadMangaChapterOffline({
+      mangaId: 'anilist-105398',
+      mangaTitle: 'Solo Leveling',
+      cover: 'https://cdn.anilist.co/cover-sl.jpg',
+      chapterNum: 10,
+      chapterLabel: '10',
+      lang: 'es',
+      mangaMeta: {
+        id: 'anilist-105398',
+        dexId: '32d76d19-8a05-4db0-9fc2-e0b0648fe9d0',
+        title: 'Solo Leveling',
+        flag: '🇰🇷 Manhwa'
+      },
+      pageUrls: ['https://cmd.mangadex.network/data/p1.webp']
+    });
+
+    await downloadMangaChapterOffline({
+      mangaId: 'anilist-105398',
+      mangaTitle: 'Solo Leveling',
+      chapterNum: 2,
+      chapterLabel: '2',
+      lang: 'en',
+      mangaMeta: {
+        id: 'anilist-105398',
+        dexId: '32d76d19-8a05-4db0-9fc2-e0b0648fe9d0',
+        title: 'Solo Leveling'
+      },
+      pageUrls: ['https://cmd.mangadex.network/data/p2.webp']
+    });
+
+    // Look up by MangaDex UUID alias instead of primary AniList ID
+    const byDexAlias = await getOfflineMangaChapterPagesByAliases(
+      ['32d76d19-8a05-4db0-9fc2-e0b0648fe9d0'],
+      10
+    );
+    expect(byDexAlias?.pages).toHaveLength(1);
+    expect(byDexAlias?.manifest.chapterNum).toBe(10);
+
+    const seriesChapters = await getOfflineMangaChaptersForSeries(['32d76d19-8a05-4db0-9fc2-e0b0648fe9d0']);
+    expect(seriesChapters.map((c) => c.chapterNum)).toEqual([2, 10]);
+
+    const buckets = buildOfflineChapterBucketsFromManifests(seriesChapters);
+    expect(buckets.spanish).toHaveLength(1);
+    expect(buckets.english).toHaveLength(1);
+    expect(buckets.all).toHaveLength(2);
+
+    const library = await getOfflineMangaLibrary();
+    expect(library).toHaveLength(1);
+    expect(library[0].chaptersCount).toBe(2);
+    expect(library[0].totalBytes).toBe(600);
+
+    const deletedCount = await deleteOfflineMangaSeries(['32d76d19-8a05-4db0-9fc2-e0b0648fe9d0']);
+    expect(deletedCount).toBe(2);
+    expect(await getOfflineMangaLibrary()).toEqual([]);
+  });
+
+  it('falls back to ManhwaWeb mirror (img1mw -> img2mw) and saver fallback URLs during chapter caching', async () => {
+    const fakePageBytes = new Uint8Array(400).fill(5);
+    const requestedUrls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.includes('img1mw.xyz') || url.includes('primary-broken.jpg')) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return new Response(fakePageBytes, { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+      })
+    );
+
+    const manifest = await downloadMangaChapterOffline({
+      mangaId: 'mirror-test',
+      mangaTitle: 'Mirror Test',
+      chapterNum: 3,
+      chapterLabel: '3',
+      pageUrls: [
+        'https://img1mw.xyz/ch3/01.jpg',
+        'https://cmd.mangadex.network/primary-broken.jpg'
+      ],
+      fallbackPageUrls: [
+        '',
+        'https://uploads.mangadex.org/data-saver/abc/02.jpg'
+      ]
+    });
+
+    expect(manifest.pageCount).toBe(2);
+    expect(requestedUrls.some((u) => u.includes('img2mw.xyz'))).toBe(true);
+    expect(requestedUrls.some((u) => u.includes('data-saver'))).toBe(true);
   });
 
   it('rolls back partial page cache and aborts cleanly when cancelled mid-download', async () => {

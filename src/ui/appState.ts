@@ -98,6 +98,8 @@ export interface NyWindow extends Window {
   _crunchyOutsideClickBound?: boolean;
   _nyPlayerKeyboardBound?: boolean;
   capitulosLectorList?: any[];
+  mangaUiState?: any;
+  refreshOfflineMangaDetailState?: (manga?: any, rerender?: boolean) => Promise<any>;
 }
 
 export const nWin = window as unknown as NyWindow;
@@ -1129,7 +1131,10 @@ export const DownloadManager = {
     }
     const badge = document.getElementById('downloads-badge');
     const countText = document.getElementById('profile-downloads-count');
-    if (badge) badge.classList.add('hide');
+    if (badge) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.classList.toggle('hide', count <= 0);
+    }
     if (countText) {
       countText.textContent = `${count} ${count === 1 ? 'elemento guardado' : 'elementos guardados'}`;
     }
@@ -1145,25 +1150,53 @@ export const DownloadManager = {
         if (!m) return;
         if (m.kind === 'manga') {
           cerrarModales();
-          setActiveManga({
-            id: m.mediaId,
-            title: m.title,
-            cover: m.cover || ''
-          });
-          // Store offline chapter directly in Store for reader
-          const offlineCap = {
-            id: m.id,
-            chapter: String(m.chapterLabel || m.chapterNum || 1),
-            chapterNum: Number(m.chapterNum || 1),
-            title: `Cap. ${m.chapterLabel || m.chapterNum || 1}`,
-            pages: m.pageCount || 0,
-            group: 'Offline 💾',
-            lang: 'es',
-            source: 'Offline'
-          };
-          (nWin.Store?.state || {}).activeChapter = offlineCap;
-          (nWin as any).capitulosLectorList = [offlineCap];
-          await uiHooks.abrirLectorManga(0);
+          const restoredManga = m.mangaMeta
+            ? { ...m.mangaMeta }
+            : { id: m.mediaId, title: m.title, cover: m.cover || '' };
+          setActiveManga(restoredManga);
+
+          let capList: any[] = [];
+          if (
+            nWin.NyAnimeOffline?.getOfflineMangaChaptersForSeries &&
+            nWin.NyAnimeOffline?.buildOfflineChapterBucketsFromManifests
+          ) {
+            const seriesManifests = await nWin.NyAnimeOffline.getOfflineMangaChaptersForSeries([
+              restoredManga.id,
+              restoredManga.dexId,
+              m.mediaId
+            ]);
+            if (Array.isArray(seriesManifests) && seriesManifests.length > 0) {
+              capList = nWin.NyAnimeOffline.buildOfflineChapterBucketsFromManifests(seriesManifests).all || [];
+            }
+          }
+
+          if (capList.length === 0) {
+            capList = [{
+              id: m.id,
+              chapter: String(m.chapterLabel || m.chapterNum || 1),
+              chapterNum: Number(m.chapterNum || 1),
+              title: m.chapterTitle || `Cap. ${m.chapterLabel || m.chapterNum || 1}`,
+              pages: m.pageCount || 0,
+              group: 'Offline 💾',
+              lang: m.lang || 'es',
+              source: 'Offline',
+              isOfflineCached: true
+            }];
+          }
+
+          const targetIdx = capList.findIndex(
+            (c) => c.id === m.id || Math.abs(Number(c.chapterNum) - Number(m.chapterNum ?? -1)) < 0.001
+          );
+          const resolvedIdx = targetIdx >= 0 ? targetIdx : 0;
+
+          if (nWin.mangaUiState) {
+            nWin.mangaUiState.capitulosLectorList = capList;
+          }
+          if (nWin.Store?.state) {
+            nWin.Store.state.activeChapter = capList[resolvedIdx];
+          }
+          (nWin as any).capitulosLectorList = capList;
+          await uiHooks.abrirLectorManga(resolvedIdx);
         } else if (m.kind === 'anime-video') {
           cerrarModales();
           if (typeof nWin.reproducirVideoOfflineCacheado === 'function') {
@@ -1184,6 +1217,12 @@ export const DownloadManager = {
         await nWin.NyAnimeOffline.deleteOfflineManifestById(offlineId);
         await this.renderDownloadsModal();
         await this.updateBadge();
+        if (state.tipoLecturaActual === 'OFFLINE') {
+          void uiHooks.cargarMangasYNovelas();
+        }
+        if (typeof nWin.refreshOfflineMangaDetailState === 'function') {
+          await nWin.refreshOfflineMangaDetailState(undefined, true);
+        }
         showToast('Archivo offline eliminado del dispositivo.');
       };
       await nWin.NyAnimeOffline.renderOfflineDownloadsModal(container, summaryEl);

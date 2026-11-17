@@ -7,14 +7,37 @@ const DB_NAME = 'NyAnimeOfflineDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'offline_items';
 
+export interface OfflineMangaMeta {
+  id: string;
+  dexId?: string;
+  title: string;
+  cover?: string;
+  banner?: string;
+  author?: string;
+  desc?: string;
+  genres?: string[];
+  status?: string;
+  year?: string | number;
+  flag?: string;
+  origLang?: string;
+  score?: string | number;
+  preferredSource?: string;
+  altTitles?: string[];
+}
+
 export interface OfflineChapterManifest {
   id: string;
   kind: 'manga' | 'anime-video' | 'watch-later';
   mediaId: string;
   title: string;
   cover?: string;
+  coverCacheKey?: string;
   chapterNum?: number;
   chapterLabel?: string;
+  chapterTitle?: string;
+  lang?: string;
+  group?: string;
+  mangaMeta?: OfflineMangaMeta;
   episode?: number;
   season?: number;
   quality?: string;
@@ -25,6 +48,17 @@ export interface OfflineChapterManifest {
   status: 'completed' | 'watch-later';
   note?: string;
   createdAt: number;
+}
+
+export interface OfflineMangaSeriesSummary {
+  mediaId: string;
+  title: string;
+  cover: string;
+  chaptersCount: number;
+  totalBytes: number;
+  latestAt: number;
+  mangaMeta?: OfflineMangaMeta;
+  chapters: OfflineChapterManifest[];
 }
 
 export interface MangaDownloadProgress {
@@ -163,6 +197,42 @@ export function buildOfflinePageCacheKey(offlineId: string, pageIndex: number): 
   return `https://nyanime.offline/cache/${encodeURIComponent(offlineId)}/page-${pageIndex}.bin`;
 }
 
+export function buildOfflineCoverCacheKey(mangaId: string | number): string {
+  const mClean = String(mangaId).replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `https://nyanime.offline/cover/${encodeURIComponent(mClean)}.bin`;
+}
+
+export function normalizeMangaAliases(
+  mangaIdOrAliases: string | number | Array<string | number | undefined | null>
+): string[] {
+  const rawList = Array.isArray(mangaIdOrAliases) ? mangaIdOrAliases : [mangaIdOrAliases];
+  const seen = new Set<string>();
+  for (const val of rawList) {
+    if (val === undefined || val === null) continue;
+    const str = String(val).trim();
+    if (!str) continue;
+    seen.add(str);
+    seen.add(str.toLowerCase());
+  }
+  return Array.from(seen);
+}
+
+export function manifestMatchesMangaAliases(
+  manifest: OfflineChapterManifest,
+  aliases: string[]
+): boolean {
+  if (!manifest || manifest.kind !== 'manga' || aliases.length === 0) return false;
+  const candidateIds = [
+    manifest.mediaId,
+    manifest.mangaMeta?.id,
+    manifest.mangaMeta?.dexId
+  ]
+    .filter((v): v is string => Boolean(v && String(v).trim()))
+    .flatMap((v) => [String(v).trim(), String(v).trim().toLowerCase()]);
+
+  return candidateIds.some((cid) => aliases.includes(cid));
+}
+
 function resolveFetchUrl(rawUrl: string): string {
   if (
     rawUrl.startsWith('/api/img-proxy') ||
@@ -172,6 +242,51 @@ function resolveFetchUrl(rawUrl: string): string {
     return rawUrl;
   }
   return `/api/img-proxy?url=${encodeURIComponent(rawUrl)}`;
+}
+
+function buildPageCandidateUrls(primaryUrl: string, fallbackUrl?: string): string[] {
+  const candidates: string[] = [];
+  const pushUnique = (u?: string) => {
+    if (!u || typeof u !== 'string') return;
+    const trimmed = u.trim();
+    if (!trimmed) return;
+    if (!candidates.includes(trimmed)) candidates.push(trimmed);
+  };
+  pushUnique(primaryUrl);
+
+  // ManhwaWeb mirror failover
+  if (primaryUrl.includes('img1mw.xyz')) {
+    pushUnique(primaryUrl.replace('img1mw.xyz', 'img2mw.xyz'));
+  } else if (primaryUrl.includes('img2mw.xyz')) {
+    pushUnique(primaryUrl.replace('img2mw.xyz', 'img1mw.xyz'));
+  }
+
+  // InManga / IntoManga CDN mirror failover
+  if (primaryUrl.includes('identification=') || primaryUrl.includes('intomanga.com') || primaryUrl.includes('inmanga.com')) {
+    const idMatch = primaryUrl.match(/identification=([^&]+)/) || primaryUrl.match(/\/o\/([^./]+)\.(?:jpg|jpeg|png|webp)/i);
+    const inId = idMatch ? idMatch[1] : '';
+    if (inId) {
+      pushUnique(`https://pack.intomanga.com/i/m/cdn/c/cdn/o/${inId}.jpg`);
+      pushUnique(`https://cdn1.intomanga.com/i/m/cdn/c/cdn/o/${inId}.jpg`);
+      pushUnique(`https://cdn2.intomanga.com/i/m/cdn/c/cdn/o/${inId}.jpg`);
+      pushUnique(`https://inmanga.com/page/getPageImage/?identification=${inId}`);
+    }
+  }
+
+  // MangaDex fallback to saver URL then master uploads origin
+  pushUnique(fallbackUrl);
+  const mdPathMatch = primaryUrl.match(/\/(data|data-saver)\/([^\/]+)\/([^?]+)/);
+  if (mdPathMatch && (primaryUrl.includes('mangadex') || primaryUrl.includes('cmd.') || primaryUrl.includes('.network/'))) {
+    pushUnique(`https://uploads.mangadex.org/${mdPathMatch[1]}/${mdPathMatch[2]}/${mdPathMatch[3]}`);
+  }
+  if (fallbackUrl) {
+    const fbMatch = fallbackUrl.match(/\/(data|data-saver)\/([^\/]+)\/([^?]+)/);
+    if (fbMatch) {
+      pushUnique(`https://uploads.mangadex.org/${fbMatch[1]}/${fbMatch[2]}/${fbMatch[3]}`);
+    }
+  }
+
+  return candidates;
 }
 
 const activeObjectUrls: string[] = [];
@@ -189,13 +304,63 @@ export function revokeOfflineObjectUrls(): void {
   }
 }
 
+async function cacheMangaCoverBestEffort(
+  cache: Cache,
+  mangaId: string | number,
+  cover?: string
+): Promise<string | undefined> {
+  if (!cover || cover.startsWith('data:') || cover.startsWith('blob:')) return undefined;
+  const coverKey = buildOfflineCoverCacheKey(mangaId);
+  try {
+    const existing = await cache.match(coverKey);
+    if (existing) return coverKey;
+    const resp = await fetch(resolveFetchUrl(cover));
+    if (!resp.ok) return undefined;
+    const blob = await resp.blob();
+    if (blob.size < 100) return undefined;
+    await cache.put(
+      coverKey,
+      new Response(blob, {
+        status: 200,
+        headers: {
+          'Content-Type': blob.type || 'image/jpeg',
+          'X-Offline-Cover': String(mangaId)
+        }
+      })
+    );
+    return coverKey;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getCachedCoverBlobUrl(coverCacheKey?: string): Promise<string | null> {
+  if (!coverCacheKey || typeof caches === 'undefined') return null;
+  try {
+    const cache = await caches.open(OFFLINE_MANGA_CACHE);
+    const match = await cache.match(coverCacheKey);
+    if (!match) return null;
+    const blob = await match.blob();
+    const objUrl = URL.createObjectURL(blob);
+    activeObjectUrls.push(objUrl);
+    return objUrl;
+  } catch {
+    return null;
+  }
+}
+
 export async function downloadMangaChapterOffline(params: {
   mangaId: string | number;
   mangaTitle: string;
   cover?: string;
   chapterNum: number;
   chapterLabel: string;
+  chapterTitle?: string;
+  lang?: string;
+  group?: string;
+  mangaMeta?: OfflineMangaMeta;
   pageUrls: string[];
+  fallbackPageUrls?: string[];
   chapterIndex?: number;
   totalChapters?: number;
   onProgress?: (p: MangaDownloadProgress) => void;
@@ -210,7 +375,12 @@ export async function downloadMangaChapterOffline(params: {
     cover,
     chapterNum,
     chapterLabel,
+    chapterTitle,
+    lang,
+    group,
+    mangaMeta,
     pageUrls,
+    fallbackPageUrls = [],
     chapterIndex = 0,
     totalChapters = 1,
     onProgress,
@@ -225,56 +395,110 @@ export async function downloadMangaChapterOffline(params: {
 
   const offlineId = buildMangaChapterOfflineId(mangaId, chapterNum);
   const cache = await caches.open(OFFLINE_MANGA_CACHE);
-  const pageKeys: string[] = [];
+  const pageKeys: string[] = new Array(pageUrls.length);
   let totalBytes = 0;
+  let completedPages = 0;
 
-  for (let i = 0; i < pageUrls.length; i += 1) {
+  const fetchSinglePage = async (index: number): Promise<void> => {
     if (signal?.aborted) {
-      // Limpiar descargas parciales de este capítulo cancelado
-      await Promise.all(pageKeys.map((k) => cache.delete(k).catch(() => false)));
       throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
     }
 
-    const proxyUrl = resolveFetchUrl(pageUrls[i]);
-    const resp = await fetch(proxyUrl, { signal });
-    if (!resp.ok) {
-      throw new Error(`Fallo al descargar página ${i + 1} (${resp.status})`);
-    }
-    const blob = await resp.blob();
-    if (blob.size < 100) {
-      throw new Error(`Página ${i + 1} vacía o corrupta.`);
-    }
-    totalBytes += blob.size;
+    const candidates = buildPageCandidateUrls(pageUrls[index], fallbackPageUrls[index]);
+    let downloadedBlob: Blob | null = null;
+    let lastStatus = 0;
 
-    const cacheKey = buildOfflinePageCacheKey(offlineId, i);
-    const cachedResp = new Response(blob, {
+    for (const candidate of candidates) {
+      if (signal?.aborted) {
+        throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+      }
+      try {
+        const proxyUrl = resolveFetchUrl(candidate);
+        const reqCtrl = new AbortController();
+        const timeoutId = setTimeout(() => reqCtrl.abort(), 10000);
+        const onUserAbort = () => reqCtrl.abort();
+        signal?.addEventListener('abort', onUserAbort, { once: true });
+        let resp: Response;
+        try {
+          resp = await fetch(proxyUrl, { signal: reqCtrl.signal });
+        } finally {
+          clearTimeout(timeoutId);
+          signal?.removeEventListener('abort', onUserAbort);
+        }
+        lastStatus = resp.status;
+        if (!resp.ok) continue;
+        const blob = await resp.blob();
+        if (blob.size < 100) continue;
+        downloadedBlob = blob;
+        break;
+      } catch (err: any) {
+        if (signal?.aborted) {
+          throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+        }
+      }
+    }
+
+    if (!downloadedBlob) {
+      throw new Error(`Fallo al descargar página ${index + 1}${lastStatus ? ` (${lastStatus})` : ''}`);
+    }
+
+    totalBytes += downloadedBlob.size;
+    const cacheKey = buildOfflinePageCacheKey(offlineId, index);
+    const cachedResp = new Response(downloadedBlob, {
       status: 200,
       headers: {
-        'Content-Type': blob.type || 'image/jpeg',
+        'Content-Type': downloadedBlob.type || 'image/jpeg',
         'X-Offline-Manga': offlineId
       }
     });
     await cache.put(cacheKey, cachedResp);
-    pageKeys.push(cacheKey);
+    pageKeys[index] = cacheKey;
+    completedPages += 1;
 
     onProgress?.({
       chapterIndex,
       totalChapters,
       chapterLabel,
-      pageIndex: i + 1,
+      pageIndex: completedPages,
       totalPages: pageUrls.length,
       bytesDownloaded: totalBytes
     });
+  };
+
+  try {
+    const concurrency = Math.min(3, pageUrls.length);
+    let nextIdx = 0;
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (nextIdx < pageUrls.length) {
+        const myIdx = nextIdx;
+        nextIdx += 1;
+        await fetchSinglePage(myIdx);
+      }
+    });
+    await Promise.all(workers);
+  } catch (err) {
+    // Limpiar descargas parciales de este capítulo cancelado o fallido
+    await Promise.all(
+      pageKeys.filter(Boolean).map((k) => cache.delete(k).catch(() => false))
+    );
+    throw err;
   }
+
+  const coverCacheKey = await cacheMangaCoverBestEffort(cache, mangaId, cover || mangaMeta?.cover);
 
   const manifest: OfflineChapterManifest = {
     id: offlineId,
     kind: 'manga',
     mediaId: String(mangaId),
     title: mangaTitle,
-    cover,
+    cover: cover || mangaMeta?.cover,
+    coverCacheKey,
     chapterNum,
     chapterLabel,
+    chapterTitle: chapterTitle || `Capítulo ${chapterLabel}`,
+    lang: lang || 'es',
+    group: group || 'Offline 💾',
+    mangaMeta,
     pageKeys,
     pageCount: pageKeys.length,
     sizeBytes: totalBytes,
@@ -290,9 +514,41 @@ export async function getOfflineMangaChapterPages(
   mangaId: string | number,
   chapterNum: number | string
 ): Promise<string[] | null> {
+  const res = await getOfflineMangaChapterPagesByAliases([mangaId], chapterNum);
+  return res ? res.pages : null;
+}
+
+export async function getOfflineMangaChapterPagesByAliases(
+  mangaIdOrAliases: string | number | Array<string | number | undefined | null>,
+  chapterNum: number | string
+): Promise<{ pages: string[]; manifest: OfflineChapterManifest } | null> {
   if (typeof caches === 'undefined') return null;
-  const offlineId = buildMangaChapterOfflineId(mangaId, chapterNum);
-  const manifest = await getOfflineManifestById(offlineId);
+  const aliases = normalizeMangaAliases(mangaIdOrAliases);
+  if (aliases.length === 0) return null;
+
+  let manifest: OfflineChapterManifest | null = null;
+  for (const alias of aliases) {
+    const candidate = await getOfflineManifestById(buildMangaChapterOfflineId(alias, chapterNum));
+    if (candidate && candidate.kind === 'manga' && candidate.pageKeys?.length) {
+      manifest = candidate;
+      break;
+    }
+  }
+
+  if (!manifest) {
+    const all = await getAllOfflineManifests();
+    const targetNum = Number(chapterNum);
+    manifest =
+      all.find(
+        (m) =>
+          manifestMatchesMangaAliases(m, aliases) &&
+          m.status === 'completed' &&
+          Boolean(m.pageKeys?.length) &&
+          (Math.abs(Number(m.chapterNum ?? -1) - targetNum) < 0.001 ||
+            String(m.chapterLabel || '').trim() === String(chapterNum).trim())
+      ) || null;
+  }
+
   if (!manifest || manifest.kind !== 'manga' || !manifest.pageKeys?.length) {
     return null;
   }
@@ -309,7 +565,106 @@ export async function getOfflineMangaChapterPages(
     activeObjectUrls.push(objUrl);
     blobUrls.push(objUrl);
   }
-  return blobUrls;
+  return { pages: blobUrls, manifest };
+}
+
+export async function getOfflineMangaChaptersForSeries(
+  mangaIdOrAliases: string | number | Array<string | number | undefined | null>
+): Promise<OfflineChapterManifest[]> {
+  const aliases = normalizeMangaAliases(mangaIdOrAliases);
+  if (aliases.length === 0) return [];
+  const all = await getAllOfflineManifests();
+  return all
+    .filter((m) => m.status === 'completed' && manifestMatchesMangaAliases(m, aliases))
+    .sort((a, b) => Number(a.chapterNum ?? 0) - Number(b.chapterNum ?? 0));
+}
+
+export async function getOfflineMangaLibrary(): Promise<OfflineMangaSeriesSummary[]> {
+  const all = await getAllOfflineManifests();
+  const mangaItems = all.filter((m) => m.kind === 'manga' && m.status === 'completed');
+  const groups = new Map<string, OfflineMangaSeriesSummary>();
+
+  for (const item of mangaItems) {
+    const groupKey = String(item.mangaMeta?.id || item.mediaId).trim();
+    let entry = groups.get(groupKey);
+    if (!entry) {
+      let resolvedCover = item.cover || item.mangaMeta?.cover || '';
+      if (item.coverCacheKey) {
+        const cachedCover = await getCachedCoverBlobUrl(item.coverCacheKey);
+        if (cachedCover) resolvedCover = cachedCover;
+      }
+      entry = {
+        mediaId: groupKey,
+        title: item.mangaMeta?.title || item.title,
+        cover: resolvedCover,
+        chaptersCount: 0,
+        totalBytes: 0,
+        latestAt: 0,
+        mangaMeta: item.mangaMeta,
+        chapters: []
+      };
+      groups.set(groupKey, entry);
+    }
+    entry.chapters.push(item);
+    entry.chaptersCount += 1;
+    entry.totalBytes += Number(item.sizeBytes || 0);
+    if ((item.createdAt || 0) > entry.latestAt) {
+      entry.latestAt = item.createdAt || 0;
+    }
+    if (!entry.mangaMeta && item.mangaMeta) {
+      entry.mangaMeta = item.mangaMeta;
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((entry) => {
+      entry.chapters.sort((a, b) => Number(a.chapterNum ?? 0) - Number(b.chapterNum ?? 0));
+      return entry;
+    })
+    .sort((a, b) => b.latestAt - a.latestAt);
+}
+
+export async function deleteOfflineMangaSeries(
+  mangaIdOrAliases: string | number | Array<string | number | undefined | null>
+): Promise<number> {
+  const chapters = await getOfflineMangaChaptersForSeries(mangaIdOrAliases);
+  for (const cap of chapters) {
+    await deleteOfflineManifestById(cap.id);
+  }
+  return chapters.length;
+}
+
+export function buildOfflineChapterBucketsFromManifests(manifests: OfflineChapterManifest[]): {
+  spanish: any[];
+  english: any[];
+  japanese: any[];
+  korean: any[];
+  all: any[];
+} {
+  const toCapObj = (m: OfflineChapterManifest) => ({
+    id: m.id,
+    chapter: String(m.chapterLabel || m.chapterNum || 1),
+    chapterNum: Number(m.chapterNum ?? 1),
+    title: m.chapterTitle || `Capítulo ${m.chapterLabel || m.chapterNum || 1}`,
+    pages: m.pageCount || 0,
+    group: 'Offline 💾',
+    lang: (m.lang || 'es').toLowerCase(),
+    source: 'Offline',
+    isOfflineCached: true,
+    offlineSizeBytes: m.sizeBytes || 0
+  });
+
+  const all = manifests
+    .map(toCapObj)
+    .sort((a, b) => Number(a.chapterNum) - Number(b.chapterNum));
+
+  return {
+    spanish: all.filter((c) => c.lang === 'es' || c.lang === 'es-la' || c.lang === 'es-es'),
+    english: all.filter((c) => c.lang.startsWith('en')),
+    japanese: all.filter((c) => c.lang === 'ja' || c.lang === 'jp'),
+    korean: all.filter((c) => c.lang === 'ko' || c.lang === 'kr'),
+    all
+  };
 }
 
 export async function isMangaChapterDownloaded(
@@ -317,7 +672,14 @@ export async function isMangaChapterDownloaded(
   chapterNum: number | string
 ): Promise<boolean> {
   const m = await getOfflineManifestById(buildMangaChapterOfflineId(mangaId, chapterNum));
-  return Boolean(m && m.status === 'completed');
+  if (m && m.status === 'completed') return true;
+  const chapters = await getOfflineMangaChaptersForSeries([mangaId]);
+  const targetNum = Number(chapterNum);
+  return chapters.some(
+    (c) =>
+      Math.abs(Number(c.chapterNum ?? -1) - targetNum) < 0.001 ||
+      String(c.chapterLabel || '').trim() === String(chapterNum).trim()
+  );
 }
 
 export async function downloadAnimeEpisodeOrQueue(params: {

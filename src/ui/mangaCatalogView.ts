@@ -20,6 +20,11 @@ import {
   scoreMangaTitleMatch
 } from '../utils/mangaLanguage.ts';
 
+import {
+  formatBytesHuman,
+  getOfflineMangaLibrary
+} from '../services/offline.ts';
+
 export interface MangaUiState {
   mangasCache: any[];
   capitulosCache: any;
@@ -27,6 +32,7 @@ export interface MangaUiState {
   mangaSortOrder: 'ASC' | 'DESC';
   mangaChapterFilterQuery: string;
   mangaFiltroSoloNoLeidos: boolean;
+  mangaFiltroSoloCache: boolean;
   mangaRenderedBatchCount: number;
   mangaFullFilteredList: any[];
   capitulosLectorList: any[];
@@ -40,6 +46,7 @@ export const mangaUiState: MangaUiState = {
   mangaSortOrder: 'ASC',
   mangaChapterFilterQuery: '',
   mangaFiltroSoloNoLeidos: false,
+  mangaFiltroSoloCache: false,
   mangaRenderedBatchCount: 50,
   mangaFullFilteredList: [],
   capitulosLectorList: [],
@@ -2605,6 +2612,38 @@ export function renderContinuarLeyendoManga(): void {
   });
 }
 
+export async function loadOfflineMangaCatalogList(): Promise<any[]> {
+  try {
+    const library = await getOfflineMangaLibrary();
+    return library.map((entry) => {
+      const meta = entry.mangaMeta;
+      return {
+        id: meta?.id || entry.mediaId,
+        dexId: meta?.dexId,
+        title: entry.title || meta?.title || 'Manga',
+        cover: entry.cover || meta?.cover || '',
+        banner: meta?.banner || entry.cover || meta?.cover || '',
+        author: meta?.author || 'Guardado en caché',
+        desc: meta?.desc || `${entry.chaptersCount} capítulo(s) guardados en caché para lectura sin conexión.`,
+        genres: meta?.genres || ['Offline'],
+        status: meta?.status || 'En Emisión',
+        year: meta?.year || new Date(entry.latestAt || Date.now()).getFullYear(),
+        flag: meta?.flag || '💾 Offline',
+        origLang: meta?.origLang || 'ja',
+        score: meta?.score || 'HD',
+        preferredSource: meta?.preferredSource,
+        altTitles: meta?.altTitles || [],
+        chaptersCount: entry.chaptersCount,
+        offlineChaptersCount: entry.chaptersCount,
+        offlineSizeBytes: entry.totalBytes,
+        isOfflineEntry: true
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function cargarMangasYNovelas(forceRefresh = false): Promise<void> {
   const container = document.getElementById('resultados-lectura');
   if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
@@ -2615,8 +2654,14 @@ export async function cargarMangasYNovelas(forceRefresh = false): Promise<void> 
   const tipo = state.tipoLecturaActual || 'ALL';
   if (tipo === 'FAVORITES') {
     mangaUiState.mangasCache = MangaFavoritesManager.getAll();
+  } else if (tipo === 'OFFLINE') {
+    mangaUiState.mangasCache = await loadOfflineMangaCatalogList();
   } else {
-    mangaUiState.mangasCache = await AniListMangaService.getCatalog(tipo);
+    let list = await AniListMangaService.getCatalog(tipo);
+    if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      list = await loadOfflineMangaCatalogList();
+    }
+    mangaUiState.mangasCache = list;
   }
   nWin._currentMangaGridList = mangaUiState.mangasCache;
   lecturaUIState.spotlightIdx = 0;
@@ -2668,8 +2713,14 @@ export async function cambiarTipoLectura(tipo: string, el: HTMLElement | null = 
 
   if (tipo === 'FAVORITES') {
     mangaUiState.mangasCache = MangaFavoritesManager.getAll();
+  } else if (tipo === 'OFFLINE') {
+    mangaUiState.mangasCache = await loadOfflineMangaCatalogList();
   } else {
-    mangaUiState.mangasCache = await AniListMangaService.getCatalog(tipo);
+    let list = await AniListMangaService.getCatalog(tipo);
+    if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      list = await loadOfflineMangaCatalogList();
+    }
+    mangaUiState.mangasCache = list;
   }
   nWin._currentMangaGridList = mangaUiState.mangasCache;
   lecturaUIState.spotlightIdx = 0;
@@ -2912,10 +2963,18 @@ export function renderGridLectura(customList: any[] | null = null): void {
 
   if (!filtered || filtered.length === 0) {
     container.className = 'grid';
+    const isOfflineTab = state.tipoLecturaActual === 'OFFLINE';
     container.innerHTML = `
       <div style="grid-column: 1/-1; text-align:center; color: var(--text-muted); padding: 36px 20px;">
-        <div style="font-size:15px; font-weight:700; color:var(--text-main); margin-bottom:6px;">No se encontraron obras con estos filtros</div>
-        <div style="font-size:12px;">Prueba seleccionando "Todos los géneros" o cambiando la categoría activa.</div>
+        <div style="font-size:28px; margin-bottom:8px;">${isOfflineTab ? '💾' : '📖'}</div>
+        <div style="font-size:15px; font-weight:700; color:var(--text-main); margin-bottom:6px;">
+          ${isOfflineTab ? 'Aún no tienes capítulos en caché' : 'No se encontraron obras con estos filtros'}
+        </div>
+        <div style="font-size:12px; max-width:340px; margin:0 auto;">
+          ${isOfflineTab
+            ? 'Abre cualquier manga y pulsa 📥 en un capítulo (o "💾 Caché" / "💾 Guardar" dentro del lector) para leerlo sin conexión a internet.'
+            : 'Prueba seleccionando "Todos los géneros" o cambiando la categoría activa.'}
+        </div>
       </div>
     `;
     return;
@@ -2930,7 +2989,10 @@ export function renderGridLectura(customList: any[] | null = null): void {
       const safeTitle = escHtml(m.title || 'Manga');
       const genresTxt = escHtml((m.genres || []).slice(0, 3).join(' · ') || 'Acción · Fantasía');
       const readCount = MangaReadStateManager.getReadChapters(m.id).size;
-      const readLabel = readCount > 0 ? `${readCount} caps leídos` : (m.chaptersCount > 0 ? `${m.chaptersCount} caps` : 'Capítulos HD');
+      const offlineMeta = m.offlineChaptersCount > 0
+        ? `💾 ${m.offlineChaptersCount} en caché (${formatBytesHuman(m.offlineSizeBytes || 0)})`
+        : '';
+      const readLabel = offlineMeta || (readCount > 0 ? `${readCount} caps leídos` : (m.chaptersCount > 0 ? `${m.chaptersCount} caps` : 'Capítulos HD'));
 
       return `
         <div class="manga-editorial-card fade-in" onclick="abrirMangaPorIndice(${index})">
@@ -2942,7 +3004,7 @@ export function renderGridLectura(customList: any[] | null = null): void {
                 <span>★ ${escHtml(m.score || '8.6')}</span>
               </div>
               <div class="manga-editorial-title" title="${safeTitle}">${safeTitle}</div>
-              <div style="font-size:11px; color:#ff4d6d; font-weight:600; margin-bottom:4px;">${genresTxt}</div>
+              <div style="font-size:11px; color:${offlineMeta ? '#34d399' : '#ff4d6d'}; font-weight:600; margin-bottom:4px;">${genresTxt}</div>
               <div class="manga-editorial-desc">${escHtml(m.desc || 'Disfruta de todos los capítulos traducidos en alta definición.')}</div>
             </div>
             <div class="manga-editorial-footer">
@@ -2965,10 +3027,15 @@ export function renderGridLectura(customList: any[] | null = null): void {
     const fallbackCardCover = generarPortadaSVG(m.title, m.origLang, m.flag?.split(' ')[1] || 'Manga');
     const displayCover = safeImg(m.cover || fallbackCardCover, fallbackCardCover);
     const readCount = MangaReadStateManager.getReadChapters(m.id).size;
-    const totalCapsBadge = readCount > 0
-      ? `✓ ${readCount} leídos`
-      : (m.chaptersCount > 0 ? `📖 ${m.chaptersCount} caps` : (m.flag?.includes('Manhwa') ? '⚡ Webtoon' : '📖 HD'));
+    const totalCapsBadge = m.offlineChaptersCount > 0
+      ? `💾 ${m.offlineChaptersCount} caps · ${formatBytesHuman(m.offlineSizeBytes || 0)}`
+      : readCount > 0
+        ? `✓ ${readCount} leídos`
+        : (m.chaptersCount > 0 ? `📖 ${m.chaptersCount} caps` : (m.flag?.includes('Manhwa') ? '⚡ Webtoon' : '📖 HD'));
     const safeTitle = escHtml(m.title || 'Manga');
+    const offlinePill = m.offlineChaptersCount > 0
+      ? `<div class="card-offline-pill">💾 ${m.offlineChaptersCount} Offline</div>`
+      : '';
 
     return `
       <div class="card-h" onclick="abrirMangaPorIndice(${index})">
@@ -2976,6 +3043,7 @@ export function renderGridLectura(customList: any[] | null = null): void {
           <img src="${escHtml(displayCover)}" class="card-h-cover" loading="lazy" alt="${safeTitle}" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${fallbackCardCover}';"/>
           <div class="card-badge" style="background: rgba(0,0,0,0.75); color: #fff;">${escHtml(m.flag || '🇯🇵 Manga')}</div>
           <div class="card-score">★ ${escHtml(m.score || '8.6')}</div>
+          ${offlinePill}
           <div class="card-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoritoMangaCardPorIndice(${index})">${isFav ? '❤️' : '🤍'}</div>
         </div>
         <div class="card-h-info">

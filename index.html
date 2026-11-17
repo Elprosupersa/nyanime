@@ -182,6 +182,7 @@
       <button type="button" class="chip" data-type="MANHWA" onclick="cambiarTipoLectura('MANHWA', this)">🇰🇷 Manhwas</button>
       <button type="button" class="chip" data-type="MANHUA" onclick="cambiarTipoLectura('MANHUA', this)">🇨🇳 Manhuas</button>
       <button type="button" class="chip" data-type="FAVORITES" onclick="cambiarTipoLectura('FAVORITES', this)">❤️ Mi Biblioteca</button>
+      <button type="button" class="chip" data-type="OFFLINE" onclick="cambiarTipoLectura('OFFLINE', this)">💾 En Caché</button>
       <button type="button" class="chip" data-type="KEIYOUSHI" onclick="cambiarTipoLectura('KEIYOUSHI', this)" style="border: 1px solid var(--primary); background: rgba(255, 26, 64, 0.15);">🧩 Extensiones Keiyoushi</button>
     </div>
 
@@ -671,9 +672,9 @@
         <span style="font-size:16px;">🌐</span>
         <span id="mihon-active-source-name">Fuente</span>
       </button>
-      <button type="button" class="mihon-action-btn" onclick="abrirModalDescargaManga()">
-        <span style="font-size:16px;">📥</span>
-        <span>Descargar</span>
+      <button type="button" class="mihon-action-btn" id="mihon-btn-download" onclick="abrirModalDescargaManga()">
+        <span style="font-size:16px;">💾</span>
+        <span id="mihon-btn-download-text">Caché</span>
       </button>
     </div>
 
@@ -714,6 +715,7 @@
           <span class="badge-pill" id="manga-det-count" style="font-size:11px; background:rgba(255, 26, 64,0.15); color:var(--primary);">0 caps</span>
         </div>
         <div class="mihon-toolbar-actions">
+          <button type="button" class="mihon-tool-btn" id="btn-filter-cached-manga" onclick="toggleFiltroCacheManga()">💾 En Caché</button>
           <button type="button" class="mihon-tool-btn" id="btn-sort-manga" onclick="toggleSortCapitulosManga()">⬇️ Ascendente</button>
           <button type="button" class="mihon-tool-btn" id="btn-filter-read-manga" onclick="toggleFiltroLeidosManga()">👁️ Todos</button>
         </div>
@@ -848,8 +850,9 @@
       <button type="button" class="btn-circle" style="width:36px; height:36px;" onclick="cerrarLector()" aria-label="Cerrar lector">
         <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
       </button>
-      <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:55%;" id="lector-titulo">Capítulo 1</div>
+      <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%;" id="lector-titulo">Capítulo 1</div>
       <div style="display:flex; gap:6px; align-items:center;">
+        <button type="button" class="chip" id="btn-lector-cache" style="font-size:11px; padding:5px 10px; font-weight:800;" onclick="toggleCacheCapituloActualLector(event)" aria-label="Guardar capítulo en caché sin conexión">💾 Guardar</button>
         <button type="button" class="chip" style="font-size:11px; padding:5px 12px; font-weight:800;" onclick="abrirQuickCapsSheet(event)">📑 Caps ▾</button>
         <button type="button" class="btn-circle" style="width:34px; height:34px;" onclick="abrirAjustesLector(event)" title="Ajustes de Lectura" aria-label="Ajustes de lectura">
           <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>

@@ -9,6 +9,7 @@ import {
   cerrarModales,
   nWin,
   showToast,
+  state,
   uiHooks
 } from './appState.ts';
 
@@ -589,6 +590,12 @@ export async function limpiarDescargasCompletadas(): Promise<void> {
   }
   DownloadManager.save([]);
   await DownloadManager.renderDownloadsModal();
+  if (state.tipoLecturaActual === 'OFFLINE') {
+    void uiHooks.cargarMangasYNovelas();
+  }
+  if (typeof nWin.refreshOfflineMangaDetailState === 'function') {
+    await nWin.refreshOfflineMangaDetailState(undefined, true);
+  }
   showToast('Almacenamiento offline limpiado.');
 }
 

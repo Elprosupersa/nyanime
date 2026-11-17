@@ -19,8 +19,97 @@ import {
   MangaSpanishMetadata,
   mangaUiState
 } from './mangaCatalogView.ts';
+import {
+  type OfflineChapterManifest,
+  type OfflineMangaMeta,
+  buildOfflineChapterBucketsFromManifests,
+  deleteOfflineManifestById,
+  deleteOfflineMangaSeries,
+  downloadMangaChapterOffline,
+  formatBytesHuman,
+  getCachedCoverBlobUrl,
+  getOfflineMangaChaptersForSeries
+} from '../services/offline.ts';
 
 let mangaDownloadAbortCtrl: AbortController | null = null;
+const cachedMangaChaptersMap = new Map<string, OfflineChapterManifest>();
+const downloadingMangaChaptersSet = new Set<string>();
+
+function chapterCacheKey(chapterNum: number | string): string {
+  const n = Number(chapterNum);
+  return Number.isFinite(n) ? String(n) : String(chapterNum ?? '').trim();
+}
+
+export function isChapterCachedInDetail(chapterNum: number | string): boolean {
+  const key = chapterCacheKey(chapterNum);
+  if (cachedMangaChaptersMap.has(key)) return true;
+  const targetNum = Number(chapterNum);
+  for (const m of cachedMangaChaptersMap.values()) {
+    if (
+      Math.abs(Number(m.chapterNum ?? -1) - targetNum) < 0.001 ||
+      String(m.chapterLabel || '').trim() === String(chapterNum).trim()
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function buildOfflineMangaMeta(manga: any): OfflineMangaMeta {
+  return {
+    id: String(manga?.id || ''),
+    dexId: manga?.dexId ? String(manga.dexId) : undefined,
+    title: String(manga?.title || 'Manga'),
+    cover: manga?.cover || undefined,
+    banner: manga?.banner || undefined,
+    author: manga?.author || undefined,
+    desc: manga?.desc || manga?.synopsis || undefined,
+    genres: Array.isArray(manga?.genres) ? manga.genres : undefined,
+    status: manga?.status || undefined,
+    year: manga?.year || undefined,
+    flag: manga?.flag || undefined,
+    origLang: manga?.origLang || undefined,
+    score: manga?.score || undefined,
+    preferredSource: manga?.preferredSource || undefined,
+    altTitles: Array.isArray(manga?.altTitles) ? manga.altTitles : undefined
+  };
+}
+
+export async function refreshOfflineMangaDetailState(
+  manga: any = getActiveManga(),
+  rerender = false
+): Promise<OfflineChapterManifest[]> {
+  cachedMangaChaptersMap.clear();
+  if (!manga) {
+    updateDetailCacheActionUi();
+    return [];
+  }
+  const manifests = await getOfflineMangaChaptersForSeries([manga.id, manga.dexId]);
+  for (const m of manifests) {
+    cachedMangaChaptersMap.set(chapterCacheKey(m.chapterNum ?? m.chapterLabel ?? 0), m);
+  }
+  updateDetailCacheActionUi();
+  if (rerender && mangaUiState.capitulosCache) {
+    renderCapitulosMangaModal();
+  }
+  return manifests;
+}
+
+function updateDetailCacheActionUi(): void {
+  const count = cachedMangaChaptersMap.size;
+  const dlText = document.getElementById('mihon-btn-download-text');
+  const dlBtn = document.getElementById('mihon-btn-download');
+  if (dlText) dlText.textContent = count > 0 ? `Caché (${count})` : 'Caché';
+  if (dlBtn) {
+    dlBtn.style.color = count > 0 ? '#34d399' : '#fff';
+    dlBtn.style.borderColor = count > 0 ? 'rgba(16, 185, 129, 0.45)' : 'rgba(255, 255, 255, 0.08)';
+  }
+  const cacheFilterBtn = document.getElementById('btn-filter-cached-manga');
+  if (cacheFilterBtn) {
+    cacheFilterBtn.classList.toggle('active', Boolean(mangaUiState.mangaFiltroSoloCache));
+    cacheFilterBtn.textContent = count > 0 ? `💾 En Caché (${count})` : '💾 En Caché';
+  }
+}
 
 export function updateMangaFavoriteButton(mangaId: number | string): void {
   const isFav = MangaFavoritesManager.isFavorite(mangaId);
@@ -120,31 +209,53 @@ export async function seleccionarFuenteManga(sourceId: string): Promise<void> {
 export function abrirModalDescargaManga(): void {
   const modal = document.getElementById('modal-descarga-manga-mihon');
   const optContainer = document.getElementById('mihon-download-options');
+  const infoEl = document.getElementById('descarga-manga-info');
   if (!modal || !optContainer) return;
 
-  const totalCaps = mangaUiState.mangaFullFilteredList.length;
+  const list = mangaUiState.mangaFullFilteredList || [];
+  const totalCaps = list.length;
+  const cachedManifests = Array.from(cachedMangaChaptersMap.values());
+  const cachedCount = cachedManifests.length;
+  const cachedBytes = cachedManifests.reduce((acc, m) => acc + Number(m.sizeBytes || 0), 0);
+  const uncachedCount = list.filter((c) => !isChapterCachedInDetail(c.chapterNum)).length;
+
+  if (infoEl) {
+    infoEl.textContent = cachedCount > 0
+      ? `Tienes ${cachedCount} capítulo(s) en caché (${formatBytesHuman(cachedBytes)}) listos para leer sin internet.`
+      : 'Guarda capítulos completos en CacheStorage e IndexedDB para leerlos sin conexión a internet.';
+  }
+
   optContainer.innerHTML = `
     <div class="mihon-dl-option-card" onclick="iniciarDescargaCapitulos(5)">
       <div>
-        <div class="mihon-dl-option-title">📥 Descargar próximos 5 capítulos</div>
-        <div class="mihon-dl-option-sub">Guarda los siguientes 5 capítulos en memoria para leer sin internet.</div>
+        <div class="mihon-dl-option-title">📥 Guardar próximos 5 capítulos</div>
+        <div class="mihon-dl-option-sub">Guarda los siguientes 5 capítulos no cacheados en memoria offline.</div>
       </div>
-      <button class="chip active">Descargar</button>
+      <button type="button" class="chip active">Guardar</button>
     </div>
     <div class="mihon-dl-option-card" onclick="iniciarDescargaCapitulos(15)">
       <div>
-        <div class="mihon-dl-option-title">📥 Descargar lote de 15 capítulos</div>
+        <div class="mihon-dl-option-title">📥 Guardar lote de 15 capítulos</div>
         <div class="mihon-dl-option-sub">Ideal para viajes o transporte público sin cobertura.</div>
       </div>
-      <button class="chip active">Descargar</button>
+      <button type="button" class="chip active">Guardar</button>
     </div>
-    <div class="mihon-dl-option-card" onclick="iniciarDescargaCapitulos(${totalCaps})">
+    <div class="mihon-dl-option-card" onclick="iniciarDescargaCapitulos(${Math.max(1, uncachedCount || totalCaps)})">
       <div>
-        <div class="mihon-dl-option-title">⚡ Descargar todo el manga (${totalCaps} caps)</div>
-        <div class="mihon-dl-option-sub">Guarda la serie completa en este idioma en este dispositivo.</div>
+        <div class="mihon-dl-option-title">⚡ Guardar todo el manga (${uncachedCount} pendientes)</div>
+        <div class="mihon-dl-option-sub">Guarda todos los capítulos faltantes de este idioma en tu dispositivo.</div>
       </div>
-      <button class="chip active">Descargar Todo</button>
+      <button type="button" class="chip active">Guardar Todo</button>
     </div>
+    ${cachedCount > 0 ? `
+      <div class="mihon-dl-option-card" style="border-color:rgba(255,26,64,0.3);" onclick="borrarCacheMangaActual()">
+        <div>
+          <div class="mihon-dl-option-title" style="color:#ff4d6d;">🗑️ Vaciar caché de este manga</div>
+          <div class="mihon-dl-option-sub">Libera ${formatBytesHuman(cachedBytes)} (${cachedCount} capítulo(s) guardados).</div>
+        </div>
+        <button type="button" class="chip" style="border-color:rgba(255,26,64,0.45); color:#ff4d6d;">Borrar</button>
+      </div>
+    ` : ''}
   `;
   modal.classList.add('active', 'open');
 }
@@ -162,19 +273,107 @@ export function cancelarDescargaManga(): void {
   document.getElementById('manga-dl-progress-box')?.classList.add('hide');
 }
 
+export async function borrarCacheMangaActual(): Promise<void> {
+  const activeManga = getActiveManga();
+  if (!activeManga) return;
+  const removed = await deleteOfflineMangaSeries([activeManga.id, activeManga.dexId]);
+  await refreshOfflineMangaDetailState(activeManga);
+  await DownloadManager.updateBadge();
+  renderCapitulosMangaModal();
+  cerrarModalDescargasManga();
+  showToast(`🗑️ Caché eliminada (${removed} capítulo(s) liberados).`);
+}
+
+export async function guardarCapituloMangaOffline(idx: number, event?: Event): Promise<void> {
+  if (event) event.stopPropagation();
+  const activeManga = getActiveManga();
+  const list = mangaUiState.mangaFullFilteredList || [];
+  const cap = list[idx];
+  if (!activeManga || !cap) return;
+
+  const key = chapterCacheKey(cap.chapterNum);
+  if (downloadingMangaChaptersSet.has(key)) return;
+
+  downloadingMangaChaptersSet.add(key);
+  renderCapitulosMangaModal();
+
+  try {
+    const resPages = await MangaDex.getChapterPages(
+      cap,
+      activeManga.title,
+      cap.chapterNum,
+      mangaUiState.idiomaMangaSeleccionado || 'es',
+      activeManga.altTitles
+    );
+    const pageUrls = resPages?.pages?.length > 0 ? resPages.pages : (resPages?.saverPages || []);
+    if (!pageUrls || pageUrls.length === 0) {
+      throw new Error(`No se encontraron páginas disponibles para Cap. ${cap.chapter}`);
+    }
+
+    await downloadMangaChapterOffline({
+      mangaId: activeManga.id,
+      mangaTitle: activeManga.title || 'Manga',
+      cover: activeManga.cover || '',
+      chapterNum: Number(cap.chapterNum ?? 1),
+      chapterLabel: String(cap.chapter ?? cap.chapterNum ?? 1),
+      chapterTitle: cap.title || undefined,
+      lang: cap.lang || mangaUiState.idiomaMangaSeleccionado || 'es',
+      group: resPages?.group || cap.group || 'Offline 💾',
+      mangaMeta: buildOfflineMangaMeta(activeManga),
+      pageUrls,
+      fallbackPageUrls: Array.isArray(resPages?.saverPages) ? resPages.saverPages : []
+    });
+
+    await refreshOfflineMangaDetailState(activeManga);
+    await DownloadManager.updateBadge();
+    showToast(`💾 Cap. ${cap.chapter} guardado en caché para lectura sin conexión.`);
+  } catch (err: any) {
+    showToast(`No se pudo guardar Cap. ${cap.chapter}: ${err?.message || err}`);
+  } finally {
+    downloadingMangaChaptersSet.delete(key);
+    renderCapitulosMangaModal();
+  }
+}
+
+export async function eliminarCapituloMangaOffline(chapterNum: number | string, event?: Event): Promise<void> {
+  if (event) event.stopPropagation();
+  const activeManga = getActiveManga();
+  if (!activeManga) return;
+  const key = chapterCacheKey(chapterNum);
+  let manifest = cachedMangaChaptersMap.get(key);
+  if (!manifest) {
+    const all = await getOfflineMangaChaptersForSeries([activeManga.id, activeManga.dexId]);
+    const targetNum = Number(chapterNum);
+    manifest = all.find(
+      (m) =>
+        Math.abs(Number(m.chapterNum ?? -1) - targetNum) < 0.001 ||
+        String(m.chapterLabel || '').trim() === String(chapterNum).trim()
+    );
+  }
+  if (manifest) {
+    await deleteOfflineManifestById(manifest.id);
+  }
+  await refreshOfflineMangaDetailState(activeManga);
+  await DownloadManager.updateBadge();
+  renderCapitulosMangaModal();
+  showToast(`Cap. ${chapterNum} eliminado de la caché offline.`);
+}
+
 export async function iniciarDescargaCapitulos(count: number): Promise<void> {
   const list = mangaUiState.mangaFullFilteredList || [];
   const activeManga = getActiveManga();
   if (!activeManga || list.length === 0) {
-    showToast('No hay capítulos disponibles para descargar.');
-    return;
-  }
-  if (!nWin.NyAnimeOffline?.downloadMangaChapterOffline) {
-    showToast('Motor offline no inicializado.');
+    showToast('No hay capítulos disponibles para guardar.');
     return;
   }
 
-  const toDownload = list.slice(0, Math.min(count, list.length));
+  const uncachedList = list.filter((c) => !isChapterCachedInDetail(c.chapterNum));
+  const toDownload = (uncachedList.length > 0 ? uncachedList : list).slice(0, Math.min(count, list.length));
+  if (uncachedList.length === 0) {
+    showToast('Todos estos capítulos ya están guardados en caché ✓');
+    return;
+  }
+
   if (mangaDownloadAbortCtrl) mangaDownloadAbortCtrl.abort();
   mangaDownloadAbortCtrl = new AbortController();
 
@@ -197,7 +396,7 @@ export async function iniciarDescargaCapitulos(count: number): Promise<void> {
         cap,
         activeManga.title,
         cap.chapterNum,
-        null,
+        mangaUiState.idiomaMangaSeleccionado || 'es',
         activeManga.altTitles
       );
       const pageUrls = resPages?.pages?.length > 0 ? resPages.pages : (resPages?.saverPages || []);
@@ -205,13 +404,18 @@ export async function iniciarDescargaCapitulos(count: number): Promise<void> {
         throw new Error(`No se encontraron páginas descargables para Cap. ${cap.chapter}`);
       }
 
-      await nWin.NyAnimeOffline.downloadMangaChapterOffline({
+      await downloadMangaChapterOffline({
         mangaId: activeManga.id,
         mangaTitle: activeManga.title || 'Manga',
         cover: activeManga.cover || '',
         chapterNum: Number(cap.chapterNum ?? 1),
         chapterLabel: String(cap.chapter ?? cap.chapterNum ?? 1),
+        chapterTitle: cap.title || undefined,
+        lang: cap.lang || mangaUiState.idiomaMangaSeleccionado || 'es',
+        group: resPages?.group || cap.group || 'Offline 💾',
+        mangaMeta: buildOfflineMangaMeta(activeManga),
         pageUrls,
+        fallbackPageUrls: Array.isArray(resPages?.saverPages) ? resPages.saverPages : [],
         chapterIndex: cIdx,
         totalChapters: toDownload.length,
         signal: mangaDownloadAbortCtrl.signal,
@@ -219,7 +423,7 @@ export async function iniciarDescargaCapitulos(count: number): Promise<void> {
           const overallPct = Math.round(((cIdx + p.pageIndex / p.totalPages) / toDownload.length) * 100);
           if (progressBar) progressBar.style.width = `${overallPct}%`;
           if (progressText) {
-            progressText.textContent = `Cap. ${p.chapterLabel} (${cIdx + 1}/${p.totalChapters}) · Página ${p.pageIndex} de ${p.totalPages} descargada`;
+            progressText.textContent = `Cap. ${p.chapterLabel} (${cIdx + 1}/${p.totalChapters}) · Página ${p.pageIndex} de ${p.totalPages} en caché`;
           }
         }
       });
@@ -227,13 +431,15 @@ export async function iniciarDescargaCapitulos(count: number): Promise<void> {
     }
 
     if (!mangaDownloadAbortCtrl.signal.aborted) {
+      await refreshOfflineMangaDetailState(activeManga);
       await DownloadManager.updateBadge();
+      renderCapitulosMangaModal();
       cerrarModalDescargasManga();
-      showToast(`✓ ${savedCount} capítulo(s) guardados en almacenamiento offline real.`);
+      showToast(`✓ ${savedCount} capítulo(s) guardados en caché para leer sin conexión.`);
     }
   } catch (err: any) {
-    if (err && err.name === 'AbortError') showToast('Descarga cancelada.');
-    else showToast(`Error descargando: ${err?.message || err}`);
+    if (err && err.name === 'AbortError') showToast('Guardado en caché cancelado.');
+    else showToast(`Error guardando en caché: ${err?.message || err}`);
   } finally {
     progressBox?.classList.add('hide');
     if (progressBar) progressBar.style.width = '0%';
@@ -307,7 +513,10 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
   mangaUiState.mangaSortOrder = 'ASC';
   mangaUiState.mangaChapterFilterQuery = '';
   mangaUiState.mangaFiltroSoloNoLeidos = false;
+  mangaUiState.mangaFiltroSoloCache = false;
   mangaUiState.mangaRenderedBatchCount = 50;
+
+  const cachedManifestsPromise = refreshOfflineMangaDetailState(manga);
 
   const pantalla = document.getElementById('pantalla-detalle-manga');
   if (pantalla) {
@@ -395,12 +604,27 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
     if (dexId) manga.dexId = dexId;
   }
 
+  const cachedManifests = await cachedMangaChaptersMap.size > 0
+    ? Array.from(cachedMangaChaptersMap.values())
+    : await cachedManifestsPromise;
+
+  if (posterEl && cachedManifests[0]?.coverCacheKey && (!rawCover || (typeof navigator !== 'undefined' && navigator.onLine === false))) {
+    const cachedCoverBlob = await getCachedCoverBlobUrl(cachedManifests[0].coverCacheKey);
+    if (cachedCoverBlob) {
+      posterEl.src = cachedCoverBlob;
+      if (heroBlur) heroBlur.style.backgroundImage = `url("${cachedCoverBlob}")`;
+    }
+  }
+
   const activeSource = manga.preferredSource || MangaSourceManager.getActiveSourceId();
   const memCacheKey = `${dexId || FallbackMangaProvider.cleanTitle(manga.title)}_${activeSource}`;
   const cachedChaps = MangaDex.chaptersMemCache.get(memCacheKey);
+  const isOfflineNow = typeof navigator !== 'undefined' && navigator.onLine === false;
 
   const container = document.getElementById('manga-det-capitulos');
-  if (cachedChaps) {
+  if (isOfflineNow && cachedManifests.length > 0) {
+    mangaUiState.capitulosCache = buildOfflineChapterBucketsFromManifests(cachedManifests);
+  } else if (cachedChaps) {
     mangaUiState.capitulosCache = cachedChaps;
   } else {
     mangaUiState.capitulosCache = null;
@@ -426,20 +650,48 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
     }
     if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
 
-    if (!dexId) {
+    if (!dexId && !isOfflineNow) {
       dexId = await MangaDex.resolveMangaDexId(manga.title, manga.altTitles);
       manga.dexId = dexId;
     }
-    mangaUiState.capitulosCache = await MangaDex.getChapters(
-      dexId,
-      manga.title,
-      manga.preferredSource,
-      () => {
-        actualizarConteosIdiomaTabs();
-        renderCapitulosMangaModal();
-      },
-      manga.altTitles
-    );
+    try {
+      mangaUiState.capitulosCache = await MangaDex.getChapters(
+        dexId,
+        manga.title,
+        manga.preferredSource,
+        () => {
+          actualizarConteosIdiomaTabs();
+          renderCapitulosMangaModal();
+        },
+        manga.altTitles
+      );
+    } catch {
+      mangaUiState.capitulosCache = null;
+    }
+  }
+
+  // Merge offline cached chapters so they are always available even if network fails or chapter is missing from active source
+  if (cachedManifests.length > 0) {
+    const offlineBuckets = buildOfflineChapterBucketsFromManifests(cachedManifests);
+    if (!mangaUiState.capitulosCache || !(mangaUiState.capitulosCache.all?.length > 0)) {
+      mangaUiState.capitulosCache = offlineBuckets;
+    } else {
+      const existingAll: any[] = mangaUiState.capitulosCache.all || [];
+      for (const offCap of offlineBuckets.all) {
+        const alreadyPresent = existingAll.some(
+          (c) => Math.abs(Number(c.chapterNum) - Number(offCap.chapterNum)) < 0.001
+        );
+        if (!alreadyPresent) {
+          existingAll.push(offCap);
+          if (offCap.lang === 'es' || offCap.lang === 'es-la' || offCap.lang === 'es-es') {
+            mangaUiState.capitulosCache.spanish = [...(mangaUiState.capitulosCache.spanish || []), offCap];
+          } else if (offCap.lang.startsWith('en')) {
+            mangaUiState.capitulosCache.english = [...(mangaUiState.capitulosCache.english || []), offCap];
+          }
+        }
+      }
+      mangaUiState.capitulosCache.all = existingAll;
+    }
   }
 
   actualizarConteosIdiomaTabs();
@@ -462,7 +714,9 @@ export async function abrirDetalleManga(manga: any): Promise<void> {
 
   renderCapitulosMangaModal();
   setupMangaScrollListener();
-  void prefetchCapituloObjetivoManga(manga);
+  if (!isOfflineNow) {
+    void prefetchCapituloObjetivoManga(manga);
+  }
 }
 
 export function setupMangaScrollListener(): void {
@@ -513,6 +767,12 @@ export function toggleFiltroLeidosManga(): void {
   renderCapitulosMangaModal();
 }
 
+export function toggleFiltroCacheManga(): void {
+  mangaUiState.mangaFiltroSoloCache = !mangaUiState.mangaFiltroSoloCache;
+  updateDetailCacheActionUi();
+  renderCapitulosMangaModal();
+}
+
 export function filtrarCapitulosManga(query: string): void {
   mangaUiState.mangaChapterFilterQuery = (query || '').trim().toLowerCase();
   renderCapitulosMangaModal();
@@ -551,6 +811,9 @@ export function renderCapitulosMangaModal(): void {
   if (mangaUiState.mangaFiltroSoloNoLeidos && activeManga) {
     list = list.filter(c => !MangaReadStateManager.isRead(activeManga.id, c.chapterNum));
   }
+  if (mangaUiState.mangaFiltroSoloCache) {
+    list = list.filter(c => isChapterCachedInDetail(c.chapterNum));
+  }
 
   const sortedList = [...list].sort((a, b) =>
     mangaUiState.mangaSortOrder === 'ASC' ? a.chapterNum - b.chapterNum : b.chapterNum - a.chapterNum
@@ -570,18 +833,29 @@ export function renderCapitulosMangaModal(): void {
       mangaUiState.idiomaMangaSeleccionado === 'es' &&
       enList.length > 0 &&
       !mangaUiState.mangaChapterFilterQuery &&
-      !mangaUiState.mangaFiltroSoloNoLeidos;
+      !mangaUiState.mangaFiltroSoloNoLeidos &&
+      !mangaUiState.mangaFiltroSoloCache;
+
+    const emptyTitle = mangaUiState.mangaFiltroSoloCache
+      ? 'Sin capítulos en caché en este idioma'
+      : hasEnAlternative
+        ? 'Sin capítulos en Español por ahora'
+        : 'No se encontraron capítulos disponibles';
+
+    const emptyDesc = mangaUiState.mangaFiltroSoloCache
+      ? 'Pulsa 📥 en cualquier capítulo para guardarlo sin conexión, o desactiva el filtro "💾 En Caché".'
+      : hasEnAlternative
+        ? `Este manga aún no tiene capítulos subidos en Español, pero hay ${enList.length} capítulos listos en Inglés.`
+        : 'Prueba seleccionando otra pestaña de idioma (English, Todos) o limpiando el filtro.';
 
     container.innerHTML = `
       <div style="text-align:center; color:var(--text-muted); padding:32px 20px; font-size:13px; background:rgba(255,255,255,0.03); border-radius:12px; border:1px solid rgba(255,255,255,0.08);">
-        <div style="font-size:24px; margin-bottom:8px;">📖</div>
+        <div style="font-size:24px; margin-bottom:8px;">${mangaUiState.mangaFiltroSoloCache ? '💾' : '📖'}</div>
         <div style="font-weight:700; color:#fff; margin-bottom:6px;">
-          ${hasEnAlternative ? 'Sin capítulos en Español por ahora' : 'No se encontraron capítulos disponibles'}
+          ${emptyTitle}
         </div>
         <div style="font-size:12px; color:#94a3b8; max-width:340px; margin:0 auto 14px;">
-          ${hasEnAlternative
-            ? `Este manga aún no tiene capítulos subidos en Español, pero hay ${enList.length} capítulos listos en Inglés.`
-            : 'Prueba seleccionando otra pestaña de idioma (English, Todos) o limpiando el filtro.'}
+          ${emptyDesc}
         </div>
         ${hasEnAlternative ? `
           <div style="display:flex; justify-content:center; gap:8px; flex-wrap:wrap;">
@@ -597,7 +871,14 @@ export function renderCapitulosMangaModal(): void {
 
   container.innerHTML = '';
 
-  if (mangaUiState.idiomaMangaSeleccionado === 'es' && enList.length > 0 && sortedList.length < enList.length * 0.5 && !mangaUiState.mangaChapterFilterQuery) {
+  if (
+    mangaUiState.idiomaMangaSeleccionado === 'es' &&
+    enList.length > 0 &&
+    sortedList.length < enList.length * 0.5 &&
+    !mangaUiState.mangaChapterFilterQuery &&
+    !mangaUiState.mangaFiltroSoloCache &&
+    !mangaUiState.mangaFiltroSoloNoLeidos
+  ) {
     const notice = document.createElement('div');
     notice.className = 'mihon-lang-notice';
     notice.innerHTML = `
@@ -690,6 +971,8 @@ export function appendNextBatchChapters(): void {
   nextBatch.forEach((c, batchIdx) => {
     const globalIdx = currentRendered + batchIdx;
     const isRead = activeManga ? MangaReadStateManager.isRead(activeManga.id, c.chapterNum) : false;
+    const isCached = isChapterCachedInDetail(c.chapterNum);
+    const isDownloading = downloadingMangaChaptersSet.has(chapterCacheKey(c.chapterNum));
     const langBadge = c.lang === 'es' || c.lang === 'es-la' ? '🇪🇸' : (c.lang === 'en' ? '🇬🇧' : (c.lang === 'ja' ? '🇯🇵' : (c.lang === 'ko' ? '🇰🇷' : '🌐')));
     const isExternal = c.externalUrl && (!c.pages || c.pages === 0);
     const modeBadge = isExternal ? '🌐 Externo' : (c.pages ? `📖 ${c.pages}p` : '📖 Webtoon');
@@ -701,6 +984,13 @@ export function appendNextBatchChapters(): void {
       rawCleanTitle.toLowerCase() === `chapter ${chapStr}`;
     const chapTitle = !isRedundantTitle ? ` · ${rawCleanTitle}` : '';
     const altCount = c.altGroups?.length > 1 ? `<span class="mihon-chap-alt-badge">+${c.altGroups.length - 1} scanlator</span>` : '';
+    const cachedBadge = isCached ? '<span class="mihon-cached-badge">💾 En Caché</span>' : '';
+
+    const cacheBtnHtml = isDownloading
+      ? `<button type="button" class="mihon-cache-btn loading" disabled aria-label="Guardando capítulo ${escHtml(c.chapter)} en caché">⏳</button>`
+      : isCached
+        ? `<button type="button" class="mihon-cache-btn cached" onclick="eliminarCapituloMangaOffline('${c.chapterNum}', event)" title="Guardado en caché (toca para eliminar)" aria-label="Eliminar capítulo ${escHtml(c.chapter)} de caché">💾 ✓</button>`
+        : `<button type="button" class="mihon-cache-btn" onclick="guardarCapituloMangaOffline(${globalIdx}, event)" title="Guardar en caché para leer sin conexión" aria-label="Guardar capítulo ${escHtml(c.chapter)} sin conexión">📥</button>`;
 
     const card = document.createElement('div');
     card.className = `mihon-chapter-card fade-in ${isRead ? 'is-read' : ''}`;
@@ -712,13 +1002,17 @@ export function appendNextBatchChapters(): void {
         <div class="mihon-chap-meta">
           <span>${langBadge}</span>
           <span class="mihon-group-badge">${escHtml((c.group || 'Comunidad').replace(/[<>&"]/g, ''))}</span>
+          ${cachedBadge}
           ${altCount}
           <span class="mihon-pages-badge">${modeBadge}</span>
           ${c.publishAt ? `<span>· ${escHtml(c.publishAt)}</span>` : ''}
         </div>
       </div>
-      <div class="mihon-read-check ${isRead ? 'active' : ''}" onclick="toggleMarcarCapituloLeido('${c.chapterNum}', event)" title="Marcar como leído">
-        ${isRead ? '✓' : '○'}
+      <div class="mihon-chap-actions">
+        ${cacheBtnHtml}
+        <button type="button" class="mihon-read-check ${isRead ? 'active' : ''}" onclick="toggleMarcarCapituloLeido('${c.chapterNum}', event)" title="Marcar como leído" aria-label="Marcar capítulo ${escHtml(c.chapter)} como leído">
+          ${isRead ? '✓' : '○'}
+        </button>
       </div>
     `;
     frag.appendChild(card);
