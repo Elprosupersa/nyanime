@@ -33,6 +33,14 @@ import {
   type Timestamp,
   type Unsubscribe
 } from 'firebase/firestore';
+import {
+  getMessaging,
+  getToken,
+  deleteToken,
+  onMessage,
+  isSupported as isMessagingSupported,
+  type Messaging
+} from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 import {
   filterZombieHistoryEntries,
@@ -49,12 +57,18 @@ import {
   sanitizeUserScore
 } from './utils/libraryEnhancements.ts';
 import {
+  generateInviteToken,
   generateRoomCode,
+  generateRoomPasscode,
   getOrCreateWatchClientIdentity,
+  hashRoomSecret,
   normalizeRoomCode,
+  normalizeRoomSecret,
   sanitizeWatchChatText,
+  verifyRoomAccess,
   type WatchRoomState
 } from './utils/watchTogether.ts';
+import { normalizeFcmAiringPayload } from './utils/pushNotifications.ts';
 import {
   DEFAULT_AVATAR_URL,
   sanitizeAvatarForAuthPhotoUrl,
@@ -276,6 +290,7 @@ interface NyAnimeWindow extends Window {
   showToast?: (msg: string) => void;
   FirebaseAuth?: unknown;
   firebaseSync?: unknown;
+  FirebaseMessaging?: unknown;
   NyAnime?: {
     Core?: Record<string, unknown>;
   };
@@ -1903,6 +1918,53 @@ export const FirebaseSyncBridge = {
     if (auth.currentUser) {
       await runFullCloudSync();
     }
+  },
+
+  async wipeAllUserData(): Promise<{ wipedCloud: boolean; deletedDocs: number }> {
+    const user = auth.currentUser;
+    if (!user) {
+      return { wipedCloud: false, deletedDocs: 0 };
+    }
+    const subcollections = [
+      'favorites',
+      'anime_watched',
+      'manga_favorites',
+      'history',
+      'manga_progress',
+      'settings',
+      'custom_lists',
+      'push_subscriptions',
+      'suggestions'
+    ];
+    let deletedDocs = 0;
+    for (const subName of subcollections) {
+      try {
+        const snap = await getDocs(collection(db, 'users', user.uid, subName));
+        if (!snap.empty) {
+          await Promise.all(
+            snap.docs.map(async (d) => {
+              await deleteDoc(d.ref);
+              deletedDocs += 1;
+            })
+          );
+        }
+      } catch (error) {
+        console.warn(`Error wiping cloud subcollection ${subName}:`, error);
+      }
+    }
+    try {
+      await deleteDoc(doc(db, 'users', user.uid));
+      deletedDocs += 1;
+    } catch (error) {
+      console.warn('Error deleting root user document during wipe:', error);
+    }
+    lastSyncTimestamp = 0;
+    try {
+      localStorage.removeItem('nyanime_last_cloud_sync');
+    } catch {
+      // ignore
+    }
+    return { wipedCloud: true, deletedDocs };
   }
 };
 
@@ -1920,6 +1982,13 @@ export interface WatchRoomMessageRecord {
   avatar: string;
   text: string;
   createdAt: Timestamp | null;
+}
+
+export interface WatchRoomJoinCredentials {
+  passcode?: string;
+  inviteKey?: string;
+  rememberedPasscode?: string;
+  rememberedInviteToken?: string;
 }
 
 const WT_GUEST_UID_KEY = 'nyanime_wt_guest_uid';
@@ -1963,12 +2032,19 @@ export const FirebaseWatchTogetherBridge = {
     episodeNum: number;
     playbackTime: number;
     playbackState: 'playing' | 'paused';
-  }): Promise<string> {
+    passcode?: string;
+  }): Promise<{ roomId: string; passcode: string; inviteToken: string }> {
     const identity = resolveActiveWatchIdentity();
     const roomId = generateRoomCode();
     const hostName = (identity.displayName || 'Anfitrión').trim().slice(0, 80) || 'Anfitrión';
     const now = Date.now();
     const roomPath = `watch_rooms/${roomId}`;
+
+    const customPass = normalizeRoomSecret(input.passcode || '');
+    const effectivePasscode = customPass.length >= 3 ? customPass : generateRoomPasscode();
+    const inviteToken = generateInviteToken();
+    const passcodeHash = hashRoomSecret(roomId, effectivePasscode);
+    const inviteTokenHash = hashRoomSecret(roomId, inviteToken);
 
     try {
       const payload: Record<string, unknown> = {
@@ -1985,6 +2061,9 @@ export const FirebaseWatchTogetherBridge = {
         updatedByUid: identity.uid,
         updatedByName: hostName,
         status: 'active',
+        hasPasscode: true,
+        passcodeHash,
+        inviteTokenHash,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -2002,25 +2081,84 @@ export const FirebaseWatchTogetherBridge = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      return roomId;
+      return { roomId, passcode: effectivePasscode, inviteToken };
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, roomPath);
     }
   },
 
-  async joinRoom(roomIdRaw: string): Promise<WatchRoomState> {
+  async previewRoom(
+    roomIdRaw: string,
+    credentials?: WatchRoomJoinCredentials
+  ): Promise<{
+    room: WatchRoomState;
+    access: ReturnType<typeof verifyRoomAccess>;
+  }> {
     const identity = resolveActiveWatchIdentity();
     const roomId = normalizeRoomCode(roomIdRaw);
     const roomPath = `watch_rooms/${roomId}`;
     try {
       const snap = await getDoc(doc(db, 'watch_rooms', roomId));
       if (!snap.exists()) {
-        throw new Error(`La sala ${roomId} no existe o ya fue cerrada.`);
+        throw new Error(`La sala ${roomId} no existe o ya fue eliminada.`);
       }
       const data = snap.data() as WatchRoomState;
       if (data.status !== 'active') {
         throw new Error(`La sala ${roomId} ya terminó.`);
       }
+      const access = verifyRoomAccess({
+        room: data,
+        currentUid: identity.uid,
+        providedPasscode: credentials?.passcode,
+        providedInviteKey: credentials?.inviteKey,
+        rememberedPasscode: credentials?.rememberedPasscode,
+        rememberedInviteToken: credentials?.rememberedInviteToken
+      });
+      return { room: data, access };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message.includes('no existe') || error.message.includes('terminó'))
+      ) {
+        throw error;
+      }
+      handleFirestoreError(error, OperationType.GET, roomPath);
+    }
+  },
+
+  async joinRoom(roomIdRaw: string, credentials?: WatchRoomJoinCredentials): Promise<WatchRoomState> {
+    const identity = resolveActiveWatchIdentity();
+    const roomId = normalizeRoomCode(roomIdRaw);
+    const roomPath = `watch_rooms/${roomId}`;
+    try {
+      const snap = await getDoc(doc(db, 'watch_rooms', roomId));
+      if (!snap.exists()) {
+        throw new Error(`La sala ${roomId} no existe o ya fue eliminada.`);
+      }
+      const data = snap.data() as WatchRoomState;
+      if (data.status !== 'active') {
+        throw new Error(`La sala ${roomId} ya terminó.`);
+      }
+
+      const access = verifyRoomAccess({
+        room: data,
+        currentUid: identity.uid,
+        providedPasscode: credentials?.passcode,
+        providedInviteKey: credentials?.inviteKey,
+        rememberedPasscode: credentials?.rememberedPasscode,
+        rememberedInviteToken: credentials?.rememberedInviteToken
+      });
+
+      if (!access.allowed) {
+        const err = new Error(
+          access.reason === 'wrong_credentials'
+            ? 'Contraseña o enlace de invitación incorrecto.'
+            : 'Esta sala requiere contraseña o enlace de invitación.'
+        ) as Error & { code?: string };
+        err.code = access.reason === 'wrong_credentials' ? 'WRONG_CREDENTIALS' : 'AUTH_REQUIRED';
+        throw err;
+      }
+
       const displayName = (identity.displayName || 'Invitado').trim().slice(0, 80) || 'Invitado';
       await setDoc(doc(db, 'watch_rooms', roomId, 'participants', identity.uid), {
         uid: identity.uid,
@@ -2033,7 +2171,13 @@ export const FirebaseWatchTogetherBridge = {
       });
       return data;
     } catch (error) {
-      if (error instanceof Error && (error.message.includes('no existe') || error.message.includes('terminó'))) {
+      if (
+        error instanceof Error &&
+        (error.message.includes('no existe') ||
+          error.message.includes('terminó') ||
+          error.message.includes('contraseña') ||
+          error.message.includes('Contraseña'))
+      ) {
         throw error;
       }
       handleFirestoreError(error, OperationType.GET, roomPath);
@@ -2126,6 +2270,44 @@ export const FirebaseWatchTogetherBridge = {
       }
     } catch {
       // Best-effort cleanup
+    }
+  },
+
+  async deleteRoom(roomIdRaw: string): Promise<void> {
+    const roomId = normalizeRoomCode(roomIdRaw);
+    if (!roomId) return;
+    const identity = resolveActiveWatchIdentity();
+    const roomRef = doc(db, 'watch_rooms', roomId);
+    const snap = await getDoc(roomRef).catch(() => null);
+    if (snap?.exists()) {
+      const data = snap.data() as WatchRoomState;
+      if (data.hostUid && data.hostUid !== identity.uid && auth.currentUser?.uid !== data.hostUid) {
+        throw new Error('Solo el anfitrión que creó la sala puede eliminarla.');
+      }
+    }
+
+    // Delete subcollection documents first while parent room still exists for rules `get()` check
+    try {
+      const partsSnap = await getDocs(collection(db, 'watch_rooms', roomId, 'participants'));
+      await Promise.all(partsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    } catch {
+      // ignore partial cleanup
+    }
+    try {
+      const msgsSnap = await getDocs(collection(db, 'watch_rooms', roomId, 'messages'));
+      await Promise.all(msgsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    } catch {
+      // ignore partial cleanup
+    }
+
+    try {
+      await deleteDoc(roomRef);
+    } catch {
+      // Fallback: mark closed if delete is rejected
+      await updateDoc(roomRef, {
+        status: 'closed',
+        updatedAt: serverTimestamp()
+      }).catch(() => {});
     }
   },
 
@@ -2239,16 +2421,217 @@ export const FirebaseWatchTogetherBridge = {
   }
 };
 
+const FCM_TOKEN_KEY = 'nyanime_fcm_token_v1';
+let messagingInstance: Messaging | null = null;
+let foregroundUnsub: (() => void) | null = null;
+
+async function getMessagingSafe(): Promise<Messaging | null> {
+  if (messagingInstance) return messagingInstance;
+  try {
+    const supported = await isMessagingSupported();
+    if (!supported) return null;
+    messagingInstance = getMessaging(app);
+    return messagingInstance;
+  } catch {
+    return null;
+  }
+}
+
+async function getFcmServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+  try {
+    const existing = await navigator.serviceWorker.getRegistration('/firebase-cloud-messaging-push-scope');
+    if (existing) return existing;
+    return await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+      scope: '/firebase-cloud-messaging-push-scope'
+    });
+  } catch {
+    return null;
+  }
+}
+
+export const FirebaseMessagingBridge = {
+  async isSupported(): Promise<boolean> {
+    try {
+      return await isMessagingSupported();
+    } catch {
+      return false;
+    }
+  },
+
+  getCachedToken(): string | null {
+    try {
+      return localStorage.getItem(FCM_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+
+  async syncSubscriptionToCloud(input: {
+    endpoint?: string;
+    fcmToken?: string;
+    provider: 'fcm' | 'webpush';
+  }): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) return;
+    const rawKey = input.fcmToken || input.endpoint || '';
+    if (!rawKey) return;
+    const subId = sanitizeDocId(`${input.provider}_${rawKey.slice(-36)}`);
+    const path = `users/${user.uid}/push_subscriptions/${subId}`;
+    const endpoint = String(
+      input.endpoint || (input.fcmToken ? `https://fcm.googleapis.com/fcm/send/${input.fcmToken.slice(0, 64)}` : '')
+    ).slice(0, 600);
+    if (endpoint.length < 8) return;
+
+    const deviceLabel =
+      typeof navigator !== 'undefined' ? String(navigator.platform || 'Web').slice(0, 80) : 'Web';
+
+    try {
+      const ref = doc(db, 'users', user.uid, 'push_subscriptions', subId);
+      const existing = await getDoc(ref).catch(() => null);
+      const payload: Record<string, unknown> = {
+        uid: user.uid,
+        subId,
+        endpoint,
+        provider: input.provider,
+        deviceLabel,
+        enabled: true,
+        updatedAt: serverTimestamp()
+      };
+      if (input.fcmToken) {
+        payload.fcmToken = String(input.fcmToken).slice(0, 512);
+      }
+      if (existing?.exists()) {
+        await updateDoc(ref, {
+          endpoint: payload.endpoint,
+          provider: payload.provider,
+          deviceLabel: payload.deviceLabel,
+          enabled: true,
+          ...(input.fcmToken ? { fcmToken: payload.fcmToken } : {}),
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await setDoc(ref, {
+          ...payload,
+          createdAt: serverTimestamp()
+        });
+      }
+    } catch (error) {
+      console.warn(`No se pudo sincronizar suscripción Push en ${path}:`, error);
+    }
+  },
+
+  async removeCloudSubscriptions(): Promise<void> {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+      const snap = await getDocs(collection(db, 'users', user.uid, 'push_subscriptions'));
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
+    } catch {
+      // Ignore partial error
+    }
+  },
+
+  async requestToken(): Promise<{ ok: boolean; token?: string; reason?: string }> {
+    const messaging = await getMessagingSafe();
+    if (!messaging) {
+      return { ok: false, reason: 'Firebase Cloud Messaging no soportado en este navegador.' };
+    }
+    const swReg = await getFcmServiceWorkerRegistration();
+    if (!swReg) {
+      return { ok: false, reason: 'Service Worker de FCM no disponible.' };
+    }
+
+    const vapidKey = String((import.meta as any)?.env?.VITE_FIREBASE_VAPID_KEY || '').trim();
+    try {
+      const token = await getToken(
+        messaging,
+        vapidKey
+          ? { vapidKey, serviceWorkerRegistration: swReg }
+          : { serviceWorkerRegistration: swReg }
+      );
+      if (!token) {
+        return { ok: false, reason: 'No se recibió token FCM del navegador.' };
+      }
+      try {
+        localStorage.setItem(FCM_TOKEN_KEY, token);
+      } catch {
+        // ignore quota
+      }
+      await FirebaseMessagingBridge.syncSubscriptionToCloud({
+        fcmToken: token,
+        provider: 'fcm'
+      });
+      return { ok: true, token };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : 'No se pudo obtener token FCM.'
+      };
+    }
+  },
+
+  async revokeToken(): Promise<boolean> {
+    try {
+      localStorage.removeItem(FCM_TOKEN_KEY);
+    } catch {
+      // ignore
+    }
+    await FirebaseMessagingBridge.removeCloudSubscriptions();
+    try {
+      const messaging = await getMessagingSafe();
+      if (messaging) {
+        await deleteToken(messaging);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  async listenForeground(
+    onNotify: (data: ReturnType<typeof normalizeFcmAiringPayload>) => void
+  ): Promise<() => void> {
+    if (foregroundUnsub) return foregroundUnsub;
+    const messaging = await getMessagingSafe();
+    if (!messaging) return () => {};
+    foregroundUnsub = onMessage(messaging, (payload) => {
+      const normalized = normalizeFcmAiringPayload(payload);
+      onNotify(normalized);
+    });
+    return foregroundUnsub;
+  }
+};
+
+// Keep foreground FCM listener active for in-app airing episode alerts
+void FirebaseMessagingBridge.listenForeground((notif) => {
+  win.showToast?.(`🔔 ${notif.title}: ${notif.body}`);
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    try {
+      new Notification(notif.title, {
+        body: notif.body,
+        icon: '/pwa-192x192.png',
+        tag: notif.tag
+      });
+    } catch {
+      // Ignore browser Notification restrictions
+    }
+  }
+});
+
 // Expose bridges globally for /index.html UI handlers
 win.FirebaseAuth = FirebaseAuthBridge;
 win.firebaseSync = FirebaseSyncBridge;
+win.FirebaseMessaging = FirebaseMessagingBridge;
 win.NyAnime = win.NyAnime || {};
 win.NyAnime.Core = {
   ...(win.NyAnime.Core || {}),
   firebaseAuthManager: FirebaseAuthBridge,
   commentsBridge: FirebaseCommentsBridge,
   watchTogetherBridge: FirebaseWatchTogetherBridge,
+  fcmBridge: FirebaseMessagingBridge,
   syncAll: () => FirebaseSyncBridge.syncAll(),
+  wipeAllUserData: () => FirebaseSyncBridge.wipeAllUserData(),
   exportBackupJSON: () => FirebaseSyncBridge.exportBackupJSON(),
   importBackupJSON: (json: Record<string, unknown>) => FirebaseSyncBridge.importBackupJSON(json)
 };

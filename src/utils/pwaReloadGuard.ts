@@ -98,6 +98,11 @@ export function trySafeReload(
   return true;
 }
 
+export function isFirebaseMessagingServiceWorkerScript(scriptUrl: string | null | undefined): boolean {
+  if (!scriptUrl) return false;
+  return /\/firebase-messaging-sw\.js(?:\?|$)/i.test(String(scriptUrl));
+}
+
 export function findMismatchedServiceWorkers<T extends MinimalSwRegistration>(
   registrations: readonly T[],
   currentIsDevSw: boolean
@@ -109,6 +114,9 @@ export function findMismatchedServiceWorkers<T extends MinimalSwRegistration>(
       reg.installing?.scriptURL
     ].filter((u): u is string => Boolean(u));
     if (urls.length === 0) return false;
+    if (urls.some((u) => isFirebaseMessagingServiceWorkerScript(u))) {
+      return false;
+    }
     if (currentIsDevSw) {
       return urls.some((u) => isProdServiceWorkerScript(u));
     }

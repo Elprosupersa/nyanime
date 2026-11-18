@@ -159,10 +159,14 @@ service cloud.firestore {
 
     function isValidPushSubscriptionEntry(data, subId) {
       return data.keys().hasAll(['uid', 'subId', 'endpoint', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'subId', 'endpoint', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'subId', 'endpoint', 'fcmToken', 'provider', 'deviceLabel', 'enabled', 'createdAt', 'updatedAt'])
         && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
         && data.subId is string && data.subId.size() >= 1 && data.subId.size() <= 128 && data.subId == subId
         && data.endpoint is string && data.endpoint.size() >= 8 && data.endpoint.size() <= 600
+        && (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 512))
+        && (!('provider' in data) || data.provider in ['fcm', 'webpush'])
+        && (!('deviceLabel' in data) || (data.deviceLabel is string && data.deviceLabel.size() <= 80))
+        && (!('enabled' in data) || data.enabled is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -180,7 +184,7 @@ service cloud.firestore {
 
     function isValidWatchRoom(data, roomId) {
       return data.keys().hasAll(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'hasPasscode', 'passcodeHash', 'inviteTokenHash', 'createdAt', 'updatedAt'])
         && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 32 && data.roomId == roomId
         && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
         && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 80
@@ -195,6 +199,9 @@ service cloud.firestore {
         && (!('updatedByUid' in data) || isValidWatchActor(data.updatedByUid))
         && (!('updatedByName' in data) || (data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 80))
         && data.status in ['active', 'closed']
+        && (!('hasPasscode' in data) || data.hasPasscode is bool)
+        && (!('passcodeHash' in data) || (data.passcodeHash is string && data.passcodeHash.size() <= 128))
+        && (!('inviteTokenHash' in data) || (data.inviteTokenHash is string && data.inviteTokenHash.size() <= 128))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -305,7 +312,10 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt']);
         allow delete: if isValidId(roomId) && isValidId(participantId)
-          && isValidWatchActor(existing().uid);
+          && (
+            isValidWatchActor(existing().uid)
+            || isValidWatchActor(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.hostUid)
+          );
       }
 
       match /messages/{messageId} {
@@ -317,7 +327,10 @@ service cloud.firestore {
           && incoming().createdAt == request.time;
         allow update: if false;
         allow delete: if isValidId(roomId) && isValidId(messageId)
-          && isValidWatchActor(existing().uid);
+          && (
+            isValidWatchActor(existing().uid)
+            || isValidWatchActor(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.hostUid)
+          );
       }
     }
 
@@ -496,7 +509,7 @@ service cloud.firestore {
           && incoming().subId == existing().subId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['endpoint', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['endpoint', 'fcmToken', 'provider', 'deviceLabel', 'enabled', 'updatedAt']);
         allow delete: if isValidId(userId) && isValidId(subId) && isOwner(userId);
       }
 

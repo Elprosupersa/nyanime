@@ -74,7 +74,6 @@ const SERVER_RELIABILITY_SCORES: Record<string, number> = {
   desuka: 125,
   mp4upload: 124,
   yourupload: 118,
-  mega: 114,
   streamwish: 110,
   flaswish: 110,
   wish: 108,
@@ -89,11 +88,12 @@ const SERVER_RELIABILITY_SCORES: Record<string, number> = {
   byse: 82,
   bysekoze: 82,
   vidguard: 80,
+  stream: 78,
   multiembed: 76,
+  mega: 75,
   vidsrc: 74,
   hls: 65,
-  zilla: 65,
-  stream: 78
+  zilla: 65
 };
 
 export function getServerBaseScore(serverName: string): number {
@@ -134,11 +134,17 @@ export function generateAnimeSlugCandidates(
   romaji?: string | null,
   english?: string | null,
   seasonTitle?: string | null,
-  seasonNum = 1
+  seasonNum = 1,
+  synonyms?: ReadonlyArray<string | null | undefined> | null
 ): string[] {
   const candidates = new Set<string>();
   const suffixVariants = new Set<string>();
-  const titles = [romaji, seasonTitle, english].filter((v): v is string => Boolean(v && v.trim()));
+  const extraSynonyms = Array.isArray(synonyms)
+    ? synonyms.filter((v): v is string => Boolean(v && v.trim())).slice(0, 4)
+    : [];
+  const titles = [romaji, seasonTitle, english, ...extraSynonyms].filter((v): v is string =>
+    Boolean(v && v.trim())
+  );
 
   for (const raw of titles) {
     const base = normalizeSlugText(raw);
@@ -170,6 +176,8 @@ export function generateAnimeSlugCandidates(
         candidates.add(`${cleanBase}-segunda-temporada`);
         candidates.add(`${cleanBase}-2`);
         suffixVariants.add(`${cleanBase}-ii`);
+        suffixVariants.add(`${cleanBase}-part-2`);
+        suffixVariants.add(`${cleanBase}-parte-2`);
         suffixVariants.add(`${cleanBase}-latino-2`);
       } else if (seasonNum === 3) {
         candidates.add(`${cleanBase}-tercera-temporada`);
@@ -340,14 +348,13 @@ export function pickBestSlugMatch(
   const wantsMovie =
     /^(OVA|MOVIE|ONA|SPECIAL)$/i.test(String(formatHint || '').trim()) ||
     cleanTargets.some((t) => /\b(movie|pelicula|film|ova|special|gaiden)\b/i.test(t));
-  const usesNumberedSeasonTitle = cleanTargets.some((t) =>
-    /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t)
-  );
   const expectedSeasonTokens = getExpectedSeasonTokens(seasonNum);
 
   interface PreparedTarget {
     exactSlugs: Set<string>;
     beforeColonSlug: string;
+    usesNumberedSeasonTitle: boolean;
+    hasDistinctSubtitle: boolean;
     allTokens: Set<string>;
     sigTokens: Set<string>;
     compounds: Map<string, [string, string]>;
@@ -356,6 +363,14 @@ export function pickBestSlugMatch(
   const preparedTargets: PreparedTarget[] = cleanTargets.map((t) => {
     const exactSlugs = new Set<string>();
     const norm = normalizeSlugText(t);
+    const usesNumberedSeasonTitle =
+      /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t);
+    const colonIdx = t.indexOf(':');
+    const beforeColonSlug = colonIdx > 2 ? normalizeSlugText(t.slice(0, colonIdx)) : '';
+    const hasDistinctSubtitle =
+      !usesNumberedSeasonTitle &&
+      (colonIdx > 2 || /\b(hen|arc|chapter|saga|part|cour|final|shippuuden|alchemist|brotherhood|alicization)\b/i.test(t));
+
     if (norm) {
       exactSlugs.add(norm);
       if (seasonNum === 1) {
@@ -367,9 +382,6 @@ export function pickBestSlugMatch(
       const semiJoined = normalizeSlugText(t.replace(/;/g, ''));
       if (semiJoined) exactSlugs.add(semiJoined);
     }
-
-    const colonIdx = t.indexOf(':');
-    const beforeColonSlug = colonIdx > 2 ? normalizeSlugText(t.slice(0, colonIdx)) : '';
 
     const parts = norm
       .split('-')
@@ -387,7 +399,15 @@ export function pickBestSlugMatch(
       compounds.set(`${parts[i]}${parts[i + 1]}`, [parts[i], parts[i + 1]]);
     }
 
-    return { exactSlugs, beforeColonSlug, allTokens, sigTokens, compounds };
+    return {
+      exactSlugs,
+      beforeColonSlug,
+      usesNumberedSeasonTitle,
+      hasDistinctSubtitle,
+      allTokens,
+      sigTokens,
+      compounds
+    };
   });
 
   let bestSlug: string | null = null;
@@ -464,7 +484,14 @@ export function pickBestSlugMatch(
       // Reject unrelated titles that share only 1 word or low token coverage while adding foreign words (e.g. hagane-orchestra, shingeki-no-bahamut)
       if (!isExact && extraTokens >= 1) {
         if (pt.sigTokens.size === 1) {
-          continue;
+          // Allow 1-word title only if first token matches and the sole extra token is a 4-digit release year (e.g. hunter-x-hunter-2011, berserk-2016)
+          const onlyYearExtra =
+            extraTokens === 1 &&
+            pt.allTokens.has(firstTok) &&
+            /^(19\d\d|20\d\d)$/.test(slugTokens[slugTokens.length - 1] || '');
+          if (!onlyYearExtra) {
+            continue;
+          }
         }
         if (pt.sigTokens.size >= 2 && sigMatched.size < 2) {
           continue;
@@ -491,7 +518,15 @@ export function pickBestSlugMatch(
         score += 28;
       } else if (hasAnyLaterSeasonMarker) {
         score -= 60;
-      } else if (usesNumberedSeasonTitle) {
+      } else if (
+        pt.hasDistinctSubtitle &&
+        !pt.usesNumberedSeasonTitle &&
+        (isExact || (pt.sigTokens.size >= 3 && sigMatched.size >= Math.ceil(pt.sigTokens.size * 0.75))) &&
+        slug !== pt.beforeColonSlug
+      ) {
+        // Subtitle-named sequel season (e.g. "Kimetsu no Yaiba: Yuukaku-hen", "Bleach: Sennen Kessen-hen", "Dr. STONE: New World")
+        score += 18;
+      } else if (pt.usesNumberedSeasonTitle) {
         score -= 60;
       } else {
         score -= 32;
@@ -511,12 +546,20 @@ function unescapeJsonSlashes(url: string): string {
   return String(url || '').replace(/\\\//g, '/').trim();
 }
 
-function normalizeKnownEmbedUrl(rawUrl: string): string {
+export function normalizeKnownEmbedUrl(rawUrl: string): string {
   const u = unescapeJsonSlashes(rawUrl);
-  // Convert mega.nz/file/<id>#<key> -> mega.nz/embed/<id>#<key> (ad-free embed inside strict sandbox)
-  const megaMatch = u.match(/^https?:\/\/mega\.nz\/file\/([a-zA-Z0-9_-]+)(#[a-zA-Z0-9_-]+)?/i);
-  if (megaMatch?.[1]) {
-    return `https://mega.nz/embed/${megaMatch[1]}${megaMatch[2] || ''}`;
+  // Convert mega.nz/file/<id>#<key> or mega.co.nz/file/<id>#<key> -> mega.nz/embed/<id>#<key>
+  const megaFileMatch = u.match(/^https?:\/\/(?:www\.)?mega(?:\.co)?\.nz\/file\/([a-zA-Z0-9_-]+)(#[a-zA-Z0-9_-]+)?/i);
+  if (megaFileMatch?.[1]) {
+    return `https://mega.nz/embed/${megaFileMatch[1]}${megaFileMatch[2] || ''}`;
+  }
+  // Convert legacy mega.nz/#!<id>!<key> or mega.nz/embed#!<id>!<key> -> mega.nz/embed/<id>#<key>
+  const megaLegacyMatch = u.match(
+    /^https?:\/\/(?:www\.)?mega(?:\.co)?\.nz\/(?:embed\/?)?#!([a-zA-Z0-9_-]+)(?:!([a-zA-Z0-9_-]+))?/i
+  );
+  if (megaLegacyMatch?.[1]) {
+    const keyPart = megaLegacyMatch[2] ? `#${megaLegacyMatch[2]}` : '';
+    return `https://mega.nz/embed/${megaLegacyMatch[1]}${keyPart}`;
   }
   // Convert mp4upload.com/<id> -> mp4upload.com/embed-<id>.html
   const mp4Short = u.match(/^https?:\/\/(?:www\.)?mp4upload\.com\/([a-z0-9]{10,16})$/i);
@@ -649,7 +692,7 @@ export function parseTioAnimeEpisodeVideos(
     for (const entry of parsed) {
       if (!Array.isArray(entry) || entry.length < 2) continue;
       const serverName = String(entry[0] || 'Servidor').trim();
-      const rawUrl = unescapeJsonSlashes(String(entry[1] || ''));
+      const rawUrl = normalizeKnownEmbedUrl(String(entry[1] || ''));
       if (isBlockedOrUnsafeStreamHost(rawUrl, serverName)) continue;
       list.push({
         providerId: 'tioanime',
@@ -694,7 +737,7 @@ export function parseMonosChinosEpisodePlayers(
   const list: AnimeSourceCandidate[] = [];
   let m: RegExpExecArray | null;
   while ((m = regex.exec(html)) !== null) {
-    const decoded = unescapeJsonSlashes(decodeBase64Safe(m[1]));
+    const decoded = normalizeKnownEmbedUrl(decodeBase64Safe(m[1]));
     const rawLabel = (m[2] || '').replace(/\s+/g, ' ').trim();
     const serverName = rawLabel || inferServerNameFromUrl(decoded);
     if (!decoded || isBlockedOrUnsafeStreamHost(decoded, serverName)) continue;

@@ -525,7 +525,7 @@
     },
     "PushSubscriptionEntry": {
       "title": "PushSubscriptionEntry",
-      "description": "Registro de suscripción Web Push del navegador/dispositivo del usuario.",
+      "description": "Registro de suscripción Web Push / FCM del navegador o dispositivo del usuario.",
       "type": "object",
       "properties": {
         "uid": {
@@ -540,6 +540,21 @@
         "endpoint": {
           "type": "string",
           "maxLength": 600
+        },
+        "fcmToken": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["fcm", "webpush"]
+        },
+        "deviceLabel": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "enabled": {
+          "type": "boolean"
         },
         "createdAt": {
           "type": "string",
@@ -612,6 +627,17 @@
         "status": {
           "type": "string",
           "enum": ["active", "closed"]
+        },
+        "hasPasscode": {
+          "type": "boolean"
+        },
+        "passcodeHash": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "inviteTokenHash": {
+          "type": "string",
+          "maxLength": 128
         },
         "createdAt": {
           "type": "string",

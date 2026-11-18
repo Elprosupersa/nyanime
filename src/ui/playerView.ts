@@ -28,11 +28,16 @@ import {
 } from '../utils/aniskip.ts';
 import {
   type WatchRoomState,
+  buildWatchRoomInviteUrl,
   computeTargetSyncedTime,
+  extractInviteKeyFromSearch,
   normalizeRoomCode,
+  normalizeRoomSecret,
+  parseRoomJoinInput,
   parseTimecodeInput,
   shouldApplyRemotePlaybackUpdate,
-  shouldSeekForDrift
+  shouldSeekForDrift,
+  verifyRoomAccess
 } from '../utils/watchTogether.ts';
 import {
   computeIframeActiveDeltaSeconds,
@@ -45,6 +50,7 @@ import {
 import {
   extractArchiveOrgSourcesFromMetadata,
   isArchiveOrgSpanishMetadata,
+  normalizeKnownEmbedUrl,
   parseHentaiJkEpisodeSources,
   parseHentaiJkSearchSlugs,
   parseHentaiLaCatalogData,
@@ -127,15 +133,22 @@ export function generateSlugCandidates(
   titleRomaji: string,
   titleEnglish: string,
   seasonTitle: string,
-  seasonNum: number
+  seasonNum: number,
+  synonyms?: string[]
 ): string[] {
   if (nWin.NyAnimeVideoSources?.generateAnimeSlugCandidates) {
-    return nWin.NyAnimeVideoSources.generateAnimeSlugCandidates(titleRomaji, titleEnglish, seasonTitle, seasonNum);
+    return nWin.NyAnimeVideoSources.generateAnimeSlugCandidates(
+      titleRomaji,
+      titleEnglish,
+      seasonTitle,
+      seasonNum,
+      synonyms
+    );
   }
   const candidates = new Set<string>();
   const clean = (str: string) =>
     (str || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim().replace(/\s+/g, '-');
-  [seasonTitle, titleRomaji, titleEnglish].filter(Boolean).forEach((t) => {
+  [seasonTitle, titleRomaji, titleEnglish, ...(synonyms || [])].filter(Boolean).forEach((t) => {
     const b = clean(t);
     if (b) candidates.add(b);
   });
@@ -203,10 +216,23 @@ class AnimeAV1SourceProvider {
         }
       }
 
-      if (!matchedSlug) return [];
-      const epHtml = await nativeFetchHtml(`https://animeav1.com/media/${matchedSlug}/${ep}`, {}, 4500);
-      if (!epHtml || !nWin.NyAnimeVideoSources?.parseAnimeAv1EpisodeEmbeds) return [];
-      return nWin.NyAnimeVideoSources.parseAnimeAv1EpisodeEmbeds(epHtml).map((s: NormalizedSourceInput) => new NormalizedSource(s));
+      const candidatesToTry = Array.from(
+        new Set([
+          ...(matchedSlug ? [matchedSlug] : []),
+          ...generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 3)
+        ])
+      ).filter(Boolean);
+
+      for (const slug of candidatesToTry) {
+        const epHtml = await nativeFetchHtml(`https://animeav1.com/media/${slug}/${ep}`, {}, 4200);
+        if (!epHtml || !nWin.NyAnimeVideoSources?.parseAnimeAv1EpisodeEmbeds) continue;
+        const parsed = nWin.NyAnimeVideoSources.parseAnimeAv1EpisodeEmbeds(epHtml);
+        if (parsed.length > 0) {
+          this.slugCache.set(slugKey, slug);
+          return parsed.map((s: NormalizedSourceInput) => new NormalizedSource(s));
+        }
+      }
+      return [];
     } catch {
       return [];
     }
@@ -250,10 +276,23 @@ class TioAnimeSourceProvider {
         }
       }
 
-      if (!matchedSlug) return [];
-      const epHtml = await nativeFetchHtml(`https://tioanime.com/ver/${matchedSlug}-${ep}`, {}, 4500);
-      if (!epHtml || !nWin.NyAnimeVideoSources?.parseTioAnimeEpisodeVideos) return [];
-      return nWin.NyAnimeVideoSources.parseTioAnimeEpisodeVideos(epHtml, 'SUB').map((s: NormalizedSourceInput) => new NormalizedSource(s));
+      const candidatesToTry = Array.from(
+        new Set([
+          ...(matchedSlug ? [matchedSlug] : []),
+          ...generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 3)
+        ])
+      ).filter(Boolean);
+
+      for (const slug of candidatesToTry) {
+        const epHtml = await nativeFetchHtml(`https://tioanime.com/ver/${slug}-${ep}`, {}, 4200);
+        if (!epHtml || !nWin.NyAnimeVideoSources?.parseTioAnimeEpisodeVideos) continue;
+        const parsed = nWin.NyAnimeVideoSources.parseTioAnimeEpisodeVideos(epHtml, 'SUB');
+        if (parsed.length > 0) {
+          this.slugCache.set(slugKey, slug);
+          return parsed.map((s: NormalizedSourceInput) => new NormalizedSource(s));
+        }
+      }
+      return [];
     } catch {
       return [];
     }
@@ -297,13 +336,23 @@ class TVAnimeSourceProvider {
         }
       }
 
-      if (!matchedSlug) {
-        matchedSlug = generateSlugCandidates(romaji, english, seasonTitle, sNum)[0] || null;
+      const candidatesToTry = Array.from(
+        new Set([
+          ...(matchedSlug ? [matchedSlug] : []),
+          ...generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 3)
+        ])
+      ).filter(Boolean);
+
+      for (const slug of candidatesToTry) {
+        const epHtml = await nativeFetchHtml(`https://tvanime.tv/anime/${slug}/episodio/episodio-${ep}`, {}, 4200);
+        if (!epHtml || !nWin.NyAnimeVideoSources?.parseTvAnimeEpisodePlayers) continue;
+        const parsed = nWin.NyAnimeVideoSources.parseTvAnimeEpisodePlayers(epHtml);
+        if (parsed.length > 0) {
+          this.slugCache.set(slugKey, slug);
+          return parsed.map((s: NormalizedSourceInput) => new NormalizedSource(s));
+        }
       }
-      if (!matchedSlug) return [];
-      const epHtml = await nativeFetchHtml(`https://tvanime.tv/anime/${matchedSlug}/episodio/episodio-${ep}`, {}, 4500);
-      if (!epHtml || !nWin.NyAnimeVideoSources?.parseTvAnimeEpisodePlayers) return [];
-      return nWin.NyAnimeVideoSources.parseTvAnimeEpisodePlayers(epHtml).map((s: NormalizedSourceInput) => new NormalizedSource(s));
+      return [];
     } catch {
       return [];
     }
@@ -369,16 +418,17 @@ class JKAnimeSourceProvider {
   cfBlockedUntil = 0;
 
   async resolveViaJkOne(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 3);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 4);
+    const targets = buildTargetTitlesForCtx(ctx);
 
     try {
       let matchedSlug = this.oneSlugCache.get(slugKey) || null;
       if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle);
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
 
         for (const q of queries) {
           const sHtml = await nativeFetchHtml(`https://jkanime.one/anime-online?buscar=${encodeURIComponent(q)}`, {}, 3000);
@@ -387,8 +437,9 @@ class JKAnimeSourceProvider {
             if (found.length > 0) {
               matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
                 found,
-                [seasonTitle, romaji, english].filter(Boolean),
-                sNum
+                targets,
+                sNum,
+                format || ''
               );
               if (matchedSlug) {
                 const out = await fetchPortalOptSources(
@@ -439,8 +490,8 @@ class JKAnimeSourceProvider {
 
   async resolveViaJkNet(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
     if (Date.now() < this.cfBlockedUntil) return [];
-    const { romaji, english, seasonTitle, season, episode } = ctx;
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, season).slice(0, 2);
+    const { romaji, english, seasonTitle, season, episode, synonyms } = ctx;
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, season, synonyms).slice(0, 3);
     const ep = episode || 1;
     const isBlocked = nWin.NyAnimeVideoSources?.isBlockedOrUnsafeStreamHost;
 
@@ -521,16 +572,17 @@ class HenaoJaraSourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 3);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 4);
+    const targets = buildTargetTitlesForCtx(ctx);
 
     try {
       let matchedSlug = this.slugCache.get(slugKey) || null;
       if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle);
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
         for (const q of queries) {
           const sHtml = await nativeFetchHtml(`https://ww1.henaojara.net/animes?buscar=${encodeURIComponent(q)}`, {}, 3000);
           if (sHtml && nWin.NyAnimeVideoSources?.parseAnimePortalSearchSlugs) {
@@ -538,8 +590,9 @@ class HenaoJaraSourceProvider {
             if (found.length > 0) {
               const candidate = nWin.NyAnimeVideoSources.pickBestSlugMatch(
                 found,
-                [seasonTitle, romaji, english].filter(Boolean),
-                sNum
+                targets,
+                sNum,
+                format || ''
               );
               if (candidate) {
                 const out = await fetchPortalOptSources(
@@ -811,23 +864,40 @@ class InternetArchiveAnimeProvider {
       if (bestDocIds.length === 0) return [];
 
       const out: NormalizedSource[] = [];
+      const fallbackOut: NormalizedSource[] = [];
       for (const docId of bestDocIds.slice(0, 3)) {
         const metaUrl = `https://archive.org/metadata/${encodeURIComponent(docId)}`;
         const metaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(metaUrl)}`, {}, 3800).catch(() => null);
         if (!metaRes || !metaRes.ok) continue;
         const metaJson = await metaRes.json().catch(() => null);
         if (!metaJson) continue;
-        // Strictly enforce Spanish metadata on Archive.org items so English-only releases never masquerade as Sub Español
-        if (!isArchiveOrgSpanishMetadata(docId, metaJson)) continue;
-        const extracted = extractArchiveOrgSourcesFromMetadata(docId, metaJson, ep, 'Archive Español HD');
+        const isSpanish = isArchiveOrgSpanishMetadata(docId, metaJson);
+        const extracted = extractArchiveOrgSourcesFromMetadata(
+          docId,
+          metaJson,
+          ep,
+          isSpanish ? 'Archive Español HD' : 'Archive Stream HD'
+        );
         if (extracted.length > 0) {
-          for (const item of extracted) {
-            out.push(new NormalizedSource(item));
+          if (isSpanish) {
+            for (const item of extracted) {
+              out.push(new NormalizedSource(item));
+            }
+            break;
+          } else if (fallbackOut.length === 0) {
+            for (const item of extracted) {
+              fallbackOut.push(
+                new NormalizedSource({
+                  ...item,
+                  language: 'MULTI',
+                  score: Math.max(60, Number(item.score || 100) - 55)
+                })
+              );
+            }
           }
-          break;
         }
       }
-      return out;
+      return out.length > 0 ? out : fallbackOut;
     } catch {
       return [];
     }
@@ -847,9 +917,41 @@ export function ensureGuaranteedEpisodeSources(
 
   const ep = Math.max(1, Number(ctx.episode || 1));
   const sNum = Math.max(1, Number(ctx.season || 1));
-  const rawId = String(ctx.seasonId || '').replace(/^jk_/, '').trim();
+  const rawId = String(ctx.seasonId || '').replace(/^(jk_|hla_)/, '').trim();
   const numericAniId = Number.isFinite(Number(rawId)) && Number(rawId) > 0 ? Number(rawId) : 21;
   const fallbackTargetId = ctx.tmdbId || ctx.imdbId || ctx.malId || numericAniId;
+  const isTmdbOrImdb = Boolean(ctx.tmdbId || ctx.imdbId);
+
+  if (ctx.malId || numericAniId) {
+    const aniOrMal = ctx.malId || numericAniId;
+    list.push(
+      new NormalizedSource({
+        providerId: 'vidsrc_anime',
+        providerName: 'VidSrc Anime (Multi HD)',
+        serverName: 'VidSrc',
+        url: `https://vidsrc.cc/v2/embed/anime/ani${aniOrMal}/${ep}/sub`,
+        language: 'MULTI',
+        quality: '1080p',
+        score: 52
+      })
+    );
+  }
+
+  if (isTmdbOrImdb) {
+    list.push(
+      new NormalizedSource({
+        providerId: 'vidsrc_multi',
+        providerName: 'VidSrc Global (Multi)',
+        serverName: 'VidSrc',
+        url: ctx.isMovie
+          ? `https://vidsrc.xyz/embed/movie/${fallbackTargetId}`
+          : `https://vidsrc.xyz/embed/tv/${fallbackTargetId}/${sNum}-${ep}`,
+        language: 'MULTI',
+        quality: '1080p',
+        score: 48
+      })
+    );
+  }
 
   list.push(
     new NormalizedSource({
@@ -1210,43 +1312,349 @@ function getMyWatchUid(): string {
   return String(fbUser?.uid || '');
 }
 
+const WT_OWNED_ROOMS_KEY = 'nyanime_wt_owned_rooms_v1';
+const WT_UNLOCKED_ROOMS_KEY = 'nyanime_wt_unlocked_rooms_v1';
+
+interface OwnedRoomCreds {
+  hostUid: string;
+  passcode: string;
+  inviteToken: string;
+}
+
+interface UnlockedRoomCreds {
+  passcode?: string;
+  inviteToken?: string;
+}
+
+let pendingProtectedRoomJoin: {
+  roomId: string;
+  animeTitle?: string;
+  hostName?: string;
+} | null = null;
+
+function readRoomCredsMap<T>(storageKey: string): Record<string, T> {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeRoomCredsMap<T>(storageKey: string, map: Record<string, T>): void {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(map));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function getOwnedRoomCreds(roomId: string): OwnedRoomCreds | null {
+  const norm = normalizeRoomCode(roomId);
+  if (!norm) return null;
+  const map = readRoomCredsMap<OwnedRoomCreds>(WT_OWNED_ROOMS_KEY);
+  return map[norm] || null;
+}
+
+function saveOwnedRoomCreds(roomId: string, creds: OwnedRoomCreds): void {
+  const norm = normalizeRoomCode(roomId);
+  if (!norm) return;
+  const map = readRoomCredsMap<OwnedRoomCreds>(WT_OWNED_ROOMS_KEY);
+  map[norm] = creds;
+  writeRoomCredsMap(WT_OWNED_ROOMS_KEY, map);
+}
+
+function removeOwnedRoomCreds(roomId: string): void {
+  const norm = normalizeRoomCode(roomId);
+  if (!norm) return;
+  const map = readRoomCredsMap<OwnedRoomCreds>(WT_OWNED_ROOMS_KEY);
+  delete map[norm];
+  writeRoomCredsMap(WT_OWNED_ROOMS_KEY, map);
+}
+
+function getUnlockedRoomCreds(roomId: string): UnlockedRoomCreds | null {
+  const norm = normalizeRoomCode(roomId);
+  if (!norm) return null;
+  const map = readRoomCredsMap<UnlockedRoomCreds>(WT_UNLOCKED_ROOMS_KEY);
+  return map[norm] || null;
+}
+
+function saveUnlockedRoomCreds(roomId: string, creds: UnlockedRoomCreds): void {
+  const norm = normalizeRoomCode(roomId);
+  if (!norm) return;
+  const map = readRoomCredsMap<UnlockedRoomCreds>(WT_UNLOCKED_ROOMS_KEY);
+  map[norm] = { ...map[norm], ...creds };
+  writeRoomCredsMap(WT_UNLOCKED_ROOMS_KEY, map);
+}
+
+function isWatchRoomOwner(roomId: string, hostUid?: string): boolean {
+  const myUid = getMyWatchUid();
+  if (hostUid && myUid && hostUid === myUid) return true;
+  const owned = getOwnedRoomCreds(roomId);
+  return Boolean(owned && (!owned.hostUid || !myUid || owned.hostUid === myUid));
+}
+
+function getMyPrivateVisibleWatchRooms(): WatchRoomState[] {
+  const seen = new Set<string>();
+  const result: WatchRoomState[] = [];
+
+  if (activeRoomId && activeRoomData && activeRoomData.status === 'active') {
+    seen.add(activeRoomData.roomId);
+    result.push(activeRoomData);
+  }
+
+  for (const r of homeActiveRooms) {
+    if (!r || r.status !== 'active' || seen.has(r.roomId)) continue;
+    // PRIVACY ENFORCEMENT: Never list strangers' rooms publicly!
+    // Only show rooms where the current user is the creator/owner or currently connected.
+    if (activeRoomId === r.roomId || isWatchRoomOwner(r.roomId, r.hostUid)) {
+      seen.add(r.roomId);
+      result.push(r);
+    }
+  }
+  return result;
+}
+
+export function getOwnedWatchRoomsList(): Array<{
+  roomId: string;
+  passcode: string;
+  inviteToken: string;
+  room: WatchRoomState | null;
+}> {
+  const credsMap = readRoomCredsMap<OwnedRoomCreds>(WT_OWNED_ROOMS_KEY);
+  const myUid = getMyWatchUid();
+  const map = new Map<
+    string,
+    {
+      roomId: string;
+      passcode: string;
+      inviteToken: string;
+      room: WatchRoomState | null;
+    }
+  >();
+
+  for (const [rawCode, creds] of Object.entries(credsMap)) {
+    const code = normalizeRoomCode(rawCode);
+    if (!code) continue;
+    if (creds?.hostUid && myUid && creds.hostUid !== myUid) continue;
+    const liveMatch =
+      (activeRoomId === code && activeRoomData ? activeRoomData : null) ||
+      homeActiveRooms.find((r) => r.roomId === code) ||
+      null;
+    if (liveMatch && liveMatch.status === 'closed') continue;
+    map.set(code, {
+      roomId: code,
+      passcode: String(creds?.passcode || ''),
+      inviteToken: String(creds?.inviteToken || ''),
+      room: liveMatch
+    });
+  }
+
+  for (const r of homeActiveRooms) {
+    if (!r || r.status !== 'active') continue;
+    if (myUid && r.hostUid === myUid && !map.has(r.roomId)) {
+      const saved = getOwnedRoomCreds(r.roomId);
+      map.set(r.roomId, {
+        roomId: r.roomId,
+        passcode: String(saved?.passcode || ''),
+        inviteToken: String(saved?.inviteToken || ''),
+        room: r
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+export function copiarInvitacionSalaPorId(roomIdArg: string): void {
+  const code = normalizeRoomCode(roomIdArg);
+  if (!code) return;
+  const owned = getOwnedRoomCreds(code);
+  const unlocked = getUnlockedRoomCreds(code);
+  const inviteToken = owned?.inviteToken || unlocked?.inviteToken || '';
+  const url = buildWatchRoomInviteUrl(
+    window.location.origin,
+    window.location.pathname,
+    code,
+    inviteToken
+  );
+  const passSuffix = owned?.passcode ? ` · Clave: ${owned.passcode}` : '';
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        showToast(`🔗 Enlace de invitación copiado (${code}${passSuffix}) ✓`);
+      })
+      .catch(() => {
+        showToast(`Sala ${code}${passSuffix}`);
+      });
+  } else {
+    showToast(`Sala ${code}${passSuffix}`);
+  }
+}
+
+export async function eliminarTodasMisSalasWatchTogether(): Promise<void> {
+  const ownedList = getOwnedWatchRoomsList();
+  if (ownedList.length === 0) {
+    showToast('No tienes salas creadas activas.');
+    return;
+  }
+  const bridge = getWatchTogetherBridge();
+  for (const item of ownedList) {
+    try {
+      if (bridge?.deleteRoom) {
+        await bridge.deleteRoom(item.roomId);
+      }
+    } catch {
+      // ignore individual room deletion error
+    }
+    removeOwnedRoomCreds(item.roomId);
+    homeActiveRooms = homeActiveRooms.filter((r) => r.roomId !== item.roomId);
+    if (activeRoomId === item.roomId) {
+      await detachWatchTogetherLocal();
+    }
+  }
+  renderHomeWatchTogetherBanner();
+  renderProfileOwnedWatchRooms();
+  showToast('🗑️ Todas tus salas creadas fueron cerradas y eliminadas.');
+}
+
+export function renderProfileOwnedWatchRooms(): void {
+  const containers = [
+    document.getElementById('profile-owned-watch-rooms-body'),
+    document.getElementById('profile-cuenta-owned-watch-rooms-body')
+  ].filter((el): el is HTMLElement => Boolean(el));
+
+  if (containers.length === 0) return;
+
+  const ownedList = getOwnedWatchRoomsList();
+  const countBadge = document.getElementById('profile-owned-rooms-count-badge');
+  if (countBadge) {
+    countBadge.textContent = `${ownedList.length} ${ownedList.length === 1 ? 'activa' : 'activas'}`;
+  }
+
+  let html = '';
+  if (ownedList.length === 0) {
+    html = `
+      <div class="profile-wt-empty">
+        <div class="profile-wt-empty-text">
+          No tienes salas creadas activas en este momento. Las salas son 100% privadas: solo se puede entrar con la <strong>contraseña del creador</strong> o mediante el <strong>enlace de invitación</strong>.
+        </div>
+        <div class="oled-btn-row" style="margin-top:10px; flex-wrap:wrap;">
+          <button type="button" class="oled-btn-secondary" onclick="cambiarTab('inicio'); toggleHomeWatchTogetherBar();">🔑 Unirse con Código o Enlace</button>
+        </div>
+      </div>
+    `;
+  } else {
+    const cardsHtml = ownedList
+      .map((item) => {
+        const r = item.room;
+        const isPlaying = r ? r.playbackState === 'playing' : false;
+        const liveSec = r ? computeTargetSyncedTime(r, Date.now()) : 0;
+        const isJoined = activeRoomId === item.roomId;
+        const titleText = r?.animeTitle
+          ? `${r.animeTitle} · T${Number(r.seasonNum || 1)} Ep ${Number(r.episodeNum || 1)} (${formatPlaybackTime(liveSec)})`
+          : 'Sala privada creada por ti · Lista para continuar';
+        const passText = item.passcode ? `🔑 Clave: ${escHtml(item.passcode)}` : '🔒 Protegida por enlace';
+
+        return `
+          <div class="home-wt-live-card profile-wt-owned-card" data-owned-room="${escHtml(item.roomId)}">
+            <div class="home-wt-live-info">
+              <div class="home-wt-live-top" style="flex-wrap:wrap; gap:6px;">
+                <span class="home-wt-live-badge">${r ? (isPlaying ? '🔴 EN VIVO' : '⏸ PAUSA') : '🟢 PROPIETARIO'}</span>
+                <span class="wt-room-code">🔒 ${escHtml(item.roomId)}</span>
+                <span class="wt-pass-badge">${passText}</span>
+              </div>
+              <div class="home-wt-live-title">${escHtml(titleText)}</div>
+            </div>
+            <div class="home-wt-actions" style="flex-wrap:wrap;">
+              <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(item.roomId)}')">
+                ${isJoined ? '▶ En Sala (Abrir) →' : '▶ Continuar Sala →'}
+              </button>
+              <button type="button" class="wt-action-chip" title="Copiar enlace de invitación y contraseña" onclick="copiarInvitacionSalaPorId('${escHtml(item.roomId)}')">
+                🔗 Invitación
+              </button>
+              <button type="button" class="wt-action-chip danger" title="Cerrar y eliminar esta sala para todos" onclick="eliminarSalaWatchTogether('${escHtml(item.roomId)}')">
+                🗑️ Cerrar Sala
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    html = `
+      <div class="home-wt-live-list" style="margin-bottom:10px;">
+        ${cardsHtml}
+      </div>
+      ${
+        ownedList.length > 1
+          ? `<div style="display:flex; justify-content:flex-end;">
+               <button type="button" class="wt-action-chip danger" onclick="eliminarTodasMisSalasWatchTogether()">🗑️ Cerrar Todas Mis Salas (${ownedList.length})</button>
+             </div>`
+          : ''
+      }
+    `;
+  }
+
+  for (const container of containers) {
+    container.innerHTML = html;
+  }
+}
+
 function renderHomeWatchTogetherBanner(): void {
   const banner = document.getElementById('home-watch-together-banner');
   const dot = document.getElementById('home-wt-live-dot');
   const topBtn = document.getElementById('btn-home-watch-together');
-  const hasLiveRooms = homeActiveRooms.length > 0;
+  const myVisibleRooms = getMyPrivateVisibleWatchRooms();
+  const hasMyLiveRooms = myVisibleRooms.length > 0;
 
   if (dot) {
-    dot.classList.toggle('hide', !hasLiveRooms);
+    dot.classList.toggle('hide', !hasMyLiveRooms);
   }
   if (topBtn) {
-    topBtn.classList.toggle('active', homeWatchBarExpanded || hasLiveRooms || Boolean(activeRoomId));
+    topBtn.classList.toggle('active', homeWatchBarExpanded || hasMyLiveRooms || Boolean(activeRoomId));
   }
   if (!banner) return;
 
-  const shouldShow = homeWatchBarExpanded || hasLiveRooms || Boolean(activeRoomId);
+  const shouldShow = homeWatchBarExpanded || hasMyLiveRooms || Boolean(activeRoomId);
   banner.classList.toggle('hide', !shouldShow);
-  if (!shouldShow) return;
+  if (!shouldShow) {
+    renderProfileOwnedWatchRooms();
+    return;
+  }
 
-  const liveCardsHtml = homeActiveRooms
+  const liveCardsHtml = myVisibleRooms
     .slice(0, 3)
     .map((r) => {
       const liveSec = computeTargetSyncedTime(r, Date.now());
       const isPlaying = r.playbackState === 'playing';
       const isJoined = activeRoomId === r.roomId;
+      const isOwner = isWatchRoomOwner(r.roomId, r.hostUid);
+      const ownedCreds = getOwnedRoomCreds(r.roomId);
       return `
         <div class="home-wt-live-card">
           <div class="home-wt-live-info">
             <div class="home-wt-live-top">
               <span class="home-wt-live-badge">${isPlaying ? '🔴 EN VIVO' : '⏸ PAUSA'}</span>
-              <span class="wt-room-code">${escHtml(r.roomId)}</span>
-              <span class="home-wt-live-host">por ${escHtml(r.hostName || 'Anfitrión')}</span>
+              <span class="wt-room-code">🔒 ${escHtml(r.roomId)}</span>
+              ${ownedCreds?.passcode ? `<span class="wt-pass-badge">🔑 Clave: ${escHtml(ownedCreds.passcode)}</span>` : ''}
+              <span class="home-wt-live-host">${isOwner ? 'Tu sala (Propietario)' : `por ${escHtml(r.hostName || 'Anfitrión')}`}</span>
             </div>
             <div class="home-wt-live-title">${escHtml(r.animeTitle || 'Anime')} · T${Number(r.seasonNum || 1)} Ep ${Number(r.episodeNum || 1)} (${formatPlaybackTime(liveSec)})</div>
           </div>
-          <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(r.roomId)}')">
-            ${isJoined ? 'Abrir Sala →' : 'Entrar ahora →'}
-          </button>
+          <div class="home-wt-actions">
+            <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(r.roomId)}')">
+              ${isJoined ? 'Abrir Sala →' : '▶ Continuar Sala →'}
+            </button>
+            ${
+              isOwner
+                ? `<button type="button" class="wt-action-chip" title="Copiar enlace de invitación" onclick="copiarInvitacionSalaPorId('${escHtml(r.roomId)}')">🔗 Invitar</button>
+                   <button type="button" class="wt-action-chip danger" title="Cerrar y eliminar esta sala" onclick="eliminarSalaWatchTogether('${escHtml(r.roomId)}')">🗑️ Cerrar</button>`
+                : ''
+            }
+          </div>
         </div>
       `;
     })
@@ -1256,28 +1664,32 @@ function renderHomeWatchTogetherBanner(): void {
     <div class="home-wt-banner-inner">
       <div class="home-wt-banner-head">
         <div>
-          <div class="home-wt-banner-title">👥 Watch Together · Salas Compartidas en Vivo</div>
-          <div class="home-wt-banner-sub">Entra con un código o únete en 1 clic a una sala activa para sincronizar episodio, minuto exacto y chat.</div>
+          <div class="home-wt-banner-title">🔒 Watch Together · Salas Privadas Sincronizadas</div>
+          <div class="home-wt-banner-sub">Acceso exclusivo con la contraseña del creador o mediante enlace de invitación. Gestiona tus salas creadas en Mi Perfil.</div>
         </div>
-        ${
-          !hasLiveRooms
-            ? `<button type="button" class="wt-close-btn" onclick="toggleHomeWatchTogetherBar()" aria-label="Cerrar panel">✕</button>`
-            : ''
-        }
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button type="button" class="wt-action-chip" onclick="cambiarTab('perfil')">👤 Mis Salas en Perfil →</button>
+          ${
+            !hasMyLiveRooms
+              ? `<button type="button" class="wt-close-btn" onclick="toggleHomeWatchTogetherBar()" aria-label="Cerrar panel">✕</button>`
+              : ''
+          }
+        </div>
       </div>
       ${liveCardsHtml ? `<div class="home-wt-live-list">${liveCardsHtml}</div>` : ''}
       <div class="home-wt-code-row">
         <input type="text"
                id="home-wt-code-input"
                class="wt-code-input"
-               placeholder="Código de sala (ej. NY-TDUNE3)"
-               maxlength="16"
-               aria-label="Código de sala Watch Together"
+               placeholder="Código de sala (pedirá contraseña) o pega el enlace de invitación"
+               maxlength="240"
+               aria-label="Código o enlace de sala Watch Together"
                onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaDesdeHome(); }">
-        <button type="button" class="wt-create-btn" onclick="unirseSalaDesdeHome()">Unirse a Sala</button>
+        <button type="button" class="wt-create-btn" onclick="unirseSalaDesdeHome()">🔑 Entrar a Sala</button>
       </div>
     </div>
   `;
+  renderProfileOwnedWatchRooms();
 }
 
 export function toggleHomeWatchTogetherBar(): void {
@@ -1293,13 +1705,14 @@ export function toggleHomeWatchTogetherBar(): void {
 
 export async function unirseSalaDesdeHome(codeArg?: string): Promise<void> {
   const inp = document.getElementById('home-wt-code-input') as HTMLInputElement | null;
-  const code = normalizeRoomCode(codeArg || inp?.value || '');
-  if (!code || code.length < 4) {
-    showToast('Ingresa un código de sala válido (ej. NY-TDUNE3).');
+  const rawInput = codeArg || inp?.value || '';
+  const parsed = parseRoomJoinInput(rawInput);
+  if (!parsed.roomId || parsed.roomId.length < 4) {
+    showToast('Ingresa un código de sala o enlace de invitación válido (ej. NY-TDUNE3).');
     return;
   }
   if (inp) inp.value = '';
-  await abrirSalaWatchTogetherDesdeCodigo(code);
+  await abrirSalaWatchTogetherDesdeCodigo(parsed.roomId, parsed.inviteKey);
 }
 
 export function initHomeWatchTogetherListener(): void {
@@ -1315,6 +1728,7 @@ export function initHomeWatchTogetherListener(): void {
     homeRoomsUnsubscribe = bridge.subscribeActiveRooms((rooms: WatchRoomState[]) => {
       homeActiveRooms = Array.isArray(rooms) ? rooms : [];
       renderHomeWatchTogetherBanner();
+      renderProfileOwnedWatchRooms();
     });
   };
   tryBind();
@@ -1506,6 +1920,24 @@ function renderWatchTogetherMessagesAndMeta(): void {
     }
   }
 
+  const delBtn = document.getElementById('wt-delete-room-btn');
+  if (delBtn && activeRoomId) {
+    const isOwner = isWatchRoomOwner(activeRoomId, activeRoomData?.hostUid);
+    delBtn.classList.toggle('hide', !isOwner);
+  }
+  const passBadgeEl = document.getElementById('wt-room-pass-badge');
+  if (passBadgeEl && activeRoomId) {
+    const owned = getOwnedRoomCreds(activeRoomId);
+    const unlocked = getUnlockedRoomCreds(activeRoomId);
+    const knownPass = owned?.passcode || unlocked?.passcode || '';
+    if (knownPass) {
+      passBadgeEl.textContent = `🔑 Clave: ${knownPass}`;
+      passBadgeEl.classList.remove('hide');
+    } else {
+      passBadgeEl.classList.add('hide');
+    }
+  }
+
   if (msgsEl) {
     if (activeRoomMessages.length === 0) {
       msgsEl.innerHTML = '<div class="wt-chat-empty">Saluda a tus amigos en la sala 👋</div>';
@@ -1543,14 +1975,22 @@ export function renderWatchTogetherPanel(): void {
       <div class="wt-panel-header">
         <div>
           <div class="wt-title">👥 Sala Compartida (Watch Together)</div>
-          <div class="wt-sub">Sincroniza play, pausa, tiempo exacto y episodio en vivo con amigos usando Firestore.</div>
+          <div class="wt-sub">Salas protegidas con contraseña o enlace de invitación único. Sincroniza play, pausa y chat en vivo.</div>
         </div>
         <button type="button" class="wt-close-btn" onclick="toggleWatchTogetherPanel()">✕</button>
       </div>
       <div class="wt-lobby-actions">
-        <button type="button" class="wt-create-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="crearSalaWatchTogether()">🎬 Crear Sala Nueva</button>
+        <div class="wt-create-row">
+          <input type="text"
+                 id="wt-create-pass-input"
+                 class="wt-create-pass-input"
+                 placeholder="Contraseña (vacío = PIN automático)"
+                 maxlength="32"
+                 aria-label="Contraseña de la nueva sala">
+          <button type="button" class="wt-create-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="crearSalaWatchTogether()">🔒 Crear Sala</button>
+        </div>
         <div class="wt-join-row">
-          <input type="text" id="wt-join-code-input" class="wt-code-input" placeholder="Código (ej. NY-AB1234)" maxlength="16" aria-label="Código de sala" onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaWatchTogether(); }">
+          <input type="text" id="wt-join-code-input" class="wt-code-input" placeholder="Código o enlace de invitación" maxlength="240" aria-label="Código o enlace de sala" onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaWatchTogether(); }">
           <button type="button" class="wt-join-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="unirseSalaWatchTogether()">Unirse</button>
         </div>
       </div>
@@ -1561,15 +2001,23 @@ export function renderWatchTogetherPanel(): void {
   // Only rebuild connected shell if not already mounted for this roomId (preserves chat input focus)
   if (panel.dataset.roomId !== activeRoomId) {
     panel.dataset.roomId = activeRoomId;
+    const isOwner = isWatchRoomOwner(activeRoomId, activeRoomData?.hostUid);
+    const owned = getOwnedRoomCreds(activeRoomId);
+    const unlocked = getUnlockedRoomCreds(activeRoomId);
+    const knownPass = owned?.passcode || unlocked?.passcode || '';
     panel.innerHTML = `
       <div class="wt-panel-header">
         <div>
-          <div class="wt-title">👥 Sala <span class="wt-room-code">${escHtml(activeRoomId)}</span></div>
+          <div class="wt-title">
+            👥 Sala <span class="wt-room-code">${escHtml(activeRoomId)}</span>
+            <span id="wt-room-pass-badge" class="wt-pass-badge ${knownPass ? '' : 'hide'}" title="Contraseña de la sala">${knownPass ? `🔑 Clave: ${escHtml(knownPass)}` : ''}</span>
+          </div>
           <div class="wt-sub" id="wt-sync-meta">Sincronizando sala...</div>
         </div>
-        <div style="display:flex; gap:6px; align-items:center;">
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
           <button type="button" class="wt-action-chip" onclick="copiarEnlaceSalaWatchTogether()">🔗 Invitar</button>
-          <button type="button" class="wt-action-chip danger" onclick="salirSalaWatchTogether()">Salir</button>
+          <button type="button" id="wt-delete-room-btn" class="wt-action-chip danger ${isOwner ? '' : 'hide'}" onclick="eliminarSalaWatchTogether()">🗑️ Eliminar Sala</button>
+          <button type="button" class="wt-action-chip" onclick="salirSalaWatchTogether()">Salir</button>
         </div>
       </div>
       <div class="wt-sync-controls-bar">
@@ -1801,6 +2249,8 @@ export async function crearSalaWatchTogether(): Promise<void> {
     showToast('Módulo de Watch Together aún inicializando.');
     return;
   }
+  const passInput = document.getElementById('wt-create-pass-input') as HTMLInputElement | null;
+  const customPasscode = normalizeRoomSecret(passInput?.value || '');
   isWatchTogetherBusy = true;
   renderWatchTogetherPanel();
   try {
@@ -1810,7 +2260,7 @@ export async function crearSalaWatchTogether(): Promise<void> {
       seasonNumber: 1,
       title: state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'
     };
-    const code = await bridge.createRoom({
+    const created = await bridge.createRoom({
       animeId: Number(state.anime?.id || currentSeason.id || 0),
       seasonId: Number(currentSeason.id || state.anime?.id || 0),
       animeTitle: String(
@@ -1819,11 +2269,25 @@ export async function crearSalaWatchTogether(): Promise<void> {
       seasonNum: Number(currentSeason.seasonNumber || 1),
       episodeNum: Number(state.epActual || 1),
       playbackState: vidEl && vidEl.paused ? 'paused' : 'playing',
-      playbackTime: vidEl ? Number(vidEl.currentTime || 0) : 0
+      playbackTime: vidEl ? Number(vidEl.currentTime || 0) : 0,
+      passcode: customPasscode || undefined
+    });
+    const roomId = typeof created === 'string' ? created : String(created?.roomId || '');
+    const passcode = typeof created === 'object' ? String(created?.passcode || customPasscode || '') : '';
+    const inviteToken = typeof created === 'object' ? String(created?.inviteToken || '') : '';
+    saveOwnedRoomCreds(roomId, {
+      hostUid: getMyWatchUid(),
+      passcode,
+      inviteToken
     });
     watchTogetherOpen = true;
-    attachWatchTogetherSubscription(code);
-    showToast(`🎬 Sala ${code} creada ✓`);
+    attachWatchTogetherSubscription(roomId);
+    renderProfileOwnedWatchRooms();
+    showToast(
+      passcode
+        ? `🔒 Sala ${roomId} creada · Clave: ${passcode}`
+        : `🎬 Sala ${roomId} creada ✓`
+    );
   } catch (err: any) {
     showToast(err?.message || 'No se pudo crear la sala.');
   } finally {
@@ -1832,39 +2296,175 @@ export async function crearSalaWatchTogether(): Promise<void> {
   }
 }
 
-export async function unirseSalaWatchTogether(codeArg?: string): Promise<void> {
+function openWatchTogetherPasscodeModal(room: {
+  roomId: string;
+  animeTitle?: string;
+  hostName?: string;
+}): void {
+  pendingProtectedRoomJoin = room;
+  const modal = document.getElementById('modal-wt-join-pass');
+  const subEl = document.getElementById('wt-join-modal-sub');
+  const input = document.getElementById('wt-join-pass-input') as HTMLInputElement | null;
+  const errEl = document.getElementById('wt-join-pass-error');
+
+  if (subEl) {
+    const label = room.animeTitle ? ` (${room.animeTitle})` : '';
+    subEl.textContent = `La sala ${room.roomId}${label} es privada. Ingresa la contraseña del creador o pega el enlace completo de invitación.`;
+  }
+  if (input) input.value = '';
+  if (errEl) {
+    errEl.textContent = '';
+    errEl.style.display = 'none';
+  }
+  modal?.classList.add('active');
+  setTimeout(() => {
+    input?.focus();
+  }, 50);
+}
+
+export function cerrarModalPasscodeWatchTogether(): void {
+  pendingProtectedRoomJoin = null;
+  const errEl = document.getElementById('wt-join-pass-error');
+  if (errEl) {
+    errEl.textContent = '';
+    errEl.style.display = 'none';
+  }
+  document.getElementById('modal-wt-join-pass')?.classList.remove('active');
+}
+
+async function completeProtectedRoomJoin(
+  roomId: string,
+  creds: { passcode?: string; inviteKey?: string }
+): Promise<void> {
   const bridge = getWatchTogetherBridge();
-  if (!bridge?.joinRoom) {
-    showToast('Módulo de Watch Together aún inicializando.');
+  if (!bridge?.joinRoom) return;
+
+  const owned = getOwnedRoomCreds(roomId);
+  const room = await bridge.joinRoom(roomId, {
+    passcode: creds.passcode,
+    inviteKey: creds.inviteKey,
+    rememberedPasscode: owned?.passcode || '',
+    rememberedInviteToken: owned?.inviteToken || ''
+  });
+
+  if (creds.passcode || creds.inviteKey) {
+    saveUnlockedRoomCreds(room.roomId, {
+      ...(creds.passcode ? { passcode: creds.passcode } : {}),
+      ...(creds.inviteKey ? { inviteToken: creds.inviteKey } : {})
+    });
+  }
+
+  activeRoomData = room;
+  watchTogetherOpen = true;
+  await sincronizarNavegacionConSala(room);
+  attachWatchTogetherSubscription(room.roomId);
+  applyRoomSyncToNativeVideo(room, true);
+  renderProfileOwnedWatchRooms();
+  showToast(`🎬 Unido a sala ${room.roomId} · ${room.animeTitle} Ep ${room.episodeNum}`);
+}
+
+export async function confirmarPasscodeWatchTogether(): Promise<void> {
+  if (!pendingProtectedRoomJoin) return;
+  const roomId = pendingProtectedRoomJoin.roomId;
+  const input = document.getElementById('wt-join-pass-input') as HTMLInputElement | null;
+  const errEl = document.getElementById('wt-join-pass-error');
+  const submitBtn = document.getElementById('wt-join-pass-submit') as HTMLButtonElement | null;
+  const rawVal = String(input?.value || '').trim();
+
+  if (!rawVal) {
+    if (errEl) {
+      errEl.textContent = 'Ingresa la contraseña del creador o pega el enlace de invitación.';
+      errEl.style.display = 'block';
+    }
     return;
   }
-  const input = document.getElementById('wt-join-code-input') as HTMLInputElement | null;
-  const code = normalizeRoomCode(codeArg || input?.value || '');
-  if (!code || code.length < 4) {
-    showToast('Ingresa un código de sala válido (ej. NY-AB1234).');
+
+  const parsedInput = parseRoomJoinInput(rawVal);
+  const extractedKey = parsedInput.inviteKey || extractInviteKeyFromSearch(rawVal);
+  if (parsedInput.roomId && parsedInput.roomId !== roomId) {
+    if (errEl) {
+      errEl.textContent = `Ese enlace corresponde a otra sala (${parsedInput.roomId}).`;
+      errEl.style.display = 'block';
+    }
     return;
   }
-  isWatchTogetherBusy = true;
-  renderWatchTogetherPanel();
+
+  const creds = extractedKey
+    ? { inviteKey: extractedKey }
+    : { passcode: normalizeRoomSecret(rawVal) };
+
+  if (errEl) errEl.style.display = 'none';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Verificando...';
+  }
+
   try {
-    const room = await bridge.joinRoom(code);
-    activeRoomData = room;
-    watchTogetherOpen = true;
-    await sincronizarNavegacionConSala(room);
-    attachWatchTogetherSubscription(room.roomId);
-    applyRoomSyncToNativeVideo(room, true);
-    showToast(`Conectado a sala ${room.roomId} ✓`);
+    const bridge = getWatchTogetherBridge();
+    if (bridge?.previewRoom) {
+      const preview = await bridge.previewRoom(roomId);
+      if (!preview || preview.status === 'closed') {
+        if (errEl) {
+          errEl.textContent = 'Esta sala ya no existe o fue cerrada.';
+          errEl.style.display = 'block';
+        }
+        return;
+      }
+      const check = verifyRoomAccess({
+        room: preview,
+        currentUid: getMyWatchUid(),
+        providedPasscode: creds.passcode,
+        providedInviteKey: creds.inviteKey
+      });
+      if (!check.allowed) {
+        if (errEl) {
+          errEl.textContent = 'Contraseña o enlace de invitación incorrecto.';
+          errEl.style.display = 'block';
+        }
+        return;
+      }
+    }
+
+    await completeProtectedRoomJoin(roomId, creds);
+    cerrarModalPasscodeWatchTogether();
   } catch (err: any) {
-    showToast(err?.message || 'No se encontró esa sala.');
+    if (errEl) {
+      errEl.textContent = err?.message || 'Contraseña o enlace de invitación incorrecto.';
+      errEl.style.display = 'block';
+    }
   } finally {
-    isWatchTogetherBusy = false;
-    renderWatchTogetherPanel();
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = '🔓 Verificar y Entrar';
+    }
   }
 }
 
-export async function abrirSalaWatchTogetherDesdeCodigo(codeArg: string): Promise<void> {
-  const code = normalizeRoomCode(codeArg);
+export async function unirseSalaWatchTogether(codeArg?: string, inviteKeyArg?: string): Promise<void> {
+  const input = document.getElementById('wt-join-code-input') as HTMLInputElement | null;
+  const parsed = parseRoomJoinInput(codeArg || input?.value || '');
+  if (!parsed.roomId || parsed.roomId.length < 4) {
+    showToast('Ingresa un código o enlace de sala válido (ej. NY-AB1234).');
+    return;
+  }
+  await abrirSalaWatchTogetherDesdeCodigo(parsed.roomId, inviteKeyArg || parsed.inviteKey);
+}
+
+export async function abrirSalaWatchTogetherDesdeCodigo(codeArg: string, inviteKeyArg?: string): Promise<void> {
+  const parsed = parseRoomJoinInput(codeArg);
+  const code = parsed.roomId || normalizeRoomCode(codeArg);
+  const inviteKey = normalizeRoomSecret(inviteKeyArg || parsed.inviteKey || '');
   if (!code) return;
+
+  if (activeRoomId === code) {
+    watchTogetherOpen = true;
+    const repScreen = document.getElementById('pantalla-reproductor');
+    if (repScreen && repScreen.classList.contains('hide') && activeRoomData) {
+      await sincronizarNavegacionConSala(activeRoomData);
+    }
+    renderWatchTogetherPanel();
+    return;
+  }
 
   const waitForBridge = async (): Promise<any> => {
     for (let i = 0; i < 20; i++) {
@@ -1881,25 +2481,131 @@ export async function abrirSalaWatchTogetherDesdeCodigo(codeArg: string): Promis
     return;
   }
 
+  isWatchTogetherBusy = true;
+  renderWatchTogetherPanel();
   try {
+    const owned = getOwnedRoomCreds(code);
+    const preview = bridge.previewRoom ? await bridge.previewRoom(code) : null;
+    const isOwner = Boolean(owned || (preview && isWatchRoomOwner(code, preview.hostUid)));
+
+    if (bridge.previewRoom) {
+      if (!preview) {
+        if (owned) {
+          removeOwnedRoomCreds(code);
+          renderProfileOwnedWatchRooms();
+        }
+        showToast('No se encontró esa sala o ya fue cerrada.');
+        return;
+      }
+      if (preview.status === 'closed') {
+        if (owned) {
+          removeOwnedRoomCreds(code);
+          renderProfileOwnedWatchRooms();
+        }
+        showToast('Esa sala ya fue cerrada por el propietario.');
+        return;
+      }
+
+      // STRICT ACCESS GATE: Non-owners can ONLY enter if they provide a valid inviteKey (from invite link)
+      // or type the room's password in the password modal.
+      if (!isOwner && !inviteKey) {
+        openWatchTogetherPasscodeModal({
+          roomId: preview.roomId,
+          animeTitle: preview.animeTitle,
+          hostName: preview.hostName
+        });
+        return;
+      }
+
+      const access = verifyRoomAccess({
+        room: preview,
+        currentUid: getMyWatchUid(),
+        providedInviteKey: inviteKey,
+        rememberedPasscode: isOwner ? owned?.passcode || '' : '',
+        rememberedInviteToken: isOwner ? owned?.inviteToken || '' : ''
+      });
+
+      if (!access.allowed) {
+        openWatchTogetherPasscodeModal({
+          roomId: preview.roomId,
+          animeTitle: preview.animeTitle,
+          hostName: preview.hostName
+        });
+        if (access.reason === 'wrong_credentials') {
+          const errEl = document.getElementById('wt-join-pass-error');
+          if (errEl) {
+            errEl.textContent = 'El enlace de invitación no es válido. Ingresa la contraseña del propietario.';
+            errEl.style.display = 'block';
+          }
+        }
+        return;
+      }
+    } else if (!isOwner && !inviteKey) {
+      openWatchTogetherPasscodeModal({ roomId: code });
+      return;
+    }
+
     showToast(`Conectando a sala ${code}...`);
-    const room = await bridge.joinRoom(code);
-    activeRoomData = room;
-    watchTogetherOpen = true;
-    await sincronizarNavegacionConSala(room);
-    attachWatchTogetherSubscription(room.roomId);
-    applyRoomSyncToNativeVideo(room, true);
-    showToast(`🎬 Unido a sala ${room.roomId} · ${room.animeTitle} Ep ${room.episodeNum}`);
+    await completeProtectedRoomJoin(code, {
+      passcode: isOwner ? owned?.passcode : undefined,
+      inviteKey: inviteKey || (isOwner ? owned?.inviteToken : undefined)
+    });
   } catch (err: any) {
+    if (err?.code === 'AUTH_REQUIRED' || err?.code === 'WRONG_CREDENTIALS') {
+      openWatchTogetherPasscodeModal({ roomId: code });
+      return;
+    }
     showToast(err?.message || 'No se pudo entrar a la sala compartida.');
+  } finally {
+    isWatchTogetherBusy = false;
+    renderWatchTogetherPanel();
+  }
+}
+
+export async function eliminarSalaWatchTogether(roomIdArg?: string): Promise<void> {
+  const targetRoomId = normalizeRoomCode(roomIdArg || activeRoomId || '');
+  if (!targetRoomId) return;
+  const bridge = getWatchTogetherBridge();
+  if (!bridge?.deleteRoom) {
+    showToast('Servicio de salas no disponible.');
+    return;
+  }
+
+  const matchedRoom =
+    (activeRoomId === targetRoomId ? activeRoomData : null) ||
+    homeActiveRooms.find((r) => r.roomId === targetRoomId) ||
+    null;
+
+  if (!isWatchRoomOwner(targetRoomId, matchedRoom?.hostUid)) {
+    showToast('Solo el propietario que creó la sala puede cerrarla o eliminarla.');
+    return;
+  }
+
+  isWatchTogetherBusy = true;
+  renderWatchTogetherPanel();
+  try {
+    await bridge.deleteRoom(targetRoomId);
+    removeOwnedRoomCreds(targetRoomId);
+    homeActiveRooms = homeActiveRooms.filter((r) => r.roomId !== targetRoomId);
+    if (activeRoomId === targetRoomId) {
+      await detachWatchTogetherLocal();
+    } else {
+      renderHomeWatchTogetherBanner();
+    }
+    renderProfileOwnedWatchRooms();
+    showToast(`🗑️ Sala ${targetRoomId} cerrada y eliminada.`);
+  } catch (err: any) {
+    showToast(err?.message || 'No se pudo eliminar la sala.');
+  } finally {
+    isWatchTogetherBusy = false;
+    renderWatchTogetherPanel();
   }
 }
 
 export async function salirSalaWatchTogether(): Promise<void> {
   const roomToLeave = activeRoomId;
   const bridge = getWatchTogetherBridge();
-  const myUid = getMyWatchUid();
-  const isHost = Boolean(roomToLeave && myUid && activeRoomData?.hostUid === myUid);
+  const isHost = Boolean(roomToLeave && isWatchRoomOwner(roomToLeave, activeRoomData?.hostUid));
   await detachWatchTogetherLocal();
   if (roomToLeave && bridge?.leaveRoom) {
     await bridge.leaveRoom(roomToLeave, isHost).catch(() => {});
@@ -1909,15 +2615,24 @@ export async function salirSalaWatchTogether(): Promise<void> {
 
 export function copiarEnlaceSalaWatchTogether(): void {
   if (!activeRoomId) return;
-  const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(activeRoomId)}`;
+  const owned = getOwnedRoomCreds(activeRoomId);
+  const unlocked = getUnlockedRoomCreds(activeRoomId);
+  const inviteToken = owned?.inviteToken || unlocked?.inviteToken || '';
+  const url = buildWatchRoomInviteUrl(
+    window.location.origin,
+    window.location.pathname,
+    activeRoomId,
+    inviteToken
+  );
+  const passSuffix = owned?.passcode ? ` · Clave: ${owned.passcode}` : '';
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(url).then(() => {
-      showToast(`Enlace y código (${activeRoomId}) copiados ✓`);
+      showToast(`Enlace de invitación copiado (${activeRoomId}${passSuffix}) ✓`);
     }).catch(() => {
-      showToast(`Código de sala: ${activeRoomId}`);
+      showToast(`Sala ${activeRoomId}${passSuffix}`);
     });
   } else {
-    showToast(`Código de sala: ${activeRoomId}`);
+    showToast(`Sala ${activeRoomId}${passSuffix}`);
   }
 }
 
@@ -2809,23 +3524,37 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     return;
   }
 
-  let embedUrl = fuente.url;
+  let embedUrl = normalizeKnownEmbedUrl(fuente.url);
   if (embedUrl.includes('sfastwish.com')) {
     embedUrl = embedUrl.replace('sfastwish.com', 'flaswish.com');
   }
   const finalEmbedSafe = nWin.safeExternalUrl ? nWin.safeExternalUrl(embedUrl) : embedUrl;
+  const isMegaEmbed =
+    /mega(?:\.co)?\.nz/i.test(finalEmbedSafe) || /mega/i.test(String(fuente.serverName || ''));
+  // Strictly sandbox Mega embeds WITHOUT allow-popups or allow-top-navigation so clicking play inside Mega NEVER opens external mega.nz/file/... download windows
+  const iframeSandboxAttr = isMegaEmbed
+    ? 'sandbox="allow-scripts allow-same-origin allow-forms"'
+    : '';
+  const megaSwitchBanner =
+    isMegaEmbed && state.fuentesRankeadas.length > 1
+      ? `<div class="video-stall-banner" style="top:10px; bottom:auto;">
+           <span>🔒 Mega en modo embebido (descargas externas bloqueadas)</span>
+           <button type="button" onclick="probarFuenteAlternativa()">Cambiar Servidor HD ⏭</button>
+         </div>`
+      : '';
 
-  // Sin atributo sandbox para evitar errores "Sandboxed our player is not allowed" en UPNShare / Mega / Desu
   container.innerHTML = `
     <iframe 
       id="video-player-iframe"
       src="${escHtml(finalEmbedSafe)}" 
+      ${iframeSandboxAttr}
       allow="autoplay; encrypted-media; fullscreen; picture-in-picture" 
       allowfullscreen 
       referrerpolicy="strict-origin-when-cross-origin"
       frameborder="0"
       style="position:absolute; top:0; left:0; width:100%; height:100%; border:none;">
     </iframe>
+    ${megaSwitchBanner}
   `;
 
   syncMediaSessionMetadata(activeEpSnapshot);

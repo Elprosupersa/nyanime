@@ -24,12 +24,14 @@ const scheduleState: {
   view: string;
   searchQuery: string;
   tickerInterval: ReturnType<typeof setInterval> | null;
+  airingCheckInterval: ReturnType<typeof setInterval> | null;
 } = {
   filter: 'ALL',
   sort: 'TIME',
   view: 'TIMELINE',
   searchQuery: '',
-  tickerInterval: null
+  tickerInterval: null,
+  airingCheckInterval: null
 };
 
 export const ScheduleReminderManager = {
@@ -284,6 +286,13 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
       renderEmisionDiasChips();
       renderEmisionDia(state.diaEmisionActual);
       void checkAndNotifyAiringEpisodes(simulcastsCache);
+      if (!scheduleState.airingCheckInterval) {
+        scheduleState.airingCheckInterval = setInterval(() => {
+          if (simulcastsCache.length > 0) {
+            void checkAndNotifyAiringEpisodes(simulcastsCache);
+          }
+        }, 15 * 60 * 1000);
+      }
       return;
     }
   }
@@ -343,6 +352,13 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
     renderEmisionDiasChips();
     renderEmisionDia(state.diaEmisionActual);
     void checkAndNotifyAiringEpisodes(simulcastsCache);
+    if (!scheduleState.airingCheckInterval) {
+      scheduleState.airingCheckInterval = setInterval(() => {
+        if (simulcastsCache.length > 0) {
+          void checkAndNotifyAiringEpisodes(simulcastsCache);
+        }
+      }, 15 * 60 * 1000);
+    }
     if (forceRefresh) showToast('Calendario de emisiones actualizado');
   } catch (e) {
     console.warn('Error cargando calendario:', e);

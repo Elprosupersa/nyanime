@@ -38,7 +38,7 @@ import {
   sanitizeUserScore
 } from '../utils/libraryEnhancements.ts';
 import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
-import { extractRoomCodeFromLocation } from '../utils/watchTogether.ts';
+import { extractInviteKeyFromLocation, extractRoomCodeFromLocation } from '../utils/watchTogether.ts';
 import { formatRelativeTime } from '../utils/sanitize.ts';
 import * as OfflineService from '../services/offline.ts';
 
@@ -272,8 +272,11 @@ export async function activarWebPush(): Promise<void> {
   const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
   const uid = fbUser?.uid || 'local-user';
   try {
-    await nWin.NyAnimePWA.subscribeWebPush(uid);
-    renderWebPushStatusCard();
+    const res = await nWin.NyAnimePWA.subscribeWebPush(uid);
+    if (res?.ok && res?.provider === 'fcm') {
+      showToast('Alertas Firebase Push (FCM) activadas ✓');
+    }
+    await renderWebPushStatusCard();
   } catch (err: any) {
     showToast(err?.message || 'No se pudo activar Web Push.');
   }
@@ -282,7 +285,7 @@ export async function activarWebPush(): Promise<void> {
 export async function desconectarWebPush(): Promise<void> {
   if (!nWin.NyAnimePWA?.unsubscribeWebPush) return;
   await nWin.NyAnimePWA.unsubscribeWebPush();
-  renderWebPushStatusCard();
+  await renderWebPushStatusCard();
 }
 
 export async function enviarPruebaWebPush(): Promise<void> {
@@ -308,23 +311,34 @@ export async function enviarResumenSemanalPush(): Promise<void> {
   }
 }
 
-function renderWebPushStatusCard(): void {
+async function renderWebPushStatusCard(): Promise<void> {
   const container = document.getElementById('web-push-status-body');
   if (!container) return;
   const isSupported = Boolean(nWin.NyAnimePWA?.isPushSupported?.());
-  const endpoint = nWin.NyAnimePWA?.getPushEndpoint?.() || null;
   const prefs = AppPreferencesManager.get();
+
+  const status = nWin.NyAnimePWA?.getPushStatus
+    ? await nWin.NyAnimePWA.getPushStatus().catch(() => ({
+        active: false,
+        provider: null as 'fcm' | 'webpush' | null,
+        endpoint: null as string | null,
+        fcmToken: null as string | null
+      }))
+    : { active: false, provider: null as 'fcm' | 'webpush' | null, endpoint: null as string | null, fcmToken: null as string | null };
+
+  const active = Boolean(status.active);
+  const badgeLabel = !isSupported
+    ? '⚠️ Tu navegador actual no soporta Web Push'
+    : active
+      ? status.provider === 'fcm'
+        ? '🔔 Firebase Push (FCM) Activo en este dispositivo ✓'
+        : '🔔 Notificaciones Push Activas en este dispositivo ✓'
+      : '🔕 Notificaciones Push inactivas';
 
   container.innerHTML = `
     <div class="push-status-card">
-      <div class="push-status-badge ${endpoint ? 'active' : ''}">
-        ${
-          !isSupported
-            ? '⚠️ Tu navegador actual no soporta Web Push'
-            : endpoint
-              ? '🔔 Notificaciones Push Activas en este dispositivo ✓'
-              : '🔕 Notificaciones Push inactivas'
-        }
+      <div class="push-status-badge ${active ? 'active' : ''}">
+        ${badgeLabel}
       </div>
       <label class="reader-toggle-row" style="margin:8px 0;">
         <input type="checkbox" ${prefs.weeklySummaryPush ? 'checked' : ''} onchange="toggleWeeklySummaryPushPref(this.checked)">
@@ -332,7 +346,7 @@ function renderWebPushStatusCard(): void {
       </label>
       <div class="oled-btn-row" style="flex-wrap:wrap;">
         ${
-          endpoint
+          active
             ? `
               <button type="button" class="oled-btn-secondary" onclick="enviarPruebaWebPush()">📲 Probar Push</button>
               <button type="button" class="oled-btn-secondary danger-tint" onclick="desconectarWebPush()">Desactivar Push</button>
@@ -953,6 +967,7 @@ export function renderProfileUI(): void {
   renderProfileLibraryPanel();
   renderOAuthScrobbleCard();
   renderWebPushStatusCard();
+  (nWin as any).renderProfileOwnedWatchRooms?.();
   if (activeProfileTab === 'actividad') {
     renderProfileActivityPanel();
   }
@@ -1038,9 +1053,10 @@ export function initApp(): void {
   (nWin as { initHomeWatchTogetherListener?: () => void }).initHomeWatchTogetherListener?.();
 
   const inviteRoomCode = extractRoomCodeFromLocation(window.location, document.referrer);
+  const inviteRoomKey = extractInviteKeyFromLocation(window.location, document.referrer);
   if (inviteRoomCode) {
     setTimeout(() => {
-      void nWin.abrirSalaWatchTogetherDesdeCodigo?.(inviteRoomCode);
+      void nWin.abrirSalaWatchTogetherDesdeCodigo?.(inviteRoomCode, inviteRoomKey);
     }, 350);
   }
 

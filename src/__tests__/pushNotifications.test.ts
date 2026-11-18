@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildWeeklyDigestSummary,
   collectDueAiringNotifications,
+  normalizeFcmAiringPayload,
   urlBase64ToUint8Array
 } from '../utils/pushNotifications.ts';
 
@@ -50,5 +51,21 @@ describe('pushNotifications utilities', () => {
     expect(digest.chaptersReadCount).toBe(1);
     expect(digest.activeSeriesCount).toBe(3);
     expect(digest.watchingTitles).toEqual(['Solo Leveling']);
+  });
+
+  it('normalizes FCM notification and data-only airing payloads safely', () => {
+    const normalized = normalizeFcmAiringPayload({
+      data: { animeId: '154587', episode: '14', body: 'Ya disponible Frieren Ep 14', url: '/?tab=schedule' }
+    });
+    expect(normalized.title).toBe('Nuevo episodio disponible · Ep 14');
+    expect(normalized.body).toBe('Ya disponible Frieren Ep 14');
+    expect(normalized.tag).toBe('nyanime-fcm-154587-14');
+    expect(normalized.url).toBe('/?tab=schedule');
+
+    const unsafe = normalizeFcmAiringPayload({
+      notification: { title: 'Test', body: 'Hello' },
+      data: { url: 'https://evil.example.com' }
+    });
+    expect(unsafe.url).toBe('/');
   });
 });

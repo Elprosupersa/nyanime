@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildWatchRoomInviteUrl,
   computeTargetSyncedTime,
+  extractInviteKeyFromLocation,
   extractRoomCodeFromLocation,
   extractRoomCodeFromSearch,
+  generateInviteToken,
   generateRoomCode,
+  generateRoomPasscode,
   getOrCreateWatchClientIdentity,
+  hashRoomSecret,
   isValidRoomCode,
+  parseRoomJoinInput,
   parseTimecodeInput,
   sanitizeWatchChatText,
+  sha256Hex,
   shouldApplyRemotePlaybackUpdate,
-  shouldSeekForDrift
+  shouldSeekForDrift,
+  verifyRoomAccess
 } from '../utils/watchTogether.ts';
 
 describe('watchTogether utilities', () => {
@@ -31,6 +39,58 @@ describe('watchTogether utilities', () => {
         'https://nyanime.ai.studio/?room=NY-TDUNE3'
       )
     ).toBe('NY-TDUNE3');
+  });
+
+  it('computes standard SHA-256 digests and verifies room access via passcode, invite token, or host', () => {
+    expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+
+    const passcode = generateRoomPasscode(() => 0.25);
+    const inviteToken = generateInviteToken(() => 0.5);
+    expect(passcode.length).toBe(6);
+    expect(inviteToken.length).toBe(16);
+
+    const room = {
+      roomId: 'NY-SECURE1',
+      hostUid: 'host_uid',
+      hasPasscode: true,
+      passcodeHash: hashRoomSecret('NY-SECURE1', 'K7P9M2'),
+      inviteTokenHash: hashRoomSecret('NY-SECURE1', 'SecretInviteTok1')
+    };
+
+    expect(verifyRoomAccess({ room, currentUid: 'host_uid' })).toEqual({ allowed: true, via: 'host' });
+    expect(verifyRoomAccess({ room, currentUid: 'guest_2' })).toEqual({
+      allowed: false,
+      reason: 'auth_required'
+    });
+    expect(
+      verifyRoomAccess({ room, currentUid: 'guest_2', providedPasscode: 'WRONG' })
+    ).toEqual({
+      allowed: false,
+      reason: 'wrong_credentials'
+    });
+    expect(
+      verifyRoomAccess({ room, currentUid: 'guest_2', providedPasscode: 'k7p9m2' })
+    ).toEqual({
+      allowed: true,
+      via: 'passcode'
+    });
+    expect(
+      verifyRoomAccess({ room, currentUid: 'guest_2', providedInviteKey: 'SecretInviteTok1' })
+    ).toEqual({
+      allowed: true,
+      via: 'invite'
+    });
+  });
+
+  it('builds invite URLs and extracts room IDs + invite keys from pasted links or locations', () => {
+    const inviteUrl = buildWatchRoomInviteUrl('https://nyanime.app/', '/', 'NY-TDUNE3', 'InvKey99');
+    expect(inviteUrl).toBe('https://nyanime.app/?room=NY-TDUNE3&k=InvKey99');
+
+    expect(parseRoomJoinInput(inviteUrl)).toEqual({ roomId: 'NY-TDUNE3', inviteKey: 'InvKey99' });
+    expect(parseRoomJoinInput('ny-tdune3')).toEqual({ roomId: 'NY-TDUNE3', inviteKey: '' });
+    expect(
+      extractInviteKeyFromLocation({ search: '?room=NY-TDUNE3&k=InvKey99', hash: '', href: '' })
+    ).toBe('InvKey99');
   });
 
   it('builds deterministic client identities for both authenticated and guest sessions', () => {

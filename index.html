@@ -431,6 +431,18 @@
         </div>
       </section>
 
+      <!-- TARJETA OLED: MIS SALAS WATCH TOGETHER CREADAS COMO PROPIETARIO -->
+      <section class="oled-card profile-card-flat" id="card-profile-owned-watch-rooms" aria-label="Mis salas Watch Together creadas como propietario" style="margin-bottom:14px;">
+        <div class="oled-card-title" style="justify-content:space-between; width:100%; flex-wrap:wrap; gap:8px;">
+          <span>🔒 Mis Salas Watch Together (Propietario)</span>
+          <span id="profile-owned-rooms-count-badge" class="sync-pill offline">0 activas</span>
+        </div>
+        <div class="oled-card-desc">
+          Tus salas creadas son 100% privadas y no aparecen públicamente a otros usuarios. Aquí puedes ver tu código y contraseña, continuar viéndolas, copiar el enlace de invitación o cerrarlas definitivamente.
+        </div>
+        <div id="profile-owned-watch-rooms-body"></div>
+      </section>
+
       <!-- NAVEGACIÓN INTERNA DEL PERFIL -->
       <div class="profile-subtabs" id="profile-section-tabs" role="tablist" aria-label="Secciones de perfil">
         <button type="button" class="profile-subtab-btn active" data-ptab="biblioteca" role="tab" onclick="cambiarSubTabPerfil('biblioteca')">Mi Biblioteca</button>
@@ -591,6 +603,22 @@
             <button type="button" class="oled-btn-secondary" style="border-color:rgba(59,130,246,0.3); color:#3b82f6;" onclick="window.abrirImportarBackupJSON()">Restaurar JSON</button>
           </div>
           <input type="file" id="input-backup-json" accept=".json,application/json" style="display:none;" onchange="window.importarBackupJSON(event)">
+        </div>
+
+        <!-- TARJETA OLED: LIMPIAR PERFIL COMPLETO (3 CONFIRMACIONES) -->
+        <div class="oled-card profile-card-flat wipe-danger-card" id="card-wipe-profile" style="margin-top:14px;">
+          <div class="oled-card-title" style="color:#ff8ea0;">
+            <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            Limpiar Perfil Completo
+          </div>
+          <div class="oled-card-desc">
+            Borra absolutamente todo tu perfil (biblioteca, listas, calificaciones, notas, historial, caché offline, foto y datos sincronizados en la nube) para empezar desde cero como perfil nuevo. Pedirá 3 confirmaciones seguidas.
+          </div>
+          <div class="oled-btn-row">
+            <button type="button" id="btn-open-wipe-profile" class="oled-btn-secondary danger-tint" style="width:100%; justify-content:center;" onclick="solicitarLimpiarPerfil()">
+              🧹 Limpiar Perfil desde Cero
+            </button>
+          </div>
         </div>
       </section>
 

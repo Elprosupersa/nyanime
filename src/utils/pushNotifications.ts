@@ -149,3 +149,41 @@ export function buildWeeklyDigestSummary(input: {
     headline
   };
 }
+
+export interface NormalizedFcmNotification {
+  title: string;
+  body: string;
+  tag: string;
+  url: string;
+  animeId?: number;
+  episode?: number;
+}
+
+export function normalizeFcmAiringPayload(payload: any): NormalizedFcmNotification {
+  const notif = payload?.notification || {};
+  const data = payload?.data || {};
+  const animeId = Number(data.animeId || 0);
+  const episode = Number(data.episode || 0);
+  const title = String(
+    notif.title ||
+      data.title ||
+      (animeId && episode ? `Nuevo episodio disponible · Ep ${episode}` : 'NyAnime TV')
+  ).slice(0, 120);
+  const body = String(
+    notif.body || data.body || 'Tienes una nueva alerta de estreno en tu biblioteca.'
+  ).slice(0, 280);
+  const tag = String(
+    data.tag || (animeId ? `nyanime-fcm-${animeId}-${episode || 0}` : 'nyanime-fcm-alert')
+  ).slice(0, 80);
+  const rawUrl = String(data.url || '/?tab=schedule');
+  const url = rawUrl.startsWith('/') ? rawUrl : '/';
+
+  return {
+    title,
+    body,
+    tag,
+    url,
+    ...(animeId > 0 ? { animeId } : {}),
+    ...(episode > 0 ? { episode } : {})
+  };
+}

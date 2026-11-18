@@ -29,6 +29,11 @@ import {
   compactMangaEntry,
   safeStorageSetItem
 } from '../utils/storageQuota.ts';
+import {
+  collectNyAnimeStorageKeys,
+  getProfileWipeStep
+} from '../utils/profileReset.ts';
+import * as OfflineService from '../services/offline.ts';
 
 const MODALS_MARKUP = `
   <!-- MODAL: SELECTOR DE FUENTES MIHON -->
@@ -489,6 +494,57 @@ const MODALS_MARKUP = `
         </div>
       </div>
       <div id="weekly-summary-body"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: LIMPIAR PERFIL (3 CONFIRMACIONES SECUENCIALES) -->
+  <div class="ny-dialog" id="modal-wipe-profile" onclick="if(event.target===this) cancelarLimpiarPerfil()">
+    <div class="ny-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header">
+        <div class="ny-dialog-title" style="color:#ff8ea0;">⚠️ Restablecer Perfil</div>
+        <div class="ny-dialog-close" onclick="cancelarLimpiarPerfil()" aria-label="Cerrar confirmación de limpieza">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </div>
+      </div>
+      <div class="wipe-step-badge" id="wipe-step-badge">Confirmación 1 de 3</div>
+      <div class="wipe-progress-track">
+        <div class="wipe-progress-fill" id="wipe-progress-fill" style="width:33%;"></div>
+      </div>
+      <div id="wipe-step-title" style="font-size:17px; font-weight:800; color:#fff; margin-bottom:6px;"></div>
+      <div id="wipe-step-warning" style="font-size:12.5px; color:#fecdd3; background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.3); border-radius:10px; padding:10px 12px; margin-bottom:10px; line-height:1.45;"></div>
+      <ul id="wipe-step-bullets" class="wipe-bullets-list"></ul>
+      <div class="oled-btn-row" style="margin-top:14px;">
+        <button type="button" class="oled-btn-secondary" id="wipe-btn-cancel" onclick="cancelarLimpiarPerfil()">Cancelar</button>
+        <button type="button" class="oled-btn-secondary danger-tint" id="wipe-btn-confirm" style="flex:1; justify-content:center; font-weight:800;" onclick="avanzarLimpiarPerfil()">Continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CONTRASEÑA DE SALA WATCH TOGETHER -->
+  <div class="ny-dialog" id="modal-wt-join-pass" onclick="if(event.target===this) cerrarModalPasscodeWatchTogether()">
+    <div class="ny-sheet" onclick="event.stopPropagation()">
+      <div class="ny-dialog-header">
+        <div class="ny-dialog-title">🔒 Sala Protegida</div>
+        <div class="ny-dialog-close" onclick="cerrarModalPasscodeWatchTogether()" aria-label="Cerrar acceso de sala">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </div>
+      </div>
+      <div id="wt-join-modal-sub" style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
+        Ingresa la contraseña de la sala o pega el enlace completo de invitación que compartió el anfitrión.
+      </div>
+      <input type="text"
+             id="wt-join-pass-input"
+             class="wt-code-input"
+             style="width:100%; margin-bottom:8px; text-transform:none;"
+             placeholder="Contraseña de la sala o URL con ?room=...&k=..."
+             maxlength="240"
+             aria-label="Contraseña o enlace de invitación"
+             onkeydown="if(event.key==='Enter'){ event.preventDefault(); confirmarPasscodeWatchTogether(); }">
+      <div id="wt-join-pass-error" style="display:none; color:#fb7185; font-size:12px; font-weight:700; margin-bottom:10px;"></div>
+      <div class="oled-btn-row" style="margin-top:8px;">
+        <button type="button" class="oled-btn-secondary" onclick="cerrarModalPasscodeWatchTogether()">Cancelar</button>
+        <button type="button" class="btn-download-season" id="wt-join-pass-submit" style="flex:1; justify-content:center;" onclick="confirmarPasscodeWatchTogether()">🔓 Verificar y Entrar</button>
+      </div>
     </div>
   </div>
 `;
@@ -1253,4 +1309,101 @@ export function abrirModalResumenSemanal(): void {
   `;
   document.getElementById('modal-weekly-summary')?.classList.add('active');
 }
+
+let profileWipeCurrentStep: 1 | 2 | 3 = 1;
+let profileWipeInFlight = false;
+
+function renderProfileWipeStepUI(): void {
+  const meta = getProfileWipeStep(profileWipeCurrentStep);
+  const badgeEl = document.getElementById('wipe-step-badge');
+  const fillEl = document.getElementById('wipe-progress-fill');
+  const titleEl = document.getElementById('wipe-step-title');
+  const warnEl = document.getElementById('wipe-step-warning');
+  const bulletsEl = document.getElementById('wipe-step-bullets');
+  const confirmBtn = document.getElementById('wipe-btn-confirm') as HTMLButtonElement | null;
+  const cancelBtn = document.getElementById('wipe-btn-cancel') as HTMLButtonElement | null;
+
+  if (badgeEl) badgeEl.textContent = meta.badge;
+  if (fillEl) fillEl.style.width = `${Math.round((meta.step / 3) * 100)}%`;
+  if (titleEl) titleEl.textContent = meta.title;
+  if (warnEl) warnEl.textContent = meta.warning;
+  if (bulletsEl) {
+    bulletsEl.innerHTML = meta.bullets.map((b) => `<li>${escHtml(b)}</li>`).join('');
+  }
+  if (confirmBtn) {
+    confirmBtn.disabled = profileWipeInFlight;
+    confirmBtn.textContent = profileWipeInFlight ? 'Limpiando perfil...' : meta.confirmLabel;
+    confirmBtn.classList.toggle('is-final-danger', meta.step === 3);
+  }
+  if (cancelBtn) {
+    cancelBtn.disabled = profileWipeInFlight;
+  }
+}
+
+export function solicitarLimpiarPerfil(): void {
+  ensureModalsMounted();
+  profileWipeCurrentStep = 1;
+  profileWipeInFlight = false;
+  renderProfileWipeStepUI();
+  document.getElementById('modal-wipe-profile')?.classList.add('active');
+}
+
+export function cancelarLimpiarPerfil(): void {
+  if (profileWipeInFlight) return;
+  profileWipeCurrentStep = 1;
+  document.getElementById('modal-wipe-profile')?.classList.remove('active');
+}
+
+export async function confirmarLimpiarPerfilFinal(): Promise<void> {
+  if (profileWipeInFlight) return;
+  profileWipeInFlight = true;
+  renderProfileWipeStepUI();
+
+  try {
+    await nWin.NyAnimePWA?.unsubscribeWebPush?.().catch(() => false);
+    await OfflineService.clearAllOfflineStorage().catch(() => {});
+    if (nWin.NyAnime?.Core?.wipeAllUserData) {
+      await nWin.NyAnime.Core.wipeAllUserData().catch(() => {});
+    } else if (nWin.firebaseSync?.wipeAllUserData) {
+      await nWin.firebaseSync.wipeAllUserData().catch(() => {});
+    }
+
+    const keysToRemove = collectNyAnimeStorageKeys(Object.keys(localStorage));
+    for (const k of keysToRemove) {
+      try {
+        localStorage.removeItem(k);
+      } catch {
+        // ignore storage removal errors
+      }
+    }
+
+    DownloadManager.save([]);
+    await DownloadManager.updateBadge().catch(() => {});
+    UserManager.renderProfile();
+    uiHooks.renderProfileUI();
+    uiHooks.renderFavoritos();
+    uiHooks.renderContinuarViendo();
+    uiHooks.renderContinuarLeyendoManga();
+    uiHooks.renderEmisionDiasChips();
+    uiHooks.renderEmisionDia(state.diaEmisionActual);
+    uiHooks.renderSmartRecommendations();
+
+    profileWipeCurrentStep = 1;
+    document.getElementById('modal-wipe-profile')?.classList.remove('active');
+    showToast('🧹 Perfil limpiado por completo. Ahora está como nuevo.');
+  } finally {
+    profileWipeInFlight = false;
+  }
+}
+
+export async function avanzarLimpiarPerfil(): Promise<void> {
+  if (profileWipeInFlight) return;
+  if (profileWipeCurrentStep < 3) {
+    profileWipeCurrentStep = (profileWipeCurrentStep + 1) as 2 | 3;
+    renderProfileWipeStepUI();
+    return;
+  }
+  await confirmarLimpiarPerfilFinal();
+}
+
 

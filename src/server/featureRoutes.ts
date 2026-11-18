@@ -23,7 +23,9 @@ interface PendingOAuthState {
 interface StoredPushSub {
   id: string;
   uid: string;
-  subscription: webpushTypes.PushSubscription;
+  provider?: 'fcm' | 'webpush';
+  fcmToken?: string;
+  subscription?: webpushTypes.PushSubscription;
   createdAt: number;
   updatedAt: number;
 }
@@ -105,7 +107,7 @@ function loadPushSubs(): Map<string, StoredPushSub> {
       const list = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8'));
       if (Array.isArray(list)) {
         for (const item of list) {
-          if (item?.id && item?.subscription?.endpoint) {
+          if (item?.id && (item?.subscription?.endpoint || item?.fcmToken)) {
             cachedSubs.set(String(item.id), item as StoredPushSub);
           }
         }
@@ -216,7 +218,7 @@ function applyApiCors(req: http.IncomingMessage, res: http.ServerResponse): bool
 async function dispatchWebPush(
   targetSubs: StoredPushSub[],
   payloadObj: { title: string; body: string; tag?: string; url?: string; icon?: string }
-): Promise<{ sent: number; failed: number }> {
+): Promise<{ sent: number; failed: number; fcmSent?: number }> {
   getVapidKeys();
   const payloadStr = JSON.stringify({
     title: payloadObj.title,
@@ -226,21 +228,65 @@ async function dispatchWebPush(
     icon: payloadObj.icon || '/pwa-192x192.png'
   });
 
+  const fcmServerKey = String(process.env.FIREBASE_FCM_SERVER_KEY || '').trim();
   const subsMap = loadPushSubs();
   let sent = 0;
+  let fcmSent = 0;
   let failed = 0;
 
   await Promise.all(
     targetSubs.map(async (entry) => {
-      try {
-        await webpush.sendNotification(entry.subscription, payloadStr, { TTL: 3600 });
-        sent += 1;
-      } catch (err: any) {
-        failed += 1;
-        const statusCode = Number(err?.statusCode || 0);
-        if (statusCode === 404 || statusCode === 410) {
-          subsMap.delete(entry.id);
+      let delivered = false;
+      if (entry.subscription?.endpoint) {
+        try {
+          await webpush.sendNotification(entry.subscription, payloadStr, { TTL: 3600 });
+          sent += 1;
+          delivered = true;
+        } catch (err: any) {
+          const statusCode = Number(err?.statusCode || 0);
+          if (statusCode === 404 || statusCode === 410) {
+            subsMap.delete(entry.id);
+          }
         }
+      }
+
+      if (entry.fcmToken && fcmServerKey) {
+        try {
+          const fcmResp = await fetch('https://fcm.googleapis.com/fcm/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `key=${fcmServerKey}`
+            },
+            body: JSON.stringify({
+              to: entry.fcmToken,
+              notification: {
+                title: payloadObj.title,
+                body: payloadObj.body,
+                icon: payloadObj.icon || '/pwa-192x192.png'
+              },
+              data: {
+                title: payloadObj.title,
+                body: payloadObj.body,
+                tag: payloadObj.tag || 'nyanime-push',
+                url: payloadObj.url || '/'
+              }
+            })
+          });
+          if (fcmResp.ok) {
+            fcmSent += 1;
+            if (!delivered) {
+              sent += 1;
+              delivered = true;
+            }
+          }
+        } catch {
+          // Non-fatal fallback
+        }
+      }
+
+      if (!delivered && !entry.fcmToken) {
+        failed += 1;
       }
     })
   );
@@ -248,7 +294,7 @@ async function dispatchWebPush(
   if (failed > 0) {
     persistPushSubs();
   }
-  return { sent, failed };
+  return { sent, failed, fcmSent };
 }
 
 export async function handleFeatureApiRoutes(
@@ -604,38 +650,56 @@ export async function handleFeatureApiRoutes(
     if (pathname === '/api/push/subscribe' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const sub = body.subscription as webpushTypes.PushSubscription | undefined;
-      if (!sub || typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://')) {
-        sendJson(res, 400, { error: 'Suscripción Web Push inválida.' });
+      const fcmToken = String(body.fcmToken || '').trim().slice(0, 512);
+      const hasValidWebPush = Boolean(sub && typeof sub.endpoint === 'string' && sub.endpoint.startsWith('https://'));
+      if (!hasValidWebPush && !fcmToken) {
+        sendJson(res, 400, { error: 'Suscripción Web Push o token FCM inválido.' });
         return true;
       }
       const subsMap = loadPushSubs();
-      const id = hashEndpoint(sub.endpoint);
+      const id = hasValidWebPush ? hashEndpoint(sub!.endpoint) : `fcm_${hashEndpoint(fcmToken)}`;
       const existing = subsMap.get(id);
       const now = Date.now();
       subsMap.set(id, {
         id,
         uid: String(body.uid || 'local').slice(0, 128),
-        subscription: sub,
+        provider: fcmToken ? 'fcm' : 'webpush',
+        ...(fcmToken ? { fcmToken } : {}),
+        ...(hasValidWebPush ? { subscription: sub } : {}),
         createdAt: existing?.createdAt || now,
         updatedAt: now
       });
       persistPushSubs();
-      sendJson(res, 200, { ok: true, id, count: subsMap.size });
+      sendJson(res, 200, { ok: true, id, count: subsMap.size, provider: fcmToken ? 'fcm' : 'webpush' });
       return true;
     }
 
     if (pathname === '/api/push/unsubscribe' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const endpoint = String(body.endpoint || '').trim();
-      if (!endpoint) {
-        sendJson(res, 400, { error: 'Endpoint requerido.' });
+      const fcmToken = String(body.fcmToken || '').trim();
+      if (!endpoint && !fcmToken) {
+        sendJson(res, 400, { error: 'Endpoint o fcmToken requerido.' });
         return true;
       }
       const subsMap = loadPushSubs();
-      const id = hashEndpoint(endpoint);
-      subsMap.delete(id);
+      const removedIds: string[] = [];
+      if (endpoint) {
+        const id = hashEndpoint(endpoint);
+        if (subsMap.delete(id)) removedIds.push(id);
+      }
+      if (fcmToken) {
+        const fcmId = `fcm_${hashEndpoint(fcmToken)}`;
+        if (subsMap.delete(fcmId)) removedIds.push(fcmId);
+        for (const [k, v] of subsMap.entries()) {
+          if (v.fcmToken === fcmToken) {
+            subsMap.delete(k);
+            removedIds.push(k);
+          }
+        }
+      }
       persistPushSubs();
-      sendJson(res, 200, { ok: true, id });
+      sendJson(res, 200, { ok: true, removedIds });
       return true;
     }
 

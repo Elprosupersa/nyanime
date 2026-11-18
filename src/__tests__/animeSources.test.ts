@@ -711,7 +711,41 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
     expect(detail?.slug).toBe('ane-wa-yan-mama-junyuu-chuu');
     expect(resolveDevalue([{ a: 1 }, 'valor'], 0)).toEqual({ a: 'valor' });
   });
+
+  it('normalizes all Mega download/legacy URLs to embed format and resolves subtitle sequels & year slugs', () => {
+    const tioMegaHtml = `<script>var videos = [["Mega","https:\\/\\/mega.nz\\/file\\/v6IQUKDZ#6ST5d6f0SUffvTePiilolP6nzACQiVvYJ8k9yo5",0,0],["MegaLegacy","https:\\/\\/mega.nz\\/#!abc123XYZ!secretKey789",0,0],["YourUpload","https:\\/\\/www.yourupload.com\\/embed\\/54oMN0",0,0]];</script>`;
+    const tioSources = parseTioAnimeEpisodeVideos(tioMegaHtml, 'SUB');
+    expect(tioSources).toHaveLength(3);
+    expect(tioSources[0].url).toBe('https://mega.nz/embed/v6IQUKDZ#6ST5d6f0SUffvTePiilolP6nzACQiVvYJ8k9yo5');
+    expect(tioSources[1].url).toBe('https://mega.nz/embed/abc123XYZ#secretKey789');
+
+    // Direct/extractable servers (YourUpload) must rank ahead of Mega
+    const ranked = rankAndDeduplicateSources(tioSources, 'SUB');
+    expect(ranked[0].serverName).toBe('YourUpload');
+
+    // Subtitle-named sequel season must match even when English target uses "Season 2"
+    expect(
+      pickBestSlugMatch(
+        ['kimetsu-no-yaiba', 'kimetsu-no-yaiba-yuukakuhen'],
+        ['Kimetsu no Yaiba: Yuukaku-hen', 'Demon Slayer: Kimetsu no Yaiba Season 2'],
+        2
+      )
+    ).toBe('kimetsu-no-yaiba-yuukakuhen');
+
+    expect(
+      pickBestSlugMatch(
+        ['dr-stone', 'dr-stone-new-world'],
+        ['Dr. STONE: New World', 'Dr. STONE Season 3'],
+        3
+      )
+    ).toBe('dr-stone-new-world');
+
+    // 1-word title with release year suffix matches cleanly while still rejecting unrelated titles
+    expect(pickBestSlugMatch(['berserk-2016'], ['Berserk'], 1)).toBe('berserk-2016');
+    expect(pickBestSlugMatch(['monster-musume-no-iru-nichijou'], ['Monster'], 1)).toBeNull();
+  });
 });
+
 
 
 

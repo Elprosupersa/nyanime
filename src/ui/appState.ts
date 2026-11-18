@@ -141,7 +141,14 @@ export interface NyWindow extends Window {
   renderDetalleEpisodios?: () => void;
   renderSmartRecommendations?: () => Promise<void>;
   getActiveDetailAnimeEntry?: () => any;
-  abrirSalaWatchTogetherDesdeCodigo?: (codeArg: string) => Promise<void>;
+  abrirSalaWatchTogetherDesdeCodigo?: (codeArg: string, inviteKeyArg?: string) => Promise<void>;
+  eliminarSalaWatchTogether?: (roomIdArg?: string) => Promise<void>;
+  cerrarModalPasscodeWatchTogether?: () => void;
+  confirmarPasscodeWatchTogether?: () => Promise<void>;
+  solicitarLimpiarPerfil?: () => void;
+  avanzarLimpiarPerfil?: () => Promise<void>;
+  cancelarLimpiarPerfil?: () => void;
+  confirmarLimpiarPerfilFinal?: () => Promise<void>;
 }
 
 export const nWin = window as unknown as NyWindow;
@@ -2153,8 +2160,6 @@ export function setupTouchGestures(): void {
   let isHorizontalSwipe = false;
   let isEdgeSwipe = false;
 
-  const tabsOrder = ['inicio', 'emision', 'lectura', 'busqueda', 'perfil'];
-
   document.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
     const touch = e.touches[0];
@@ -2205,27 +2210,6 @@ export function setupTouchGestures(): void {
       if (navigator.vibrate) navigator.vibrate(15);
       uiHooks.cerrarDetalle();
       return;
-    }
-
-    const lector = document.getElementById('pantalla-lector');
-    const isMainScreen = (!detalle || detalle.classList.contains('hide')) &&
-      (!lector || lector.classList.contains('hide')) &&
-      !activeModal;
-
-    const target = e.target as HTMLElement | null;
-    const inHorizontalScroll = target?.closest?.('.scroll-h, .h-scroll, .schedule-day-chips, .lectura-type-chips, .category-chips, .avatar-grid');
-
-    if (isMainScreen && !inHorizontalScroll) {
-      const currentIdx = tabsOrder.indexOf(state.tabActual || 'inicio');
-      if (currentIdx !== -1) {
-        if (dx < -70 && currentIdx < tabsOrder.length - 1) {
-          if (navigator.vibrate) navigator.vibrate(12);
-          cambiarTab(tabsOrder[currentIdx + 1]);
-        } else if (dx > 70 && currentIdx > 0) {
-          if (navigator.vibrate) navigator.vibrate(12);
-          cambiarTab(tabsOrder[currentIdx - 1]);
-        }
-      }
     }
   }, { passive: true });
 }
