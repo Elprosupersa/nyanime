@@ -30,6 +30,8 @@ import {
   type WatchRoomState,
   computeTargetSyncedTime,
   normalizeRoomCode,
+  parseTimecodeInput,
+  shouldApplyRemotePlaybackUpdate,
   shouldSeekForDrift
 } from '../utils/watchTogether.ts';
 import {
@@ -1092,6 +1094,8 @@ let activeRoomMessages: Array<{ id?: string; uid: string; displayName?: string; 
 let roomUnsubscribe: (() => void) | null = null;
 let isApplyingRemoteSync = false;
 let isWatchTogetherBusy = false;
+let lastAppliedRoomUpdatedAtMs = 0;
+let _watchTogetherClockTimer: ReturnType<typeof setInterval> | null = null;
 
 function resetAniSkipState(): void {
   activeAniSkipIntervals = [];
@@ -1188,25 +1192,175 @@ async function fetchAniSkipForEpisode(malId: number | string | undefined, ep: nu
   }
 }
 
+let homeWatchBarExpanded = false;
+let homeActiveRooms: WatchRoomState[] = [];
+let homeRoomsUnsubscribe: (() => void) | null = null;
+let isSyncingRoomNavigation = false;
+
 function getWatchTogetherBridge(): any {
   return nWin.NyAnime?.Core?.watchTogetherBridge || null;
 }
 
-async function broadcastWatchTogetherState(forcePlaybackState?: 'playing' | 'paused'): Promise<void> {
+function getMyWatchUid(): string {
+  const bridge = getWatchTogetherBridge();
+  if (bridge?.getCurrentUid) {
+    return String(bridge.getCurrentUid() || '');
+  }
+  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
+  return String(fbUser?.uid || '');
+}
+
+function renderHomeWatchTogetherBanner(): void {
+  const banner = document.getElementById('home-watch-together-banner');
+  const dot = document.getElementById('home-wt-live-dot');
+  const topBtn = document.getElementById('btn-home-watch-together');
+  const hasLiveRooms = homeActiveRooms.length > 0;
+
+  if (dot) {
+    dot.classList.toggle('hide', !hasLiveRooms);
+  }
+  if (topBtn) {
+    topBtn.classList.toggle('active', homeWatchBarExpanded || hasLiveRooms || Boolean(activeRoomId));
+  }
+  if (!banner) return;
+
+  const shouldShow = homeWatchBarExpanded || hasLiveRooms || Boolean(activeRoomId);
+  banner.classList.toggle('hide', !shouldShow);
+  if (!shouldShow) return;
+
+  const liveCardsHtml = homeActiveRooms
+    .slice(0, 3)
+    .map((r) => {
+      const liveSec = computeTargetSyncedTime(r, Date.now());
+      const isPlaying = r.playbackState === 'playing';
+      const isJoined = activeRoomId === r.roomId;
+      return `
+        <div class="home-wt-live-card">
+          <div class="home-wt-live-info">
+            <div class="home-wt-live-top">
+              <span class="home-wt-live-badge">${isPlaying ? '🔴 EN VIVO' : '⏸ PAUSA'}</span>
+              <span class="wt-room-code">${escHtml(r.roomId)}</span>
+              <span class="home-wt-live-host">por ${escHtml(r.hostName || 'Anfitrión')}</span>
+            </div>
+            <div class="home-wt-live-title">${escHtml(r.animeTitle || 'Anime')} · T${Number(r.seasonNum || 1)} Ep ${Number(r.episodeNum || 1)} (${formatPlaybackTime(liveSec)})</div>
+          </div>
+          <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(r.roomId)}')">
+            ${isJoined ? 'Abrir Sala →' : 'Entrar ahora →'}
+          </button>
+        </div>
+      `;
+    })
+    .join('');
+
+  banner.innerHTML = `
+    <div class="home-wt-banner-inner">
+      <div class="home-wt-banner-head">
+        <div>
+          <div class="home-wt-banner-title">👥 Watch Together · Salas Compartidas en Vivo</div>
+          <div class="home-wt-banner-sub">Entra con un código o únete en 1 clic a una sala activa para sincronizar episodio, minuto exacto y chat.</div>
+        </div>
+        ${
+          !hasLiveRooms
+            ? `<button type="button" class="wt-close-btn" onclick="toggleHomeWatchTogetherBar()" aria-label="Cerrar panel">✕</button>`
+            : ''
+        }
+      </div>
+      ${liveCardsHtml ? `<div class="home-wt-live-list">${liveCardsHtml}</div>` : ''}
+      <div class="home-wt-code-row">
+        <input type="text"
+               id="home-wt-code-input"
+               class="wt-code-input"
+               placeholder="Código de sala (ej. NY-TDUNE3)"
+               maxlength="16"
+               aria-label="Código de sala Watch Together"
+               onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaDesdeHome(); }">
+        <button type="button" class="wt-create-btn" onclick="unirseSalaDesdeHome()">Unirse a Sala</button>
+      </div>
+    </div>
+  `;
+}
+
+export function toggleHomeWatchTogetherBar(): void {
+  homeWatchBarExpanded = !homeWatchBarExpanded;
+  renderHomeWatchTogetherBanner();
+  if (homeWatchBarExpanded) {
+    setTimeout(() => {
+      const inp = document.getElementById('home-wt-code-input') as HTMLInputElement | null;
+      inp?.focus();
+    }, 60);
+  }
+}
+
+export async function unirseSalaDesdeHome(codeArg?: string): Promise<void> {
+  const inp = document.getElementById('home-wt-code-input') as HTMLInputElement | null;
+  const code = normalizeRoomCode(codeArg || inp?.value || '');
+  if (!code || code.length < 4) {
+    showToast('Ingresa un código de sala válido (ej. NY-TDUNE3).');
+    return;
+  }
+  if (inp) inp.value = '';
+  await abrirSalaWatchTogetherDesdeCodigo(code);
+}
+
+export function initHomeWatchTogetherListener(): void {
+  if (homeRoomsUnsubscribe) return;
+  const tryBind = (attempt = 0) => {
+    const bridge = getWatchTogetherBridge();
+    if (!bridge?.subscribeActiveRooms) {
+      if (attempt < 15) {
+        setTimeout(() => tryBind(attempt + 1), 300);
+      }
+      return;
+    }
+    homeRoomsUnsubscribe = bridge.subscribeActiveRooms((rooms: WatchRoomState[]) => {
+      homeActiveRooms = Array.isArray(rooms) ? rooms : [];
+      renderHomeWatchTogetherBanner();
+    });
+  };
+  tryBind();
+}
+
+function getEffectiveRoomTimeSeconds(): number {
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  if (vidEl && Number.isFinite(vidEl.currentTime)) {
+    return Math.max(0, Number(vidEl.currentTime || 0));
+  }
+  if (activeRoomData) {
+    return computeTargetSyncedTime(activeRoomData, Date.now());
+  }
+  return 0;
+}
+
+async function broadcastWatchTogetherState(
+  forcePlaybackState?: 'playing' | 'paused',
+  overrideTimeSec?: number
+): Promise<void> {
   if (!activeRoomId || isApplyingRemoteSync) return;
   const bridge = getWatchTogetherBridge();
   if (!bridge?.updatePlayback) return;
 
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
-  const currentSeason = state.seasons?.[state.temporadaActualIdx] || { seasonNumber: 1 };
+  const currentSeason = state.seasons?.[state.temporadaActualIdx] || {
+    id: state.anime?.id,
+    seasonNumber: 1,
+    title: state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'
+  };
+  const fallbackState = activeRoomData?.playbackState || 'playing';
   const playbackState: 'playing' | 'paused' =
-    forcePlaybackState || (vidEl ? (vidEl.paused ? 'paused' : 'playing') : 'playing');
-  const playbackTime = vidEl ? Math.max(0, Number(vidEl.currentTime || 0)) : 0;
+    forcePlaybackState || (vidEl ? (vidEl.paused ? 'paused' : 'playing') : fallbackState);
+  const playbackTime =
+    typeof overrideTimeSec === 'number' && Number.isFinite(overrideTimeSec)
+      ? Math.max(0, overrideTimeSec)
+      : getEffectiveRoomTimeSeconds();
 
+  lastAppliedRoomUpdatedAtMs = Date.now();
   try {
     await bridge.updatePlayback(activeRoomId, {
-      animeId: Number(state.anime?.id || 0),
-      animeTitle: String(state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'),
+      animeId: Number(state.anime?.id || currentSeason.id || 0),
+      seasonId: Number(currentSeason.id || state.anime?.id || 0),
+      animeTitle: String(
+        currentSeason.title || state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'
+      ),
       seasonNum: Number(currentSeason.seasonNumber || 1),
       episodeNum: Number(state.epActual || 1),
       playbackState,
@@ -1217,25 +1371,139 @@ async function broadcastWatchTogetherState(forcePlaybackState?: 'playing' | 'pau
   }
 }
 
+function applyRoomSyncToNativeVideo(room: WatchRoomState, forceSeek = false): boolean {
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  if (!vidEl || vidEl.readyState < 1) return false;
+  const targetTime = computeTargetSyncedTime(room, Date.now(), vidEl.duration);
+  isApplyingRemoteSync = true;
+  try {
+    if (forceSeek || shouldSeekForDrift(vidEl.currentTime || 0, targetTime, 1.8)) {
+      vidEl.currentTime = targetTime;
+      activeVideoLastTickPos = targetTime;
+    }
+    if (room.playbackState === 'playing' && vidEl.paused) {
+      vidEl.play().catch(() => {
+        // Fallback to muted autoplay if browser blocked unmuted remote play
+        vidEl.muted = true;
+        void vidEl.play().catch(() => {});
+        showToast('🔊 Reproducción sincronizada (activa el sonido en el reproductor)');
+      });
+    } else if (room.playbackState === 'paused' && !vidEl.paused) {
+      vidEl.pause();
+    }
+  } finally {
+    setTimeout(() => {
+      isApplyingRemoteSync = false;
+    }, 550);
+  }
+  return true;
+}
+
+async function sincronizarNavegacionConSala(room: WatchRoomState): Promise<void> {
+  if (!room || isSyncingRoomNavigation) return;
+  const targetAnimeId = Number(room.seasonId || room.animeId || 0);
+  const targetEp = Math.max(1, Number(room.episodeNum || 1));
+  const targetSeasonNum = Math.max(1, Number(room.seasonNum || 1));
+  if (!targetAnimeId) return;
+
+  const repScreen = document.getElementById('pantalla-reproductor');
+  const isPlayerVisible = Boolean(repScreen && !repScreen.classList.contains('hide'));
+
+  const findMatchingSeasonIdx = (): number => {
+    if (!Array.isArray(state.seasons) || state.seasons.length === 0) return -1;
+    if (room.seasonId) {
+      const byId = state.seasons.findIndex((s: any) => String(s?.id) === String(room.seasonId));
+      if (byId >= 0) return byId;
+    }
+    const byAnimeId = state.seasons.findIndex((s: any) => String(s?.id) === String(room.animeId));
+    if (byAnimeId >= 0 && state.seasons[byAnimeId]?.seasonNumber === targetSeasonNum) {
+      return byAnimeId;
+    }
+    const bySeasonNum = state.seasons.findIndex(
+      (s: any) => Number(s?.seasonNumber || 1) === targetSeasonNum
+    );
+    return bySeasonNum;
+  };
+
+  const currentAnimeMatches =
+    Boolean(state.anime?.id) &&
+    (String(state.anime?.id) === String(room.animeId) ||
+      String(state.anime?.id) === String(room.seasonId) ||
+      findMatchingSeasonIdx() >= 0);
+
+  isSyncingRoomNavigation = true;
+  isApplyingRemoteSync = true;
+  try {
+    if (!currentAnimeMatches) {
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const done = () => {
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+        };
+        void uiHooks.abrirDetalle(targetAnimeId, done).finally(done);
+      });
+    }
+
+    const matchedIdx = findMatchingSeasonIdx();
+    if (matchedIdx >= 0 && matchedIdx !== state.temporadaActualIdx) {
+      state.temporadaActualIdx = matchedIdx;
+      renderDetalleEpisodios();
+    }
+
+    const currentSeason = state.seasons?.[state.temporadaActualIdx] || { seasonNumber: 1 };
+    const needOpenOrSwitchEp =
+      !isPlayerVisible ||
+      Number(state.epActual) !== targetEp ||
+      Number(currentSeason.seasonNumber || 1) !== targetSeasonNum;
+
+    if (needOpenOrSwitchEp) {
+      if (!isPlayerVisible) {
+        abrirReproductor(targetEp);
+      } else {
+        cambiarEpisodioRep(targetEp, true);
+      }
+    }
+  } finally {
+    setTimeout(() => {
+      isSyncingRoomNavigation = false;
+      isApplyingRemoteSync = false;
+    }, 900);
+  }
+}
+
 function renderWatchTogetherMessagesAndMeta(): void {
   const msgsEl = document.getElementById('wt-chat-messages');
   const partsEl = document.getElementById('wt-participants-row');
   const syncMetaEl = document.getElementById('wt-sync-meta');
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  const myUid = fbUser?.uid || '';
+  const playToggleBtn = document.getElementById('wt-btn-play-toggle');
+  const myUid = getMyWatchUid();
 
   if (partsEl) {
     partsEl.innerHTML =
       activeRoomParticipants.length === 0
         ? '<span class="wt-part-chip">Conectando participantes...</span>'
         : activeRoomParticipants
-            .map((p) => `<span class="wt-part-chip">${escHtml(p.displayName || 'Otaku')}</span>`)
+            .map((p) => `<span class="wt-part-chip">🟢 ${escHtml(p.displayName || 'Otaku')}</span>`)
             .join('');
   }
 
-  if (syncMetaEl && activeRoomData) {
-    const stateIcon = activeRoomData.playbackState === 'playing' ? '▶ Reproduciendo' : '⏸ Pausado';
-    syncMetaEl.textContent = `${stateIcon} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(activeRoomData.playbackTime || 0)}`;
+  if (activeRoomData) {
+    const isPlaying = activeRoomData.playbackState === 'playing';
+    const liveTimeSec = computeTargetSyncedTime(activeRoomData, Date.now());
+    const actorSuffix = activeRoomData.updatedByName
+      ? ` · por ${activeRoomData.updatedByName}`
+      : '';
+    if (syncMetaEl) {
+      const stateIcon = isPlaying ? '▶ En vivo' : '⏸ En pausa';
+      syncMetaEl.textContent = `${stateIcon} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
+    }
+    if (playToggleBtn) {
+      playToggleBtn.textContent = isPlaying ? '⏸ Pausar' : '▶ Reproducir';
+      playToggleBtn.classList.toggle('is-playing', isPlaying);
+    }
   }
 
   if (msgsEl) {
@@ -1244,7 +1512,7 @@ function renderWatchTogetherMessagesAndMeta(): void {
     } else {
       msgsEl.innerHTML = activeRoomMessages
         .map((m) => {
-          const isMine = myUid && m.uid === myUid;
+          const isMine = Boolean(myUid && m.uid === myUid);
           return `
             <div class="wt-chat-msg ${isMine ? 'mine' : ''}">
               <span class="wt-chat-author">${escHtml(m.displayName || 'Usuario')}:</span>
@@ -1269,30 +1537,20 @@ export function renderWatchTogetherPanel(): void {
   panel.classList.toggle('hide', !watchTogetherOpen);
   if (!watchTogetherOpen) return;
 
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  const isLoggedIn = Boolean(fbUser && !fbUser.isAnonymous);
-
   if (!activeRoomId) {
+    panel.dataset.roomId = '';
     panel.innerHTML = `
       <div class="wt-panel-header">
         <div>
           <div class="wt-title">👥 Sala Compartida (Watch Together)</div>
-          <div class="wt-sub">Sincroniza play, pausa, salto de tiempo y episodio en vivo por Firestore.</div>
+          <div class="wt-sub">Sincroniza play, pausa, tiempo exacto y episodio en vivo con amigos usando Firestore.</div>
         </div>
         <button type="button" class="wt-close-btn" onclick="toggleWatchTogetherPanel()">✕</button>
       </div>
-      ${
-        !isLoggedIn
-          ? `<div class="wt-auth-notice">
-              <span>Conecta tu cuenta de Google para crear o unirte a salas en tiempo real.</span>
-              <button type="button" class="oled-btn-secondary" onclick="window.iniciarSesionGoogle()">Conectar con Google</button>
-            </div>`
-          : ''
-      }
       <div class="wt-lobby-actions">
         <button type="button" class="wt-create-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="crearSalaWatchTogether()">🎬 Crear Sala Nueva</button>
         <div class="wt-join-row">
-          <input type="text" id="wt-join-code-input" class="wt-code-input" placeholder="Código (ej. NY-AB1234)" maxlength="16" aria-label="Código de sala">
+          <input type="text" id="wt-join-code-input" class="wt-code-input" placeholder="Código (ej. NY-AB1234)" maxlength="16" aria-label="Código de sala" onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaWatchTogether(); }">
           <button type="button" class="wt-join-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="unirseSalaWatchTogether()">Unirse</button>
         </div>
       </div>
@@ -1312,6 +1570,17 @@ export function renderWatchTogetherPanel(): void {
         <div style="display:flex; gap:6px; align-items:center;">
           <button type="button" class="wt-action-chip" onclick="copiarEnlaceSalaWatchTogether()">🔗 Invitar</button>
           <button type="button" class="wt-action-chip danger" onclick="salirSalaWatchTogether()">Salir</button>
+        </div>
+      </div>
+      <div class="wt-sync-controls-bar">
+        <button type="button" id="wt-btn-play-toggle" class="wt-ctrl-btn primary" onclick="togglePlayPauseWatchTogether()">⏸ Pausar</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(-15)">⏪ -15s</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(15)">⏩ +15s</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(85)">⚡ +85s</button>
+        <button type="button" class="wt-ctrl-btn" title="Sincronizar mi reproductor con el tiempo de la sala" onclick="forzarSincronizacionWatchTogether()">🔄 Sincronizar</button>
+        <div class="wt-manual-time-group">
+          <input type="text" id="wt-manual-time-input" class="wt-time-input" placeholder="MM:SS" maxlength="8" aria-label="Saltar a minuto exacto" onkeydown="if(event.key==='Enter'){ event.preventDefault(); aplicarTiempoManualWatchTogether(); }">
+          <button type="button" class="wt-ctrl-btn" onclick="aplicarTiempoManualWatchTogether()">Ir</button>
         </div>
       </div>
       <div class="wt-participants-row" id="wt-participants-row"></div>
@@ -1336,6 +1605,105 @@ export function toggleWatchTogetherPanel(): void {
   renderWatchTogetherPanel();
 }
 
+export async function togglePlayPauseWatchTogether(): Promise<void> {
+  if (!activeRoomId || !activeRoomData) return;
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  const nextState: 'playing' | 'paused' =
+    activeRoomData.playbackState === 'playing' ? 'paused' : 'playing';
+  const currentSec = getEffectiveRoomTimeSeconds();
+
+  if (vidEl) {
+    isApplyingRemoteSync = true;
+    try {
+      if (nextState === 'playing') {
+        void vidEl.play().catch(() => {});
+      } else {
+        vidEl.pause();
+      }
+    } finally {
+      setTimeout(() => {
+        isApplyingRemoteSync = false;
+      }, 350);
+    }
+  }
+  await broadcastWatchTogetherState(nextState, currentSec);
+}
+
+export async function seekWatchTogether(deltaSeconds: number): Promise<void> {
+  if (!activeRoomId || !activeRoomData) return;
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  const baseSec = getEffectiveRoomTimeSeconds();
+  const targetSec = computeSafeSeekTarget(baseSec, deltaSeconds, vidEl?.duration);
+
+  if (vidEl) {
+    isApplyingRemoteSync = true;
+    vidEl.currentTime = targetSec;
+    activeVideoLastTickPos = targetSec;
+    setTimeout(() => {
+      isApplyingRemoteSync = false;
+    }, 350);
+  }
+  await broadcastWatchTogetherState(activeRoomData.playbackState, targetSec);
+  showToast(`⏱️ Sala sincronizada a ${formatPlaybackTime(targetSec)}`);
+}
+
+export async function aplicarTiempoManualWatchTogether(): Promise<void> {
+  if (!activeRoomId || !activeRoomData) return;
+  const input = document.getElementById('wt-manual-time-input') as HTMLInputElement | null;
+  const parsed = parseTimecodeInput(input?.value || '');
+  if (parsed === null) {
+    showToast('Ingresa un tiempo válido (ej. 04:30 o 120).');
+    return;
+  }
+  if (input) input.value = '';
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  const targetSec = computeSafeSeekTarget(parsed, 0, vidEl?.duration);
+  if (vidEl) {
+    isApplyingRemoteSync = true;
+    vidEl.currentTime = targetSec;
+    activeVideoLastTickPos = targetSec;
+    setTimeout(() => {
+      isApplyingRemoteSync = false;
+    }, 350);
+  }
+  await broadcastWatchTogetherState(activeRoomData.playbackState, targetSec);
+  showToast(`⏱️ Sala saltó a ${formatPlaybackTime(targetSec)}`);
+}
+
+export async function forzarSincronizacionWatchTogether(): Promise<void> {
+  if (!activeRoomId || !activeRoomData) return;
+  const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+  if (vidEl && applyRoomSyncToNativeVideo(activeRoomData, true)) {
+    showToast(`🔄 Sincronizado con la sala (${formatPlaybackTime(computeTargetSyncedTime(activeRoomData))})`);
+  } else {
+    await broadcastWatchTogetherState(activeRoomData.playbackState, getEffectiveRoomTimeSeconds());
+    showToast(`🔄 Tiempo de sala: ${formatPlaybackTime(computeTargetSyncedTime(activeRoomData))}`);
+  }
+}
+
+function startWatchTogetherClockTicker(): void {
+  if (_watchTogetherClockTimer) clearInterval(_watchTogetherClockTimer);
+  _watchTogetherClockTimer = setInterval(() => {
+    if (!activeRoomId || !activeRoomData) return;
+    const syncMetaEl = document.getElementById('wt-sync-meta');
+    if (syncMetaEl) {
+      const isPlaying = activeRoomData.playbackState === 'playing';
+      const liveTimeSec = computeTargetSyncedTime(activeRoomData, Date.now());
+      const actorSuffix = activeRoomData.updatedByName
+        ? ` · por ${activeRoomData.updatedByName}`
+        : '';
+      syncMetaEl.textContent = `${isPlaying ? '▶ En vivo' : '⏸ En pausa'} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
+    }
+  }, 1000);
+}
+
+function stopWatchTogetherClockTicker(): void {
+  if (_watchTogetherClockTimer) {
+    clearInterval(_watchTogetherClockTimer);
+    _watchTogetherClockTimer = null;
+  }
+}
+
 function attachWatchTogetherSubscription(roomId: string): void {
   if (roomUnsubscribe) {
     roomUnsubscribe();
@@ -1345,9 +1713,12 @@ function attachWatchTogetherSubscription(roomId: string): void {
   if (!bridge?.subscribeRoom) return;
 
   activeRoomId = roomId;
+  lastAppliedRoomUpdatedAtMs = 0;
   const panel = document.getElementById('watch-together-panel');
   if (panel) panel.dataset.roomId = '';
   renderWatchTogetherPanel();
+  renderHomeWatchTogetherBanner();
+  startWatchTogetherClockTicker();
 
   roomUnsubscribe = bridge.subscribeRoom(roomId, {
     onRoom: (room: WatchRoomState | null) => {
@@ -1361,38 +1732,35 @@ function attachWatchTogetherSubscription(roomId: string): void {
       activeRoomData = room;
       renderWatchTogetherMessagesAndMeta();
 
-      const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-      const myUid = fbUser?.uid || '';
-      const isHost = Boolean(myUid && room.hostUid === myUid);
+      const myUid = getMyWatchUid();
+      const currentSeason = state.seasons?.[state.temporadaActualIdx] || {
+        id: state.anime?.id,
+        seasonNumber: 1
+      };
+      const repScreen = document.getElementById('pantalla-reproductor');
+      const isPlayerVisible = Boolean(repScreen && !repScreen.classList.contains('hide'));
 
-      if (
-        Number(room.animeId) > 0 &&
-        String(room.animeId) === String(state.anime?.id) &&
-        Number(room.episodeNum) > 0 &&
-        Number(room.episodeNum) !== Number(state.epActual)
-      ) {
-        isApplyingRemoteSync = true;
-        cambiarEpisodioRep(Number(room.episodeNum), true);
-        setTimeout(() => { isApplyingRemoteSync = false; }, 1200);
+      const animeMismatch =
+        Number(room.animeId || room.seasonId || 0) > 0 &&
+        String(state.anime?.id || '') !== String(room.animeId || '') &&
+        String(currentSeason.id || '') !== String(room.seasonId || room.animeId || '');
+      const seasonMismatch =
+        Number(room.seasonNum || 0) > 0 &&
+        Number(currentSeason.seasonNumber || 1) !== Number(room.seasonNum);
+      const epMismatch =
+        Number(room.episodeNum || 0) > 0 &&
+        Number(state.epActual || 0) !== Number(room.episodeNum);
+
+      if (!isPlayerVisible || animeMismatch || seasonMismatch || epMismatch) {
+        lastAppliedRoomUpdatedAtMs = Number(room.updatedAtMs || Date.now());
+        void sincronizarNavegacionConSala(room);
         return;
       }
 
-      const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
-      if (vidEl && !isHost) {
-        const targetTime = computeTargetSyncedTime(room, Date.now(), vidEl.duration);
-        isApplyingRemoteSync = true;
-        try {
-          if (shouldSeekForDrift(vidEl.currentTime || 0, targetTime, 2.0)) {
-            vidEl.currentTime = targetTime;
-            activeVideoLastTickPos = targetTime;
-          }
-          if (room.playbackState === 'playing' && vidEl.paused) {
-            void vidEl.play().catch(() => {});
-          } else if (room.playbackState === 'paused' && !vidEl.paused) {
-            vidEl.pause();
-          }
-        } finally {
-          setTimeout(() => { isApplyingRemoteSync = false; }, 450);
+      if (shouldApplyRemotePlaybackUpdate(room, myUid, lastAppliedRoomUpdatedAtMs)) {
+        const applied = applyRoomSyncToNativeVideo(room, false);
+        if (applied) {
+          lastAppliedRoomUpdatedAtMs = Number(room.updatedAtMs || Date.now());
         }
       }
     },
@@ -1411,6 +1779,7 @@ function attachWatchTogetherSubscription(roomId: string): void {
 }
 
 async function detachWatchTogetherLocal(): Promise<void> {
+  stopWatchTogetherClockTicker();
   if (roomUnsubscribe) {
     roomUnsubscribe();
     roomUnsubscribe = null;
@@ -1419,9 +1788,11 @@ async function detachWatchTogetherLocal(): Promise<void> {
   activeRoomData = null;
   activeRoomParticipants = [];
   activeRoomMessages = [];
+  lastAppliedRoomUpdatedAtMs = 0;
   const panel = document.getElementById('watch-together-panel');
   if (panel) panel.dataset.roomId = '';
   renderWatchTogetherPanel();
+  renderHomeWatchTogetherBanner();
 }
 
 export async function crearSalaWatchTogether(): Promise<void> {
@@ -1430,19 +1801,21 @@ export async function crearSalaWatchTogether(): Promise<void> {
     showToast('Módulo de Watch Together aún inicializando.');
     return;
   }
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  if (!fbUser || fbUser.isAnonymous) {
-    showToast('Inicia sesión con Google para crear una sala compartida.');
-    return;
-  }
   isWatchTogetherBusy = true;
   renderWatchTogetherPanel();
   try {
     const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
-    const currentSeason = state.seasons?.[state.temporadaActualIdx] || { seasonNumber: 1 };
+    const currentSeason = state.seasons?.[state.temporadaActualIdx] || {
+      id: state.anime?.id,
+      seasonNumber: 1,
+      title: state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'
+    };
     const code = await bridge.createRoom({
-      animeId: Number(state.anime?.id || 0),
-      animeTitle: String(state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'),
+      animeId: Number(state.anime?.id || currentSeason.id || 0),
+      seasonId: Number(currentSeason.id || state.anime?.id || 0),
+      animeTitle: String(
+        currentSeason.title || state.anime?.title?.english || state.anime?.title?.romaji || 'Anime'
+      ),
       seasonNum: Number(currentSeason.seasonNumber || 1),
       episodeNum: Number(state.epActual || 1),
       playbackState: vidEl && vidEl.paused ? 'paused' : 'playing',
@@ -1461,16 +1834,14 @@ export async function crearSalaWatchTogether(): Promise<void> {
 
 export async function unirseSalaWatchTogether(codeArg?: string): Promise<void> {
   const bridge = getWatchTogetherBridge();
-  if (!bridge?.joinRoom) return;
+  if (!bridge?.joinRoom) {
+    showToast('Módulo de Watch Together aún inicializando.');
+    return;
+  }
   const input = document.getElementById('wt-join-code-input') as HTMLInputElement | null;
   const code = normalizeRoomCode(codeArg || input?.value || '');
   if (!code || code.length < 4) {
     showToast('Ingresa un código de sala válido (ej. NY-AB1234).');
-    return;
-  }
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  if (!fbUser || fbUser.isAnonymous) {
-    showToast('Inicia sesión con Google para unirte a una sala.');
     return;
   }
   isWatchTogetherBusy = true;
@@ -1479,7 +1850,9 @@ export async function unirseSalaWatchTogether(codeArg?: string): Promise<void> {
     const room = await bridge.joinRoom(code);
     activeRoomData = room;
     watchTogetherOpen = true;
+    await sincronizarNavegacionConSala(room);
     attachWatchTogetherSubscription(room.roomId);
+    applyRoomSyncToNativeVideo(room, true);
     showToast(`Conectado a sala ${room.roomId} ✓`);
   } catch (err: any) {
     showToast(err?.message || 'No se encontró esa sala.');
@@ -1492,38 +1865,31 @@ export async function unirseSalaWatchTogether(codeArg?: string): Promise<void> {
 export async function abrirSalaWatchTogetherDesdeCodigo(codeArg: string): Promise<void> {
   const code = normalizeRoomCode(codeArg);
   if (!code) return;
-  const bridge = getWatchTogetherBridge();
+
+  const waitForBridge = async (): Promise<any> => {
+    for (let i = 0; i < 20; i++) {
+      const b = getWatchTogetherBridge();
+      if (b?.joinRoom) return b;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return null;
+  };
+
+  const bridge = await waitForBridge();
   if (!bridge?.joinRoom) {
     showToast('Servicio de Watch Together no disponible todavía.');
     return;
   }
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  if (!fbUser || fbUser.isAnonymous) {
-    watchTogetherOpen = true;
-    if (state.anime?.id) {
-      abrirReproductor(state.epActual || 1);
-      renderWatchTogetherPanel();
-    } else {
-      showToast('Inicia sesión con Google para unirte a la sala compartida.', {
-        label: 'Ir a Perfil',
-        onClick: () => nWin.cambiarTab?.('perfil')
-      });
-    }
-    return;
-  }
+
   try {
+    showToast(`Conectando a sala ${code}...`);
     const room = await bridge.joinRoom(code);
     activeRoomData = room;
     watchTogetherOpen = true;
-    if (room.animeId && String(room.animeId) !== String(state.anime?.id)) {
-      await uiHooks.abrirDetalle(room.animeId, () => {
-        abrirReproductor(room.episodeNum || 1);
-        attachWatchTogetherSubscription(room.roomId);
-      });
-    } else {
-      abrirReproductor(room.episodeNum || 1);
-      attachWatchTogetherSubscription(room.roomId);
-    }
+    await sincronizarNavegacionConSala(room);
+    attachWatchTogetherSubscription(room.roomId);
+    applyRoomSyncToNativeVideo(room, true);
+    showToast(`🎬 Unido a sala ${room.roomId} · ${room.animeTitle} Ep ${room.episodeNum}`);
   } catch (err: any) {
     showToast(err?.message || 'No se pudo entrar a la sala compartida.');
   }
@@ -1532,8 +1898,8 @@ export async function abrirSalaWatchTogetherDesdeCodigo(codeArg: string): Promis
 export async function salirSalaWatchTogether(): Promise<void> {
   const roomToLeave = activeRoomId;
   const bridge = getWatchTogetherBridge();
-  const fbUser = nWin.FirebaseAuth?.getCurrentUser ? nWin.FirebaseAuth.getCurrentUser() : null;
-  const isHost = Boolean(roomToLeave && fbUser?.uid && activeRoomData?.hostUid === fbUser.uid);
+  const myUid = getMyWatchUid();
+  const isHost = Boolean(roomToLeave && myUid && activeRoomData?.hostUid === myUid);
   await detachWatchTogetherLocal();
   if (roomToLeave && bridge?.leaveRoom) {
     await bridge.leaveRoom(roomToLeave, isHost).catch(() => {});
@@ -1546,9 +1912,9 @@ export function copiarEnlaceSalaWatchTogether(): void {
   const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(activeRoomId)}`;
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(url).then(() => {
-      showToast(`Enlace de sala ${activeRoomId} copiado ✓`);
+      showToast(`Enlace y código (${activeRoomId}) copiados ✓`);
     }).catch(() => {
-      showToast(`Código: ${activeRoomId}`);
+      showToast(`Código de sala: ${activeRoomId}`);
     });
   } else {
     showToast(`Código de sala: ${activeRoomId}`);
@@ -1748,11 +2114,21 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
   const seasonNum = currentSeason.seasonNumber || 1;
   const seasonId = currentSeason.id || state.anime?.id;
   let resumeApplied = false;
+  let initialRoomSyncDone = !activeRoomId;
   resetWatchTimeTrackers();
 
   vidEl.addEventListener('loadedmetadata', () => {
     if (resumeApplied || !state.anime?.id) return;
     resumeApplied = true;
+    if (activeRoomId && activeRoomData) {
+      applyRoomSyncToNativeVideo(activeRoomData, true);
+      setTimeout(() => {
+        initialRoomSyncDone = true;
+      }, 650);
+      syncMediaSessionMetadata(activeEp);
+      return;
+    }
+    initialRoomSyncDone = true;
     const saved = HistoryManager.getProgress(state.anime.id, seasonNum, activeEp);
     const totalDuration = Number.isFinite(vidEl.duration) && vidEl.duration > 0 ? vidEl.duration : (saved?.duration || 0);
     if (saved && shouldResumePlayback(saved.currentTime, totalDuration)) {
@@ -1774,11 +2150,13 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
 
   vidEl.addEventListener('play', () => {
     activeVideoLastTickPos = vidEl.currentTime || 0;
+    if (activeRoomId && !initialRoomSyncDone) return;
     void broadcastWatchTogetherState('playing');
   });
 
   vidEl.addEventListener('seeked', () => {
     activeVideoLastTickPos = vidEl.currentTime || 0;
+    if (activeRoomId && !initialRoomSyncDone) return;
     void broadcastWatchTogetherState();
   });
 
@@ -1836,7 +2214,9 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
   vidEl.addEventListener('pause', () => {
     flushWatchTimeBuffers(true);
     activeVideoLastTickPos = vidEl.currentTime || 0;
-    void broadcastWatchTogetherState('paused');
+    if (!activeRoomId || initialRoomSyncDone) {
+      void broadcastWatchTogetherState('paused');
+    }
     if (!state.anime?.id || !Number.isFinite(vidEl.duration) || vidEl.duration <= 0) return;
     HistoryManager.saveProgress(
       state.anime,

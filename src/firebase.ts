@@ -50,6 +50,7 @@ import {
 } from './utils/libraryEnhancements.ts';
 import {
   generateRoomCode,
+  getOrCreateWatchClientIdentity,
   normalizeRoomCode,
   sanitizeWatchChatText,
   type WatchRoomState
@@ -1921,38 +1922,58 @@ export interface WatchRoomMessageRecord {
   createdAt: Timestamp | null;
 }
 
+const WT_GUEST_UID_KEY = 'nyanime_wt_guest_uid';
+
+function resolveActiveWatchIdentity() {
+  let storedGuestUid: string | null = null;
+  try {
+    storedGuestUid = localStorage.getItem(WT_GUEST_UID_KEY);
+  } catch {
+    storedGuestUid = null;
+  }
+  const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : null;
+  const identity = getOrCreateWatchClientIdentity(auth.currentUser, localProfile, storedGuestUid);
+  if (identity.isGuest) {
+    try {
+      localStorage.setItem(WT_GUEST_UID_KEY, identity.uid);
+    } catch {
+      // ignore storage quota
+    }
+  }
+  return {
+    ...identity,
+    avatar: sanitizeAvatarForCloud(identity.avatar, DEFAULT_AVATAR_URL)
+  };
+}
+
 export const FirebaseWatchTogetherBridge = {
   isAuthenticated() {
     return Boolean(auth.currentUser);
   },
 
-  getCurrentUid(): string | null {
-    return auth.currentUser?.uid || null;
+  getCurrentUid(): string {
+    return resolveActiveWatchIdentity().uid;
   },
 
   async createRoom(input: {
     animeId: number;
+    seasonId?: number;
     animeTitle: string;
     seasonNum: number;
     episodeNum: number;
     playbackTime: number;
     playbackState: 'playing' | 'paused';
   }): Promise<string> {
-    const user = auth.currentUser;
-    if (!user) throw new Error('Inicia sesión con tu cuenta NyAnime para crear una sala compartida.');
+    const identity = resolveActiveWatchIdentity();
     const roomId = generateRoomCode();
-    const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
-    const hostName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Anfitrión')
-      .trim()
-      .slice(0, 80) || 'Anfitrión';
-    const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
+    const hostName = (identity.displayName || 'Anfitrión').trim().slice(0, 80) || 'Anfitrión';
     const now = Date.now();
     const roomPath = `watch_rooms/${roomId}`;
 
     try {
-      await setDoc(doc(db, 'watch_rooms', roomId), {
+      const payload: Record<string, unknown> = {
         roomId,
-        hostUid: user.uid,
+        hostUid: identity.uid,
         hostName,
         animeId: Math.max(0, Math.floor(Number(input.animeId || 0))),
         animeTitle: String(input.animeTitle || 'Anime').slice(0, 240),
@@ -1961,16 +1982,22 @@ export const FirebaseWatchTogetherBridge = {
         playbackState: input.playbackState === 'playing' ? 'playing' : 'paused',
         playbackTime: Math.max(0, Number(input.playbackTime || 0)),
         updatedAtMs: now,
+        updatedByUid: identity.uid,
+        updatedByName: hostName,
         status: 'active',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      if (typeof input.seasonId === 'number' && Number.isFinite(input.seasonId) && input.seasonId >= 0) {
+        payload.seasonId = Math.floor(input.seasonId);
+      }
+      await setDoc(doc(db, 'watch_rooms', roomId), payload);
 
-      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid), {
-        uid: user.uid,
+      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', identity.uid), {
+        uid: identity.uid,
         roomId,
         displayName: hostName,
-        avatar,
+        avatar: identity.avatar,
         lastSeenMs: now,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -1982,8 +2009,7 @@ export const FirebaseWatchTogetherBridge = {
   },
 
   async joinRoom(roomIdRaw: string): Promise<WatchRoomState> {
-    const user = auth.currentUser;
-    if (!user) throw new Error('Inicia sesión para unirte a la sala compartida.');
+    const identity = resolveActiveWatchIdentity();
     const roomId = normalizeRoomCode(roomIdRaw);
     const roomPath = `watch_rooms/${roomId}`;
     try {
@@ -1995,16 +2021,12 @@ export const FirebaseWatchTogetherBridge = {
       if (data.status !== 'active') {
         throw new Error(`La sala ${roomId} ya terminó.`);
       }
-      const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
-      const displayName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Invitado')
-        .trim()
-        .slice(0, 80) || 'Invitado';
-      const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
-      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid), {
-        uid: user.uid,
+      const displayName = (identity.displayName || 'Invitado').trim().slice(0, 80) || 'Invitado';
+      await setDoc(doc(db, 'watch_rooms', roomId, 'participants', identity.uid), {
+        uid: identity.uid,
         roomId,
         displayName,
-        avatar,
+        avatar: identity.avatar,
         lastSeenMs: Date.now(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -2022,6 +2044,7 @@ export const FirebaseWatchTogetherBridge = {
     roomIdRaw: string,
     patch: {
       animeId?: number;
+      seasonId?: number;
       animeTitle?: string;
       seasonNum?: number;
       episodeNum?: number;
@@ -2029,21 +2052,35 @@ export const FirebaseWatchTogetherBridge = {
       playbackTime: number;
     }
   ): Promise<void> {
-    const user = auth.currentUser;
-    if (!user) return;
+    const identity = resolveActiveWatchIdentity();
     const roomId = normalizeRoomCode(roomIdRaw);
+    if (!roomId) return;
     const path = `watch_rooms/${roomId}`;
+    const actorName = (identity.displayName || 'Usuario').trim().slice(0, 80) || 'Usuario';
     try {
       const fields: Record<string, unknown> = {
         playbackState: patch.playbackState === 'playing' ? 'playing' : 'paused',
-        playbackTime: Math.max(0, Number(patch.playbackTime || 0)),
+        playbackTime: Math.max(0, Math.min(86400, Number(patch.playbackTime || 0))),
         updatedAtMs: Date.now(),
+        updatedByUid: identity.uid,
+        updatedByName: actorName,
         updatedAt: serverTimestamp()
       };
-      if (typeof patch.animeId === 'number') fields.animeId = Math.max(0, Math.floor(patch.animeId));
-      if (typeof patch.animeTitle === 'string' && patch.animeTitle) fields.animeTitle = patch.animeTitle.slice(0, 240);
-      if (typeof patch.seasonNum === 'number') fields.seasonNum = Math.max(1, Math.floor(patch.seasonNum));
-      if (typeof patch.episodeNum === 'number') fields.episodeNum = Math.max(1, Math.floor(patch.episodeNum));
+      if (typeof patch.animeId === 'number' && Number.isFinite(patch.animeId) && patch.animeId >= 0) {
+        fields.animeId = Math.floor(patch.animeId);
+      }
+      if (typeof patch.seasonId === 'number' && Number.isFinite(patch.seasonId) && patch.seasonId >= 0) {
+        fields.seasonId = Math.floor(patch.seasonId);
+      }
+      if (typeof patch.animeTitle === 'string' && patch.animeTitle) {
+        fields.animeTitle = patch.animeTitle.slice(0, 240);
+      }
+      if (typeof patch.seasonNum === 'number' && Number.isFinite(patch.seasonNum)) {
+        fields.seasonNum = Math.max(1, Math.floor(patch.seasonNum));
+      }
+      if (typeof patch.episodeNum === 'number' && Number.isFinite(patch.episodeNum)) {
+        fields.episodeNum = Math.max(1, Math.floor(patch.episodeNum));
+      }
       await updateDoc(doc(db, 'watch_rooms', roomId), fields);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
@@ -2051,24 +2088,19 @@ export const FirebaseWatchTogetherBridge = {
   },
 
   async sendChatMessage(roomIdRaw: string, rawText: string): Promise<void> {
-    const user = auth.currentUser;
-    if (!user) throw new Error('Inicia sesión para chatear en la sala.');
+    const identity = resolveActiveWatchIdentity();
     const roomId = normalizeRoomCode(roomIdRaw);
     const cleanText = sanitizeWatchChatText(rawText);
-    if (!cleanText) return;
-    const localProfile = win.UserManager?.getUser ? win.UserManager.getUser() : {};
-    const displayName = (user.displayName || localProfile.username || user.email?.split('@')[0] || 'Usuario')
-      .trim()
-      .slice(0, 80) || 'Usuario';
-    const avatar = sanitizeAvatarForCloud(localProfile.avatar || user.photoURL, DEFAULT_AVATAR_URL);
-    const msgId = sanitizeDocId(`m_${user.uid.slice(0, 10)}_${Date.now()}`);
+    if (!cleanText || !roomId) return;
+    const displayName = (identity.displayName || 'Usuario').trim().slice(0, 80) || 'Usuario';
+    const msgId = sanitizeDocId(`m_${identity.uid.slice(0, 14)}_${Date.now()}`);
     const path = `watch_rooms/${roomId}/messages/${msgId}`;
     try {
       await setDoc(doc(db, 'watch_rooms', roomId, 'messages', msgId), {
-        uid: user.uid,
+        uid: identity.uid,
         roomId,
         displayName,
-        avatar,
+        avatar: identity.avatar,
         text: cleanText,
         createdAt: serverTimestamp()
       });
@@ -2078,14 +2110,14 @@ export const FirebaseWatchTogetherBridge = {
   },
 
   async leaveRoom(roomIdRaw: string, closeIfHost = false): Promise<void> {
-    const user = auth.currentUser;
-    if (!user || !roomIdRaw) return;
+    if (!roomIdRaw) return;
+    const identity = resolveActiveWatchIdentity();
     const roomId = normalizeRoomCode(roomIdRaw);
     try {
-      await deleteDoc(doc(db, 'watch_rooms', roomId, 'participants', user.uid)).catch(() => {});
+      await deleteDoc(doc(db, 'watch_rooms', roomId, 'participants', identity.uid)).catch(() => {});
       if (closeIfHost) {
         const snap = await getDoc(doc(db, 'watch_rooms', roomId)).catch(() => null);
-        if (snap?.exists() && snap.data()?.hostUid === user.uid) {
+        if (snap?.exists() && snap.data()?.hostUid === identity.uid) {
           await updateDoc(doc(db, 'watch_rooms', roomId), {
             status: 'closed',
             updatedAt: serverTimestamp()
@@ -2095,6 +2127,32 @@ export const FirebaseWatchTogetherBridge = {
     } catch {
       // Best-effort cleanup
     }
+  },
+
+  subscribeActiveRooms(onRooms: (rooms: WatchRoomState[]) => void): () => void {
+    const q = query(collection(db, 'watch_rooms'), orderBy('updatedAtMs', 'desc'), limit(8));
+    return onSnapshot(
+      q,
+      (snap) => {
+        const now = Date.now();
+        const active: WatchRoomState[] = [];
+        snap.forEach((d) => {
+          const data = d.data() as WatchRoomState;
+          if (
+            data &&
+            data.status === 'active' &&
+            data.roomId &&
+            now - Number(data.updatedAtMs || 0) < 3 * 3600 * 1000
+          ) {
+            active.push(data);
+          }
+        });
+        onRooms(active);
+      },
+      () => {
+        onRooms([]);
+      }
+    );
   },
 
   subscribeRoom(

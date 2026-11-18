@@ -34,6 +34,9 @@
     <div class="topbar">
       <h1>NyAnime TV</h1>
       <div class="topbar-actions">
+        <button type="button" class="topbar-wt-pill" id="btn-home-watch-together" onclick="toggleHomeWatchTogetherBar()" title="Salas Watch Together en vivo" aria-label="Watch Together">
+          👥 Sala <span class="topbar-wt-dot hide" id="home-wt-live-dot"></span>
+        </button>
         <button type="button" class="topbar-icon" id="btn-install-pwa-header" onclick="window.NyAnimePWA?.install()" title="Instalar App en tu dispositivo" aria-label="Instalar aplicación">
           <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14zm-4-6h3l-4 4-4-4h3V9h2v4z"/></svg>
         </button>
@@ -46,6 +49,8 @@
         </button>
       </div>
     </div>
+
+    <div id="home-watch-together-banner" class="home-wt-banner hide"></div>
 
     <div class="hero-container" id="hero-container"></div>
 

@@ -575,6 +575,10 @@
         "animeId": {
           "type": "integer"
         },
+        "seasonId": {
+          "type": "integer",
+          "description": "ID opcional de la temporada activa en AniList."
+        },
         "animeTitle": {
           "type": "string",
           "minLength": 1,
@@ -595,6 +599,15 @@
         },
         "updatedAtMs": {
           "type": "integer"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByName": {
+          "type": "string",
+          "maxLength": 80
         },
         "status": {
           "type": "string",

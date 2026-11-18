@@ -167,19 +167,33 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidWatchActor(actorUid) {
+      return actorUid is string
+        && actorUid.size() >= 1
+        && actorUid.size() <= 128
+        && actorUid.matches('^[a-zA-Z0-9_\\-]+$')
+        && (
+          (request.auth != null && actorUid == request.auth.uid)
+          || (request.auth == null && actorUid.matches('^guest_[a-zA-Z0-9_\\-]{6,64}$'))
+        );
+    }
+
     function isValidWatchRoom(data, roomId) {
       return data.keys().hasAll(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'createdAt', 'updatedAt'])
         && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 32 && data.roomId == roomId
         && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
         && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 80
         && data.animeId is int && data.animeId >= 0
+        && (!('seasonId' in data) || (data.seasonId is int && data.seasonId >= 0))
         && data.animeTitle is string && data.animeTitle.size() >= 1 && data.animeTitle.size() <= 240
         && data.seasonNum is int && data.seasonNum >= 1 && data.seasonNum <= 200
         && data.episodeNum is int && data.episodeNum >= 1 && data.episodeNum <= 10000
         && data.playbackState in ['playing', 'paused']
         && data.playbackTime is number && data.playbackTime >= 0 && data.playbackTime <= 86400
         && data.updatedAtMs is int && data.updatedAtMs >= 0
+        && (!('updatedByUid' in data) || isValidWatchActor(data.updatedByUid))
+        && (!('updatedByName' in data) || (data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 80))
         && data.status in ['active', 'closed']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -188,7 +202,7 @@ service cloud.firestore {
     function isValidWatchRoomParticipant(data, roomId, participantId) {
       return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
-        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid && participantId == request.auth.uid
+        && isValidWatchActor(data.uid) && participantId == data.uid
         && data.roomId is string && data.roomId == roomId
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
         && data.avatar is string && data.avatar.size() <= 40000
@@ -200,7 +214,7 @@ service cloud.firestore {
     function isValidWatchRoomMessage(data, roomId) {
       return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'text', 'createdAt'])
         && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'text', 'createdAt'])
-        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && isValidWatchActor(data.uid)
         && data.roomId is string && data.roomId == roomId
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
         && data.avatar is string && data.avatar.size() <= 40000
@@ -243,7 +257,7 @@ service cloud.firestore {
     // Community Episode Comments
     match /episodes/{episodeKey}/comments/{commentId} {
       allow get: if isValidId(episodeKey) && isValidId(commentId) && isSignedIn();
-      allow list: if isValidId(episodeKey) && isSignedIn() && existing().episodeKey == episodeKey;
+      allow list: if isValidId(episodeKey) && isSignedIn();
       allow create: if isValidId(episodeKey) && isValidId(commentId)
         && isSignedIn()
         && isValidEpisodeComment(incoming(), episodeKey)
@@ -256,64 +270,54 @@ service cloud.firestore {
 
     // Real-Time Watch Together Rooms
     match /watch_rooms/{roomId} {
-      allow get: if isValidId(roomId) && isSignedIn();
-      allow list: if isSignedIn() && existing().hostUid == request.auth.uid;
+      allow get: if isValidId(roomId);
+      allow list: if request.query.limit <= 20;
       allow create: if isValidId(roomId)
-        && isSignedIn()
         && isValidWatchRoom(incoming(), roomId)
-        && incoming().hostUid == request.auth.uid
+        && isValidWatchActor(incoming().hostUid)
         && incoming().status == 'active'
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isValidId(roomId)
-        && isSignedIn()
         && existing().status == 'active'
-        && existing().hostUid == request.auth.uid
         && isValidWatchRoom(incoming(), roomId)
         && incoming().roomId == existing().roomId
         && incoming().hostUid == existing().hostUid
+        && incoming().hostName == existing().hostName
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'updatedAt']);
       allow delete: if isValidId(roomId)
-        && isSignedIn()
-        && existing().hostUid == request.auth.uid;
+        && isValidWatchActor(existing().hostUid);
 
       match /participants/{participantId} {
-        allow get: if isValidId(roomId) && isValidId(participantId) && isSignedIn();
-        allow list: if isValidId(roomId) && isSignedIn() && existing().roomId == roomId;
+        allow get: if isValidId(roomId) && isValidId(participantId);
+        allow list: if isValidId(roomId);
         allow create: if isValidId(roomId) && isValidId(participantId)
-          && isSignedIn()
           && isValidWatchRoomParticipant(incoming(), roomId, participantId)
           && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
         allow update: if isValidId(roomId) && isValidId(participantId)
-          && isSignedIn()
-          && existing().uid == request.auth.uid
           && isValidWatchRoomParticipant(incoming(), roomId, participantId)
           && incoming().uid == existing().uid
           && incoming().roomId == existing().roomId
-          && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'lastSeenMs', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt']);
         allow delete: if isValidId(roomId) && isValidId(participantId)
-          && isSignedIn()
-          && existing().uid == request.auth.uid;
+          && isValidWatchActor(existing().uid);
       }
 
       match /messages/{messageId} {
-        allow get: if isValidId(roomId) && isValidId(messageId) && isSignedIn();
-        allow list: if isValidId(roomId) && isSignedIn() && existing().roomId == roomId;
+        allow get: if isValidId(roomId) && isValidId(messageId);
+        allow list: if isValidId(roomId);
         allow create: if isValidId(roomId) && isValidId(messageId)
-          && isSignedIn()
           && isValidWatchRoomMessage(incoming(), roomId)
           && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
           && incoming().createdAt == request.time;
         allow update: if false;
         allow delete: if isValidId(roomId) && isValidId(messageId)
-          && isSignedIn()
-          && existing().uid == request.auth.uid;
+          && isValidWatchActor(existing().uid);
       }
     }
 
@@ -340,7 +344,7 @@ service cloud.firestore {
       // Anime Favorites Subcollection
       match /favorites/{favoriteId} {
         allow get: if isValidId(userId) && isValidId(favoriteId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(favoriteId)
           && isOwner(userId)
           && isValidFavoriteAnime(incoming())
@@ -360,7 +364,7 @@ service cloud.firestore {
       // Deduplicated Anime Watched Episodes Subcollection
       match /anime_watched/{seasonId} {
         allow get: if isValidId(userId) && isValidId(seasonId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(seasonId)
           && isOwner(userId)
           && isValidAnimeWatchedEntry(incoming(), seasonId)
@@ -380,7 +384,7 @@ service cloud.firestore {
       // Manga Favorites Subcollection
       match /manga_favorites/{mangaId} {
         allow get: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(mangaId)
           && isOwner(userId)
           && isValidFavoriteManga(incoming())
@@ -400,7 +404,7 @@ service cloud.firestore {
       // Anime Watch History Subcollection
       match /history/{historyId} {
         allow get: if isValidId(userId) && isValidId(historyId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(historyId)
           && isOwner(userId)
           && isValidWatchHistoryEntry(incoming())
@@ -420,7 +424,7 @@ service cloud.firestore {
       // Manga Reading Progress Subcollection
       match /manga_progress/{mangaId} {
         allow get: if isValidId(userId) && isValidId(mangaId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(mangaId)
           && isOwner(userId)
           && isValidMangaProgressEntry(incoming())
@@ -440,7 +444,7 @@ service cloud.firestore {
       // User Settings & Reminders Subcollection
       match /settings/{settingId} {
         allow get: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(settingId)
           && isOwner(userId)
           && isValidUserSettings(incoming())
@@ -459,7 +463,7 @@ service cloud.firestore {
       // User Custom Lists Subcollection
       match /custom_lists/{listId} {
         allow get: if isValidId(userId) && isValidId(listId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(listId)
           && isOwner(userId)
           && isValidCustomList(incoming(), listId)
@@ -479,7 +483,7 @@ service cloud.firestore {
       // User Push Subscriptions Subcollection
       match /push_subscriptions/{subId} {
         allow get: if isValidId(userId) && isValidId(subId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(subId)
           && isOwner(userId)
           && isValidPushSubscriptionEntry(incoming(), subId)
@@ -499,7 +503,7 @@ service cloud.firestore {
       // User Suggestions Subcollection
       match /suggestions/{suggestionId} {
         allow get: if isValidId(userId) && isValidId(suggestionId) && isOwner(userId);
-        allow list: if isOwner(userId) && resource.data.uid == request.auth.uid;
+        allow list: if isValidId(userId) && isOwner(userId);
         allow create: if isValidId(userId) && isValidId(suggestionId)
           && isOwner(userId)
           && isValidUserSuggestion(incoming())

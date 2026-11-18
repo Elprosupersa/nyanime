@@ -38,7 +38,7 @@ import {
   sanitizeUserScore
 } from '../utils/libraryEnhancements.ts';
 import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
-import { extractRoomCodeFromSearch } from '../utils/watchTogether.ts';
+import { extractRoomCodeFromLocation } from '../utils/watchTogether.ts';
 import { formatRelativeTime } from '../utils/sanitize.ts';
 import * as OfflineService from '../services/offline.ts';
 
@@ -1035,17 +1035,13 @@ export function initApp(): void {
   setupTouchGestures();
 
   nWin.handleAndroidBackButton = handleAndroidBackButton;
+  (nWin as { initHomeWatchTogetherListener?: () => void }).initHomeWatchTogetherListener?.();
 
-  const inviteRoomCode = extractRoomCodeFromSearch(window.location.search);
+  const inviteRoomCode = extractRoomCodeFromLocation(window.location, document.referrer);
   if (inviteRoomCode) {
     setTimeout(() => {
-      showToast(`Invitación a Sala Compartida ${inviteRoomCode}`, {
-        label: 'Unirse ahora',
-        onClick: () => {
-          void nWin.abrirSalaWatchTogetherDesdeCodigo?.(inviteRoomCode);
-        }
-      });
-    }, 650);
+      void nWin.abrirSalaWatchTogetherDesdeCodigo?.(inviteRoomCode);
+    }, 350);
   }
 
   if (!nWin._nyLifecycleFlushesBound) {

@@ -4896,6 +4896,132 @@
       font-weight: 800;
       cursor: pointer;
     }
+    .topbar-wt-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.05);
+      color: #f8fafc;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.18s ease;
+    }
+    .topbar-wt-pill:hover,
+    .topbar-wt-pill.active {
+      border-color: rgba(255, 26, 64, 0.55);
+      background: rgba(255, 26, 64, 0.16);
+      color: #ffffff;
+    }
+    .topbar-wt-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #ff1a40;
+      box-shadow: 0 0 8px #ff1a40;
+    }
+    .topbar-wt-dot.hide {
+      display: none;
+    }
+    .home-wt-banner {
+      margin: 0 16px 14px 16px;
+    }
+    .home-wt-banner.hide {
+      display: none;
+    }
+    .home-wt-banner-inner {
+      padding: 14px;
+      border-radius: 14px;
+      background: linear-gradient(145deg, rgba(20, 22, 31, 0.96), rgba(11, 13, 19, 0.98));
+      border: 1px solid rgba(255, 26, 64, 0.38);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .home-wt-banner-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .home-wt-banner-title {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #ffffff;
+    }
+    .home-wt-banner-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .home-wt-live-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .home-wt-live-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 26, 64, 0.09);
+      border: 1px solid rgba(255, 26, 64, 0.32);
+    }
+    .home-wt-live-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
+    .home-wt-live-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .home-wt-live-badge {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #ff4d6d;
+      letter-spacing: 0.04em;
+    }
+    .home-wt-live-host {
+      font-size: 11px;
+      color: #cbd5e1;
+    }
+    .home-wt-live-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .home-wt-join-live-btn {
+      min-height: 36px;
+      padding: 6px 14px;
+      border-radius: 9px;
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .home-wt-code-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
     .watch-together-panel {
       margin: 12px 0;
       padding: 14px;
@@ -5016,6 +5142,57 @@
     .wt-action-chip.danger {
       border-color: rgba(255, 77, 109, 0.38);
       color: #fda4af;
+    }
+    .wt-sync-controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .wt-ctrl-btn {
+      min-height: 32px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.05);
+      color: #f1f5f9;
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .wt-ctrl-btn:hover {
+      border-color: var(--primary);
+      background: rgba(255, 26, 64, 0.14);
+    }
+    .wt-ctrl-btn.primary {
+      background: rgba(255, 26, 64, 0.2);
+      border-color: rgba(255, 26, 64, 0.5);
+      color: #ffffff;
+    }
+    .wt-manual-time-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+    .wt-time-input {
+      width: 68px;
+      min-height: 32px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: #050507;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 11.5px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
     }
     .wt-participants-row {
       display: flex;

@@ -219,8 +219,17 @@ export const RealCommentsManager = {
       this.renderLoadedList(container, animeId, ep, fbUser.uid);
     } catch (err) {
       if (countEl) countEl.textContent = '(0)';
-      const msg = err instanceof Error ? err.message : 'Error cargando comentarios';
-      container.innerHTML = `<div style="text-align:center; padding:16px; color:#fca5a5; font-size:12px;">${escapeHTML(msg)}</div>`;
+      const rawMsg = err instanceof Error ? err.message : 'Error cargando comentarios';
+      let friendlyMsg = 'No se pudieron cargar los comentarios en este momento.';
+      if (!rawMsg.trim().startsWith('{') && !rawMsg.includes('Missing or insufficient permissions')) {
+        friendlyMsg = rawMsg;
+      }
+      container.innerHTML = `
+        <div style="text-align:center; padding:18px 14px; color:var(--text-secondary); font-size:12px; background:rgba(255,255,255,0.02); border:1px dashed var(--border-color); border-radius:12px;">
+          <div style="margin-bottom:8px;">${escapeHTML(friendlyMsg)}</div>
+          <button type="button" class="chip active" style="padding:6px 14px;" onclick="CommentsManager.render(${Number(animeId)}, ${Number(ep)})">🔄 Reintentar</button>
+        </div>
+      `;
     }
   },
 
