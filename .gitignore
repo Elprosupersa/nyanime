@@ -84,3 +84,13 @@ nyaa_batch2_results.json
 *.iml
 .DS_Store
 Thumbs.db
+
+# Build & PWA dev artifacts
+dist/
+dev-dist/
+coverage/
+
+# Blindaje extra para archivos de entorno (conservando plantilla)
+.env.*
+!.env.example
+
