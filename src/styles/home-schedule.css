@@ -1,0 +1,373 @@
+    /* --- PANTALLA EMISIÓN (CALENDARIO / HORARIOS MEJORADO) --- */
+    #pantalla-emision {
+      padding-bottom: 40px;
+      max-width: 1280px;
+      margin: 0 auto;
+      width: 100%;
+      overflow-x: hidden;
+    }
+    .emision-topbar-meta {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .emision-live-clock {
+      font-size: 12px; font-weight: 700; color: var(--text-muted);
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      padding: 6px 12px; border-radius: var(--radius-md);
+      font-variant-numeric: tabular-nums;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .emision-season-subtitle {
+      padding: 0 20px 14px 20px;
+      font-size: 13px; color: var(--text-muted);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+    .emision-jump-today-btn {
+      background: var(--primary-light); color: var(--primary);
+      border: 1px solid var(--border-active);
+      padding: 5px 12px; border-radius: var(--radius-md);
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      transition: var(--transition); white-space: nowrap;
+    }
+    .emision-jump-today-btn:hover {
+      background: var(--primary); color: #fff;
+    }
+
+    /* Hero Destacado del Día en Calendario */
+    .emision-featured-wrap {
+      padding: 0 20px 18px 20px;
+    }
+    .emision-featured-card {
+      position: relative; border-radius: var(--radius-xl); overflow: hidden;
+      min-height: 195px; background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      display: flex; flex-direction: column; justify-content: flex-end;
+      cursor: pointer; transition: var(--transition);
+    }
+    .emision-featured-card:hover {
+      border-color: var(--border-active);
+    }
+    .emision-featured-bg {
+      position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+      filter: brightness(0.65) saturate(1.1);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .emision-featured-card:hover .emision-featured-bg {
+      transform: scale(1.03);
+    }
+    .emision-featured-scrim {
+      position: absolute; inset: 0;
+      background: linear-gradient(to top, rgba(5, 5, 7, 0.96) 10%, rgba(5, 5, 7, 0.55) 60%, rgba(5, 5, 7, 0.25) 100%);
+    }
+    .emision-featured-content {
+      position: relative; z-index: 2; padding: 18px 20px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .emision-featured-kicker {
+      font-size: 11px; font-weight: 700; color: #ff4d6d;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .emision-featured-title {
+      font-size: clamp(18px, 2.5vw, 24px); font-weight: 800; color: #fff;
+      line-height: 1.2; text-wrap: balance;
+    }
+    .emision-featured-meta {
+      font-size: 12px; color: #cbd5e1; font-weight: 500;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .emision-featured-actions {
+      display: flex; align-items: center; gap: 10px; margin-top: 4px; flex-wrap: wrap;
+    }
+    .emision-btn-primary {
+      background: var(--primary); color: #fff; border: none;
+      padding: 9px 16px; border-radius: var(--radius-md);
+      font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;
+      cursor: pointer; transition: var(--transition); white-space: nowrap;
+      min-height: 40px;
+    }
+    .emision-btn-primary:hover { background: var(--primary-hover); }
+    .emision-btn-secondary {
+      background: rgba(12, 13, 18, 0.85); color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 9px 14px; border-radius: var(--radius-md);
+      font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+      cursor: pointer; transition: var(--transition); white-space: nowrap;
+      min-height: 40px; backdrop-filter: blur(8px);
+    }
+    .emision-btn-secondary.reminded, .emision-btn-secondary:hover {
+      border-color: var(--primary); color: #ff4d6d; background: rgba(255, 26, 64, 0.14);
+    }
+
+    /* Selector Semanal de 7 Días */
+    .schedule-day-chips {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(74px, 1fr));
+      gap: 8px; overflow-x: auto; padding: 0 20px 14px 20px; scrollbar-width: none;
+    }
+    .schedule-day-chips::-webkit-scrollbar { display: none; }
+    .schedule-day-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 10px 8px;
+      min-height: 68px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      cursor: pointer; transition: var(--transition);
+      position: relative; color: var(--text-main);
+      font-family: inherit;
+    }
+    .schedule-day-btn:hover {
+      border-color: rgba(255, 255, 255, 0.22);
+      background: var(--bg-card-hover);
+    }
+    .schedule-day-btn.active {
+      background: rgba(255, 26, 64, 0.15);
+      border-color: var(--primary);
+      box-shadow: 0 6px 18px rgba(255, 26, 64, 0.18);
+    }
+    .schedule-day-name {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
+      color: var(--text-muted); text-transform: uppercase;
+    }
+    .schedule-day-btn.active .schedule-day-name { color: #ff4d6d; }
+    .schedule-day-date {
+      font-size: 15px; font-weight: 800; color: var(--text-main);
+      font-variant-numeric: tabular-nums;
+    }
+    .schedule-day-count {
+      font-size: 10px; font-weight: 600; color: var(--text-dim);
+      font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    .schedule-day-btn.active .schedule-day-count { color: #f8fafc; }
+    .schedule-today-tag {
+      font-size: 9px; font-weight: 800; color: var(--primary);
+      letter-spacing: 0.05em; text-transform: uppercase;
+    }
+
+    /* Barra de herramientas del Calendario (Búsqueda, Filtros y Vista) */
+    .emision-toolbar {
+      padding: 0 20px 14px 20px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .emision-search-row {
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    .emision-search-box {
+      flex: 1; min-width: 220px; position: relative;
+    }
+    .emision-search-box input {
+      width: 100%; padding: 11px 16px 11px 40px;
+      border-radius: var(--radius-lg); border: 1px solid var(--border-color);
+      background: var(--bg-card); color: var(--text-main);
+      font-family: inherit; font-size: 13px; outline: none;
+      transition: var(--transition);
+    }
+    .emision-search-box input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-light);
+    }
+    .emision-search-box svg {
+      position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+      width: 16px; height: 16px; fill: var(--text-muted);
+    }
+    .emision-controls-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    }
+    .emision-filter-tabs {
+      display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+    }
+    .emision-filter-tabs::-webkit-scrollbar { display: none; }
+    .emision-tab-btn {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      color: var(--text-muted); font-family: inherit;
+      font-size: 12px; font-weight: 600; padding: 7px 13px;
+      border-radius: var(--radius-md); cursor: pointer;
+      transition: var(--transition); white-space: nowrap; min-height: 36px;
+    }
+    .emision-tab-btn.active, .emision-tab-btn:hover {
+      background: var(--primary-light); color: #ff4d6d; border-color: var(--primary);
+    }
+    .emision-sort-view-group {
+      display: flex; align-items: center; gap: 8px; margin-left: auto;
+    }
+    .emision-select {
+      background: var(--bg-card); color: var(--text-main);
+      border: 1px solid var(--border-color); border-radius: var(--radius-md);
+      padding: 7px 10px; font-family: inherit; font-size: 12px; font-weight: 600;
+      outline: none; cursor: pointer; min-height: 36px;
+    }
+    .emision-view-toggle {
+      display: inline-flex; background: var(--bg-card);
+      border: 1px solid var(--border-color); border-radius: var(--radius-md);
+      padding: 2px;
+    }
+    .emision-view-btn {
+      background: transparent; border: none; color: var(--text-muted);
+      padding: 6px 10px; border-radius: 7px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: var(--transition);
+    }
+    .emision-view-btn svg { width: 16px; height: 16px; fill: currentColor; }
+    .emision-view-btn.active {
+      background: var(--primary-light); color: var(--primary);
+    }
+
+    /* Resumen de métricas del día */
+    .emision-stats-bar {
+      padding: 0 20px 14px 20px;
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;
+    }
+    .emision-stat-item {
+      background: var(--bg-card); border: 1px solid var(--border-color);
+      border-radius: var(--radius-md); padding: 10px 14px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .emision-stat-val {
+      font-size: 18px; font-weight: 800; color: var(--text-main);
+      font-variant-numeric: tabular-nums;
+    }
+    .emision-stat-lbl {
+      font-size: 11px; color: var(--text-muted); font-weight: 500;
+    }
+
+    /* Contenedor de Tarjetas de Emisión */
+    .schedule-timeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+      gap: 12px; padding: 0 20px;
+    }
+    @media (max-width: 480px) {
+      .schedule-timeline-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .schedule-day-group-header {
+      grid-column: 1 / -1;
+      font-size: 15px; font-weight: 800; color: var(--text-main);
+      padding: 14px 4px 4px 4px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .schedule-card {
+      display: flex; gap: 12px; background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg); padding: 12px;
+      cursor: pointer; transition: var(--transition);
+      position: relative; align-items: stretch;
+      min-width: 0; max-width: 100%; overflow: hidden;
+    }
+    .schedule-card:hover {
+      border-color: rgba(255, 26, 64, 0.5);
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+    }
+    .schedule-card.aired-card {
+      border-color: rgba(52, 211, 153, 0.22);
+    }
+    .schedule-thumb {
+      width: 82px; height: 118px; border-radius: var(--radius-md);
+      overflow: hidden; flex-shrink: 0; position: relative;
+      background: #14161f;
+    }
+    .schedule-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .schedule-thumb-time {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.92), rgba(0,0,0,0.55));
+      color: #fff; font-size: 11px; font-weight: 800;
+      text-align: center; padding: 4px 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .schedule-info {
+      flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between;
+    }
+    .schedule-top-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      font-size: 11px; color: var(--text-muted); font-weight: 600;
+      font-variant-numeric: tabular-nums; margin-bottom: 3px;
+    }
+    .schedule-title {
+      font-size: 14px; font-weight: 700; margin-bottom: 4px; line-height: 1.3;
+      color: var(--text-main);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .schedule-submeta {
+      font-size: 11px; color: var(--text-muted); margin-bottom: 8px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .schedule-bottom-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: auto; flex-wrap: wrap;
+    }
+    .schedule-countdown {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #34d399;
+      min-width: 0;
+    }
+    .schedule-countdown.upcoming {
+      color: #fbbf24;
+    }
+    .schedule-card-actions {
+      display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+    }
+    .schedule-action-btn {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: var(--transition);
+    }
+    .schedule-action-btn:hover {
+      border-color: var(--primary); color: var(--text-main);
+    }
+    .schedule-action-btn.active {
+      background: var(--primary-light); border-color: var(--primary); color: var(--primary);
+    }
+    .schedule-action-btn svg { width: 15px; height: 15px; fill: currentColor; }
+    .schedule-watch-btn {
+      padding: 6px 10px; border-radius: 8px;
+      background: rgba(255, 26, 64, 0.14); border: 1px solid rgba(255, 26, 64, 0.35);
+      color: #ff4d6d; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: var(--transition); white-space: nowrap;
+      font-family: inherit;
+    }
+    .schedule-watch-btn:hover {
+      background: var(--primary); color: #fff;
+    }
+
+    @media (max-width: 768px) {
+      .emision-tab-btn,
+      .emision-select,
+      .emision-jump-today-btn,
+      .schedule-watch-btn {
+        min-height: 44px;
+      }
+      .emision-view-btn {
+        min-width: 44px;
+        min-height: 40px;
+      }
+      .schedule-action-btn {
+        width: 44px;
+        height: 44px;
+      }
+      .emision-search-box {
+        min-width: 0;
+        width: 100%;
+      }
+    }
+    @media (max-width: 430px) {
+      .emision-season-subtitle,
+      .emision-featured-wrap,
+      .schedule-day-chips,
+      .emision-toolbar,
+      .emision-stats-bar,
+      .schedule-timeline-grid {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+    }
+
+

@@ -15,6 +15,7 @@ import {
   cerrarModales,
   escHtml,
   generarPortadaSVG,
+  isAnimeBatchDownloadRunning,
   nWin,
   safeImg,
   setupTouchGestures,
@@ -23,6 +24,7 @@ import {
   uiHooks
 } from './appState.ts';
 import { ensureModalsMounted, setupAvatarOptions } from './modals.ts';
+import { resolveModalDismissBehavior } from '../utils/uiPolishHelpers.ts';
 import {
   ANIME_LIST_CATEGORIES,
   computeLibrarySummary,
@@ -1018,8 +1020,18 @@ export function handleAndroidBackButton(): string {
     return 'HANDLED';
   }
 
-  const activeModal = document.querySelector('.modal-overlay.active, .modal-overlay.open, .ny-dialog.active, .ny-dialog.open');
+  const activeModal = document.querySelector<HTMLElement>('.modal-overlay.active, .modal-overlay.open, .ny-dialog.active, .ny-dialog.open');
   if (activeModal) {
+    const behavior = resolveModalDismissBehavior(activeModal.id, {
+      isBatchDownloadRunning: isAnimeBatchDownloadRunning()
+    });
+    if (behavior === 'blocked') {
+      return 'HANDLED';
+    }
+    if (behavior === 'minimize' && typeof nWin.cerrarOMinimizarModalDescargaTemporada === 'function') {
+      nWin.cerrarOMinimizarModalDescargaTemporada();
+      return 'HANDLED';
+    }
     cerrarModales();
     return 'HANDLED';
   }

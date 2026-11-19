@@ -10,6 +10,11 @@ import {
   uiHooks
 } from './appState.ts';
 import { collectDueAiringNotifications } from '../utils/pushNotifications.ts';
+import {
+  buildSkeletonListHtml,
+  buildStateCardHtml,
+  createRequestGuard
+} from '../utils/uiPolishHelpers.ts';
 
 const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DIAS_SEMANA_CORTOS = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
@@ -18,6 +23,9 @@ const ORDEN_DIAS_SEMANA = [1, 2, 3, 4, 5, 6, 0];
 const NOTIFIED_AIRINGS_KEY = 'nyanime_notified_airings_v1';
 
 let simulcastsCache: any[] = [];
+let scheduleLoading = false;
+let scheduleLoadError: string | null = null;
+const scheduleRequestGuard = createRequestGuard();
 const scheduleState: {
   filter: string;
   sort: string;
@@ -282,6 +290,8 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
   if (!forceRefresh) {
     const cached = CacheManager.get(cacheKey);
     if (cached && Array.isArray(cached) && cached.length > 0) {
+      scheduleLoading = false;
+      scheduleLoadError = null;
       simulcastsCache = cached.map((a, i) => normalizarItemCalendario(a, i));
       renderEmisionDiasChips();
       renderEmisionDia(state.diaEmisionActual);
@@ -297,9 +307,13 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
     }
   }
 
+  const { seq, signal } = scheduleRequestGuard.next();
+  scheduleLoading = true;
+  scheduleLoadError = null;
+
   const container = document.getElementById('schedule-cards-container');
-  if (container && forceRefresh) {
-    container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  if (container && (forceRefresh || simulcastsCache.length === 0)) {
+    container.innerHTML = buildSkeletonListHtml(5);
   }
 
   const query = `
@@ -335,9 +349,12 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
     const res = await fetch(ANILIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query }),
+      signal
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (!scheduleRequestGuard.isCurrent(seq)) return;
     const list1 = data?.data?.rel1?.media || [];
     const list2 = data?.data?.rel2?.media || [];
     const mergedMap = new Map<number, any>();
@@ -347,8 +364,13 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
       }
     });
     const rawList = Array.from(mergedMap.values());
+    if (rawList.length === 0) {
+      throw new Error('No se recibieron animes en emisión.');
+    }
     CacheManager.set(cacheKey, rawList);
     simulcastsCache = rawList.map((a, i) => normalizarItemCalendario(a, i));
+    scheduleLoading = false;
+    scheduleLoadError = null;
     renderEmisionDiasChips();
     renderEmisionDia(state.diaEmisionActual);
     void checkAndNotifyAiringEpisodes(simulcastsCache);
@@ -361,7 +383,10 @@ export async function cargarEmisionCalendario(forceRefresh = false): Promise<voi
     }
     if (forceRefresh) showToast('Calendario de emisiones actualizado');
   } catch (e) {
+    if (!scheduleRequestGuard.isCurrent(seq)) return;
     console.warn('Error cargando calendario:', e);
+    scheduleLoading = false;
+    scheduleLoadError = 'No pudimos conectar con el calendario de simulcasts en este momento.';
     renderEmisionDiasChips();
     renderEmisionDia(state.diaEmisionActual);
   }
@@ -675,7 +700,18 @@ export function renderEmisionDia(diaIdx: number): void {
   container.innerHTML = '';
 
   if (!simulcastsCache || simulcastsCache.length === 0) {
-    container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+    if (scheduleLoading) {
+      container.innerHTML = buildSkeletonListHtml(5);
+      return;
+    }
+    container.innerHTML = buildStateCardHtml({
+      kind: 'error',
+      icon: '📡',
+      title: 'Calendario no disponible',
+      message: scheduleLoadError || 'No se pudieron cargar los estrenos de esta semana.',
+      retryLabel: '🔄 Reintentar',
+      retryOnClick: 'cargarEmisionCalendario(true)'
+    });
     return;
   }
 
@@ -708,12 +744,14 @@ export function renderEmisionDia(diaIdx: number): void {
   }
 
   if (baseList.length === 0) {
-    container.innerHTML = `
-      <div style="text-align:center; color:var(--text-muted); padding:36px 20px; font-size:13px;">
-        <div style="font-size:15px; font-weight:700; color:var(--text-main); margin-bottom:6px;">Sin resultados en este filtro</div>
-        <div>Prueba cambiando el filtro activo o seleccionando otro día de la semana.</div>
-      </div>
-    `;
+    container.innerHTML = buildStateCardHtml({
+      kind: 'empty',
+      icon: '🗓️',
+      title: 'Sin resultados en este filtro',
+      message: 'Prueba cambiando el filtro activo o seleccionando otro día de la semana.',
+      retryLabel: scheduleState.filter !== 'ALL' ? 'Ver todo el día' : undefined,
+      retryOnClick: scheduleState.filter !== 'ALL' ? "cambiarFiltroEmision('ALL')" : undefined
+    });
     return;
   }
 

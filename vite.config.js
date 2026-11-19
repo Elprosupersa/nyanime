@@ -444,7 +444,7 @@ function nyanimeServerProxyPlugin() {
       }
 
       const abortCtrl = new AbortController();
-      const connectTimer = setTimeout(() => abortCtrl.abort(), 15000);
+      const connectTimer = setTimeout(() => abortCtrl.abort(), 20000);
       let activeNodeStream = null;
       let activeUpstreamBody = null;
       const unbindAbort = bindClientDisconnectAbort(req, res, abortCtrl, () => {
@@ -617,7 +617,7 @@ function nyanimeServerProxyPlugin() {
         res.setHeader('Accept-Ranges', upstream.headers.get('accept-ranges') || 'bytes');
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Accel-Buffering', 'no');
-        if (isDownload) {
+        if (isDownload && upstream.status !== 206) {
           const safeFile = sanitizeDownloadFilename(parsed.searchParams.get('filename') || '', 'nyanime_episodio.mp4');
           res.setHeader('Content-Disposition', `attachment; filename="${safeFile}"`);
         }

@@ -20,17 +20,37 @@ import { ANIME_LIST_CATEGORIES, getCategoryMeta } from '../utils/profileStats.ts
 import { sanitizeUserScore } from '../utils/libraryEnhancements.ts';
 import {
   buildSeasonEpisodeRanges,
+  computeEpisodeRangeSelection,
   computeEpisodeSelectionByMode,
-  type DownloadPickerFilterMode
+  estimateAnimeBatchBytes,
+  formatAnimeEpisodeFilename,
+  formatBytesCompact,
+  isDirectMp4DownloadCandidate,
+  isQuotaExceededError,
+  type ActiveDownloadBatchSnapshot,
+  type ActiveDownloadEpisodeState,
+  type DownloadDestination,
+  type DownloadPickerFilterMode,
+  type StorageQuotaAssessment,
+  type VideoQualityPreference
 } from '../utils/downloadHelpers.ts';
+import { checkStorageSpaceForDownload, type AnimeDownloadProgress } from '../services/offline.ts';
 import { ensureModalsMounted } from './modals.ts';
 import {
   StreamExtractor,
   resolverContextoEpisodio,
   videoSourceManager
 } from './playerView.ts';
+import { createRequestGuard } from '../utils/uiPolishHelpers.ts';
 
+const animeDetailGuard = createRequestGuard();
+const aniZipRequestGuard = createRequestGuard();
 let seasonDownloadAbortCtrl: AbortController | null = null;
+let seasonDownloadPaused = false;
+let seasonDownloadResumeResolvers: Array<() => void> = [];
+let seasonDownloadMinimized = false;
+let activeBatchSnapshot: ActiveDownloadBatchSnapshot | null = null;
+let lastManagerSyncAt = 0;
 let episodeMarkMode = false;
 let libraryMenuOpen = false;
 let dlModalWatchedSet = new Set<number>();
@@ -213,7 +233,9 @@ export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => voi
   aplicarMetadatosTemporadaUI(anime, anime);
   updateFavoriteButton(anime.id);
 
-  await resolverTemporadasAnime(anime);
+  const detailToken = animeDetailGuard.next();
+  await resolverTemporadasAnime(anime, detailToken.seq);
+  if (!animeDetailGuard.isCurrent(detailToken.seq)) return;
   if (onLoadedCallback) onLoadedCallback();
 }
 
@@ -299,7 +321,8 @@ async function postAniListResilient(bodyObj: Record<string, any>): Promise<any> 
   return await proxyRes.json();
 }
 
-export async function resolverTemporadasAnime(anime: any): Promise<void> {
+export async function resolverTemporadasAnime(anime: any, expectedSeq?: number): Promise<void> {
+  const guardSeq = typeof expectedSeq === 'number' ? expectedSeq : animeDetailGuard.next().seq;
   const cacheKey = `anime_franchise_v4_${anime.id}`;
   let cachedOrganized = CacheManager.get(cacheKey);
   const hasStaleReleasingZero =
@@ -319,13 +342,16 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
       const numericId = Number(anime?.id);
       if (Number.isFinite(numericId) && numericId > 0) {
         const data = await postAniListResilient({ query: ANILIST_FRANCHISE_QUERY, variables: { id: numericId } });
+        if (!animeDetailGuard.isCurrent(guardSeq)) return;
         primaryMedia = data?.data?.Media || anime;
       } else if (anime?.hentailaSlug && nWin.NyAnimeVideoSources?.parseHentaiLaMediaDetail) {
         try {
           const hlaMediaUrl = `https://hentaila.com/media/${encodeURIComponent(String(anime.hentailaSlug))}/__data.json`;
           const hlaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(hlaMediaUrl)}&probe=1`, {}, 3500);
+          if (!animeDetailGuard.isCurrent(guardSeq)) return;
           if (hlaRes.ok) {
             const hlaJson = await hlaRes.json().catch(() => null);
+            if (!animeDetailGuard.isCurrent(guardSeq)) return;
             const detail = nWin.NyAnimeVideoSources.parseHentaiLaMediaDetail(hlaJson);
             if (detail) {
               primaryMedia = {
@@ -345,6 +371,7 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
           // ignore
         }
       }
+      if (!animeDetailGuard.isCurrent(guardSeq)) return;
       if (primaryMedia) {
         if (anime?.hentailaSlug && !primaryMedia.hentailaSlug) {
           primaryMedia.hentailaSlug = anime.hentailaSlug;
@@ -409,14 +436,17 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
           query: ANILIST_FRONTIER_BATCH_QUERY,
           variables: { ids: frontier }
         });
+        if (!animeDetailGuard.isCurrent(guardSeq)) return;
         const batchMedia = batchJson?.data?.Page?.media || [];
         if (batchMedia.length === 0) break;
         collectedRoots.push(...batchMedia);
       }
     } catch {
+      if (!animeDetailGuard.isCurrent(guardSeq)) return;
       if (collectedRoots.length === 0) collectedRoots.push(anime);
     }
 
+    if (!animeDetailGuard.isCurrent(guardSeq)) return;
     state.fullMedia = primaryMedia;
 
     if (nWin.NyAnimeSeasons?.organizeAnimeFranchise) {
@@ -452,6 +482,7 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
     }
   }
 
+  if (!animeDetailGuard.isCurrent(guardSeq)) return;
   state.seasons = cachedOrganized.seasons || [];
   state.temporadaActualIdx = Math.min(cachedOrganized.initialIndex || 0, Math.max(0, state.seasons.length - 1));
   const activeSeason = state.seasons[state.temporadaActualIdx];
@@ -470,23 +501,28 @@ export async function resolverTemporadasAnime(anime: any): Promise<void> {
 
 export async function cargarAniZipMappingAsync(seasonAnimeId: number | string): Promise<any> {
   if (!seasonAnimeId) return null;
+  const { seq, signal } = aniZipRequestGuard.next();
   const cacheKey = `anizip_mapping_${seasonAnimeId}`;
   let mapping = CacheManager.get(cacheKey);
   if (!mapping) {
     try {
       const res = await fetchWithTimeout(
         `https://api.ani.zip/mappings?anilist_id=${seasonAnimeId}`,
-        { headers: { Accept: 'application/json' } },
+        { headers: { Accept: 'application/json' }, signal },
         2500
       );
+      if (!aniZipRequestGuard.isCurrent(seq)) return null;
       if (res.ok) {
         mapping = await res.json();
+        if (!aniZipRequestGuard.isCurrent(seq)) return null;
         CacheManager.set(cacheKey, mapping);
       }
     } catch {
+      if (!aniZipRequestGuard.isCurrent(seq)) return null;
       // ignore network error
     }
   }
+  if (!aniZipRequestGuard.isCurrent(seq)) return null;
   if (mapping && nWin.NyAnimeVideoSources?.extractEpisodeDetailsMap) {
     const metaMap = nWin.NyAnimeVideoSources.extractEpisodeDetailsMap(mapping);
     state.episodeMetaMap = metaMap;
@@ -1069,6 +1105,8 @@ export function renderDetalleEpisodios(): void {
 }
 
 export function cerrarDetalle(): void {
+  animeDetailGuard.invalidate();
+  aniZipRequestGuard.invalidate();
   state.seasonMenuOpen = false;
   libraryMenuOpen = false;
   document.getElementById('det-temporadas')?.classList.remove('open');
@@ -1076,14 +1114,160 @@ export function cerrarDetalle(): void {
   document.getElementById('pantalla-detalle')?.classList.add('hide');
 }
 
-function getCleanBaseTitleForFilename(rawTitle: string): string {
-  return String(rawTitle || 'Anime')
-    .replace(/\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b/gi, '')
-    .replace(/\bseason\s+\d+\b/gi, '')
-    .replace(/\btemporada\s+\d+\b/gi, '')
-    .replace(/[:\-–—]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+export function getActiveAnimeDownloadSnapshot(): ActiveDownloadBatchSnapshot | null {
+  if (!activeBatchSnapshot) return null;
+  return {
+    ...activeBatchSnapshot,
+    items: activeBatchSnapshot.items.map((it) => ({ ...it }))
+  };
+}
+
+function getSelectedDownloadDestination(): DownloadDestination {
+  const input = document.getElementById('select-destino-descarga') as HTMLInputElement | null;
+  const val = input?.value;
+  if (val === 'device' || val === 'both') return val;
+  return 'app';
+}
+
+export function seleccionarDestinoDescarga(dest: DownloadDestination): void {
+  const normalized: DownloadDestination = dest === 'device' || dest === 'both' ? dest : 'app';
+  const input = document.getElementById('select-destino-descarga') as HTMLInputElement | null;
+  if (input) input.value = normalized;
+  document.querySelectorAll('#dl-dest-options .dl-dest-card').forEach((card) => {
+    const isSelected = (card as HTMLElement).dataset.dest === normalized;
+    card.classList.toggle('active', isSelected);
+    card.setAttribute('aria-checked', isSelected ? 'true' : 'false');
+  });
+  actualizarResumenSeleccionDescarga();
+}
+
+function getSelectedVideoPreference(): VideoQualityPreference {
+  const qualityEl = document.getElementById('select-calidad-descarga') as HTMLSelectElement | null;
+  return qualityEl?.value === 'saver' || qualityEl?.value === '720p' ? 'saver' : 'auto';
+}
+
+function syncFloatingDownloadPill(): void {
+  const pill = document.getElementById('dl-floating-pill');
+  const textEl = document.getElementById('dl-floating-pill-text');
+  const pctEl = document.getElementById('dl-floating-pill-pct');
+  if (!pill) return;
+
+  const modalOpen = document.getElementById('modal-descarga-temporada')?.classList.contains('active');
+  const shouldShow =
+    Boolean(activeBatchSnapshot && activeBatchSnapshot.isRunning) &&
+    (seasonDownloadMinimized || !modalOpen);
+
+  if (!shouldShow || !activeBatchSnapshot) {
+    pill.classList.add('hide');
+    return;
+  }
+
+  const epLabel = activeBatchSnapshot.activeEpisode ? `Ep. ${activeBatchSnapshot.activeEpisode}` : 'Preparando';
+  const stateWord = activeBatchSnapshot.isPaused ? 'En pausa' : `Descargando ${epLabel}`;
+  if (textEl) textEl.textContent = `${stateWord} (${activeBatchSnapshot.completedCount}/${activeBatchSnapshot.totalCount})`;
+  if (pctEl) pctEl.textContent = `${activeBatchSnapshot.overallPercent}%`;
+  pill.classList.toggle('is-paused', activeBatchSnapshot.isPaused);
+  pill.classList.remove('hide');
+}
+
+function notifyDownloadManagerLive(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastManagerSyncAt < 350) return;
+  lastManagerSyncAt = now;
+  const managerModal = document.getElementById('modal-gestor-descargas');
+  if (managerModal?.classList.contains('active')) {
+    void DownloadManager.renderDownloadsModal();
+  }
+}
+
+function syncProgressPanelUI(): void {
+  const progBox = document.getElementById('season-dl-progress-box');
+  const progText = document.getElementById('season-dl-progress-text');
+  const progDetail = document.getElementById('season-dl-progress-detail');
+  const progPctEl = document.getElementById('season-dl-progress-pct');
+  const progBar = document.getElementById('season-dl-progress-bar') as HTMLElement | null;
+  const pauseBtn = document.getElementById('btn-pause-season-dl') as HTMLButtonElement | null;
+  const minBtn = document.getElementById('btn-minimize-season-dl') as HTMLButtonElement | null;
+  const cancelBtn = document.getElementById('btn-cancel-season-dl') as HTMLButtonElement | null;
+  const retryFailedBtn = document.getElementById('btn-retry-failed-dl') as HTMLButtonElement | null;
+
+  if (!activeBatchSnapshot) {
+    progBox?.classList.add('hide');
+    syncFloatingDownloadPill();
+    return;
+  }
+
+  const snap = activeBatchSnapshot;
+  const showPanel = snap.isRunning || snap.failedCount > 0;
+  progBox?.classList.toggle('hide', !showPanel);
+
+  if (progText) {
+    if (snap.isPaused) {
+      progText.textContent = `En pausa · ${snap.completedCount} de ${snap.totalCount} completados`;
+    } else if (snap.isRunning) {
+      const currentNum = Math.min(snap.totalCount, snap.completedCount + snap.failedCount + 1);
+      progText.textContent = `Descargando episodio ${currentNum} de ${snap.totalCount}`;
+    } else if (snap.failedCount > 0) {
+      progText.textContent = `Finalizado con ${snap.failedCount} error${snap.failedCount === 1 ? '' : 'es'} (${snap.completedCount}/${snap.totalCount} descargados)`;
+    } else {
+      progText.textContent = `Completado · ${snap.completedCount} de ${snap.totalCount}`;
+    }
+  }
+
+  if (progDetail) {
+    progDetail.textContent = snap.activeDetailText || '';
+    progDetail.classList.toggle('hide', !snap.activeDetailText);
+  }
+  if (progPctEl) progPctEl.textContent = `${snap.overallPercent}%`;
+  if (progBar) progBar.style.width = `${snap.overallPercent}%`;
+
+  if (pauseBtn) {
+    pauseBtn.classList.toggle('hide', !snap.isRunning);
+    pauseBtn.textContent = snap.isPaused ? '▶ Reanudar' : '⏸ Pausar';
+  }
+  if (minBtn) {
+    minBtn.classList.toggle('hide', !snap.isRunning);
+  }
+  if (cancelBtn) {
+    cancelBtn.classList.toggle('hide', !snap.isRunning);
+  }
+  if (retryFailedBtn) {
+    retryFailedBtn.classList.toggle('hide', snap.isRunning || snap.failedCount === 0);
+  }
+
+  syncFloatingDownloadPill();
+}
+
+function setEpisodeCardDownloadState(
+  ep: number,
+  text: string,
+  tone: 'idle' | 'active' | 'done' | 'warn' | 'error',
+  showRetry = false
+): void {
+  const card = document.querySelector(`#descarga-ep-list .dl-ep-card[data-ep="${ep}"]`) as HTMLElement | null;
+  const stateEl = card?.querySelector('.dl-ep-live-state') as HTMLElement | null;
+  if (!card || !stateEl) return;
+  stateEl.textContent = text;
+  stateEl.className = `dl-ep-live-state ${tone}`;
+
+  let retryBtn = card.querySelector('.dl-ep-retry-btn') as HTMLButtonElement | null;
+  if (showRetry) {
+    if (!retryBtn) {
+      retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'dl-ep-retry-btn';
+      retryBtn.textContent = 'Reintentar';
+      retryBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void reintentarEpisodioDescarga(ep);
+      });
+      card.appendChild(retryBtn);
+    }
+    retryBtn.classList.remove('hide');
+  } else if (retryBtn) {
+    retryBtn.remove();
+  }
 }
 
 export function actualizarResumenSeleccionDescarga(): void {
@@ -1097,16 +1281,17 @@ export function actualizarResumenSeleccionDescarga(): void {
   }
 
   const audioEl = document.getElementById('select-audio-descarga') as HTMLSelectElement | null;
-  const qualityEl = document.getElementById('select-calidad-descarga') as HTMLSelectElement | null;
-  const destEl = document.getElementById('select-destino-descarga') as HTMLSelectElement | null;
+  const videoPref = getSelectedVideoPreference();
+  const dest = getSelectedDownloadDestination();
   const audioLabel = audioEl?.value === 'DUB' ? 'Audio Latino' : 'Sub Español';
-  const qualityLabel = qualityEl?.value === '720p' ? '720p' : '1080p';
-  const destLabel = destEl?.value === 'cache' ? 'Solo app' : 'Offline + .MP4';
+  const qualityLabel = videoPref === 'saver' ? 'Ahorro' : 'Auto';
+  const destLabel =
+    dest === 'device' ? 'Archivo .MP4' : dest === 'both' ? 'App + .MP4' : 'En la app';
 
   const footerSum = document.getElementById('dl-footer-summary');
   if (footerSum) {
     footerSum.textContent = count > 0
-      ? `${count} ${count === 1 ? 'episodio' : 'episodios'} · ${qualityLabel} · ${audioLabel} · ${destLabel}`
+      ? `${count} ${count === 1 ? 'episodio' : 'episodios'} · ${audioLabel} · ${qualityLabel} · ${destLabel}`
       : 'Ningún episodio seleccionado';
   }
 
@@ -1122,14 +1307,74 @@ export function actualizarResumenSeleccionDescarga(): void {
     const cb = card.querySelector('.cb-dl-ep') as HTMLInputElement | null;
     card.classList.toggle('selected', Boolean(cb?.checked));
   });
+
+  void actualizarAvisoCuotaAnime(count, videoPref, dest);
 }
 
-function setEpisodeCardDownloadState(ep: number, text: string, tone: 'idle' | 'active' | 'done' | 'warn' | 'error'): void {
-  const card = document.querySelector(`#descarga-ep-list .dl-ep-card[data-ep="${ep}"]`) as HTMLElement | null;
-  const stateEl = card?.querySelector('.dl-ep-live-state') as HTMLElement | null;
-  if (!card || !stateEl) return;
-  stateEl.textContent = text;
-  stateEl.className = `dl-ep-live-state ${tone}`;
+function renderStorageQuotaBanner(el: HTMLElement | null, quota: StorageQuotaAssessment | null): void {
+  if (!el) return;
+  if (!quota || (quota.status !== 'low' && quota.status !== 'insufficient') || !quota.message) {
+    el.classList.add('hide');
+    el.textContent = '';
+    return;
+  }
+  const isDanger = quota.status === 'insufficient';
+  el.style.background = isDanger ? 'rgba(239, 68, 68, 0.14)' : 'rgba(245, 158, 11, 0.14)';
+  el.style.border = isDanger ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid rgba(245, 158, 11, 0.45)';
+  el.style.color = isDanger ? '#fca5a5' : '#fde68a';
+  el.textContent = `${isDanger ? '⚠️' : '💾'} ${quota.message}`;
+  el.classList.remove('hide');
+}
+
+async function actualizarAvisoCuotaAnime(
+  selectedCount: number,
+  videoPref: VideoQualityPreference,
+  dest: DownloadDestination = getSelectedDownloadDestination()
+): Promise<StorageQuotaAssessment> {
+  const estTextEl = document.getElementById('dl-estimate-text');
+  const estFreeEl = document.getElementById('dl-estimate-free');
+  const estBarEl = document.getElementById('dl-estimate-bar') as HTMLElement | null;
+  const warnEl = document.getElementById('dl-anime-storage-warning');
+
+  const estimatedBytes = selectedCount > 0 ? estimateAnimeBatchBytes(selectedCount, videoPref) : 0;
+  const quota = await checkStorageSpaceForDownload(estimatedBytes);
+
+  if (estTextEl) {
+    if (selectedCount === 0) {
+      estTextEl.textContent = 'Selecciona episodios para estimar espacio';
+    } else if (dest === 'device') {
+      estTextEl.textContent = `~${formatBytesCompact(estimatedBytes)} estimados · Se guardarán directo en tu dispositivo`;
+    } else {
+      estTextEl.textContent = `~${formatBytesCompact(estimatedBytes)} estimados`;
+    }
+  }
+  if (estFreeEl) {
+    estFreeEl.textContent =
+      quota.supported && quota.quotaBytes > 0
+        ? `${formatBytesCompact(quota.remainingBytes)} disponibles`
+        : '';
+  }
+  if (estBarEl) {
+    let fillPct = 0;
+    if (selectedCount > 0 && quota.supported && quota.remainingBytes > 0) {
+      fillPct = Math.min(100, Math.max(4, Math.round((estimatedBytes / quota.remainingBytes) * 100)));
+    } else if (selectedCount > 0 && quota.status === 'insufficient') {
+      fillPct = 100;
+    } else if (selectedCount > 0) {
+      fillPct = 22;
+    }
+    estBarEl.style.width = `${fillPct}%`;
+    estBarEl.classList.toggle('danger', dest !== 'device' && quota.status === 'insufficient');
+    estBarEl.classList.toggle('warn', dest !== 'device' && quota.status === 'low');
+  }
+
+  if (dest === 'device' || selectedCount === 0) {
+    renderStorageQuotaBanner(warnEl, null);
+  } else {
+    renderStorageQuotaBanner(warnEl, quota);
+  }
+
+  return quota;
 }
 
 export async function abrirModalDescargaTemporada(): Promise<void> {
@@ -1190,8 +1435,16 @@ export async function abrirModalDescargaTemporada(): Promise<void> {
   const filterInput = document.getElementById('dl-ep-filter-input') as HTMLInputElement | null;
   if (filterInput) filterInput.value = '';
 
-  const progBox = document.getElementById('season-dl-progress-box');
-  if (progBox) progBox.classList.add('hide');
+  const rangeStartEl = document.getElementById('dl-range-start') as HTMLInputElement | null;
+  const rangeEndEl = document.getElementById('dl-range-end') as HTMLInputElement | null;
+  if (rangeStartEl) {
+    rangeStartEl.max = String(total);
+    rangeStartEl.value = '1';
+  }
+  if (rangeEndEl) {
+    rangeEndEl.max = String(total);
+    rangeEndEl.value = String(Math.min(total, 6));
+  }
 
   const rangesContainer = document.getElementById('dl-range-chips');
   if (rangesContainer) {
@@ -1210,6 +1463,11 @@ export async function abrirModalDescargaTemporada(): Promise<void> {
     }
   }
 
+  const sameBatchActive =
+    activeBatchSnapshot &&
+    String(activeBatchSnapshot.animeId) === String(season.id || state.anime?.id || 0) &&
+    Number(activeBatchSnapshot.season) === Number(season.seasonNumber || 1);
+
   const defaultSelected =
     dlModalOfflineSet.size > 0 && dlModalOfflineSet.size < total
       ? computeEpisodeSelectionByMode({
@@ -1225,7 +1483,7 @@ export async function abrirModalDescargaTemporada(): Promise<void> {
           offlineEpisodes: dlModalOfflineSet
         });
 
-  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => {
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn[data-dl-mode]').forEach((btn) => {
     const mode = (btn as HTMLElement).dataset.dlMode;
     btn.classList.toggle(
       'active',
@@ -1242,7 +1500,7 @@ export async function abrirModalDescargaTemporada(): Promise<void> {
     const isWatched = dlModalWatchedSet.has(i);
     const isOffline = dlModalOfflineSet.has(i);
     const statusParts: string[] = [];
-    if (isOffline) statusParts.push('Offline');
+    if (isOffline) statusParts.push('✓ Descargado');
     if (isWatched) statusParts.push('Visto');
     const subText = statusParts.length > 0 ? statusParts.join(' · ') : 'Disponible';
     const epMetaTitle = state.episodeMetaMap?.[i]?.title ? ` title="${escHtml(state.episodeMetaMap[i].title)}"` : '';
@@ -1259,19 +1517,126 @@ export async function abrirModalDescargaTemporada(): Promise<void> {
   }
   listContainer.innerHTML = cardsHtml.join('');
 
+  if (sameBatchActive && activeBatchSnapshot) {
+    for (const item of activeBatchSnapshot.items) {
+      if (item.status === 'queued') setEpisodeCardDownloadState(item.episode, 'En cola', 'idle');
+      else if (item.status === 'resolving') setEpisodeCardDownloadState(item.episode, 'Resolviendo fuente...', 'active');
+      else if (item.status === 'downloading') setEpisodeCardDownloadState(item.episode, `Descargando ${item.percent}%`, 'active');
+      else if (item.status === 'paused') setEpisodeCardDownloadState(item.episode, `Pausado (${item.percent}%)`, 'warn');
+      else if (item.status === 'completed') setEpisodeCardDownloadState(item.episode, `✓ Descargado${item.sizeBytes ? ` (${formatBytesCompact(item.sizeBytes)})` : ''}`, 'done');
+      else if (item.status === 'error') setEpisodeCardDownloadState(item.episode, `✕ ${item.errorReason || 'Error'}`, 'error', true);
+    }
+  }
+
+  seasonDownloadMinimized = false;
+  syncProgressPanelUI();
   actualizarResumenSeleccionDescarga();
   document.getElementById('modal-descarga-temporada')?.classList.add('active');
 }
 
+function resumePauseWaiters(): void {
+  const waiters = seasonDownloadResumeResolvers.splice(0, seasonDownloadResumeResolvers.length);
+  for (const resolve of waiters) {
+    resolve();
+  }
+}
+
+async function waitIfDownloadPaused(signal: AbortSignal): Promise<void> {
+  if (!seasonDownloadPaused || signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const onAbort = () => {
+      resolve();
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    seasonDownloadResumeResolvers.push(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
+
+export function togglePausaDescargaTemporada(): void {
+  if (!seasonDownloadAbortCtrl || !activeBatchSnapshot || !activeBatchSnapshot.isRunning) return;
+  seasonDownloadPaused = !seasonDownloadPaused;
+  activeBatchSnapshot.isPaused = seasonDownloadPaused;
+  const activeEp = activeBatchSnapshot.activeEpisode;
+  if (activeEp) {
+    const item = activeBatchSnapshot.items.find((x) => x.episode === activeEp);
+    if (item) {
+      item.status = seasonDownloadPaused ? 'paused' : 'downloading';
+      setEpisodeCardDownloadState(
+        activeEp,
+        seasonDownloadPaused ? `Pausado (${item.percent}%)` : `Descargando ${item.percent}%`,
+        seasonDownloadPaused ? 'warn' : 'active'
+      );
+    }
+  }
+  if (!seasonDownloadPaused) {
+    resumePauseWaiters();
+    showToast('Descarga reanudada ▶');
+  } else {
+    showToast('Descarga en pausa ⏸');
+  }
+  syncProgressPanelUI();
+  notifyDownloadManagerLive(true);
+}
+
+export function minimizarModalDescargaTemporada(): void {
+  seasonDownloadMinimized = true;
+  document.getElementById('modal-descarga-temporada')?.classList.remove('active');
+  syncFloatingDownloadPill();
+  if (activeBatchSnapshot?.isRunning) {
+    showToast('Descarga en segundo plano. Toca la barra inferior para ver el progreso.');
+  }
+}
+
+export function cerrarOMinimizarModalDescargaTemporada(event?: Event): void {
+  if (event && event.target !== event.currentTarget) return;
+  if (activeBatchSnapshot?.isRunning) {
+    minimizarModalDescargaTemporada();
+    return;
+  }
+  cerrarModales();
+}
+
+export function abrirDescargaEnCurso(): void {
+  ensureModalsMounted();
+  if (!activeBatchSnapshot) {
+    nWin.abrirModalDescargas?.();
+    return;
+  }
+  const currentSeason = state.seasons?.[state.temporadaActualIdx];
+  const sameContext =
+    currentSeason &&
+    String(currentSeason.id || state.anime?.id || 0) === String(activeBatchSnapshot.animeId) &&
+    Number(currentSeason.seasonNumber || 1) === Number(activeBatchSnapshot.season);
+
+  if (sameContext && document.getElementById('descarga-ep-list')?.children.length) {
+    seasonDownloadMinimized = false;
+    document.getElementById('modal-descarga-temporada')?.classList.add('active');
+    syncProgressPanelUI();
+    return;
+  }
+
+  DownloadManager.activeTab = 'active';
+  nWin.abrirModalDescargas?.();
+}
+
 export function cancelarDescargaTemporada(): void {
+  seasonDownloadPaused = false;
+  resumePauseWaiters();
   if (seasonDownloadAbortCtrl) {
     seasonDownloadAbortCtrl.abort();
     seasonDownloadAbortCtrl = null;
   }
-  const progBox = document.getElementById('season-dl-progress-box');
-  if (progBox) progBox.classList.add('hide');
+  seasonDownloadMinimized = false;
+  activeBatchSnapshot = null;
+  syncProgressPanelUI();
+  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
+  if (startBtn) startBtn.disabled = false;
   actualizarResumenSeleccionDescarga();
-  showToast('Descarga de episodios cancelada.');
+  notifyDownloadManagerLive(true);
+  showToast('Descarga cancelada y archivos parciales eliminados.');
 }
 
 export function toggleTodosEpisodiosDescarga(check: boolean): void {
@@ -1292,12 +1657,29 @@ export function aplicarFiltroDescargaEpisodios(mode: DownloadPickerFilterMode): 
     cb.checked = selection.has(epNum);
   });
 
-  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => {
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn[data-dl-mode]').forEach((btn) => {
     btn.classList.toggle('active', (btn as HTMLElement).dataset.dlMode === mode);
   });
   document.querySelectorAll('#dl-range-chips .dl-range-btn').forEach((btn) => btn.classList.remove('active'));
 
   actualizarResumenSeleccionDescarga();
+}
+
+export function aplicarRangoPersonalizadoDescarga(): void {
+  const startEl = document.getElementById('dl-range-start') as HTMLInputElement | null;
+  const endEl = document.getElementById('dl-range-end') as HTMLInputElement | null;
+  const total = dlModalTotalEpisodes || document.querySelectorAll('#descarga-ep-list .cb-dl-ep').length;
+  const startVal = parseInt(startEl?.value || '1', 10) || 1;
+  const endVal = parseInt(endEl?.value || String(total), 10) || total;
+  const selection = computeEpisodeRangeSelection(startVal, endVal, total);
+  if (selection.size === 0) return;
+
+  const minEp = Math.min(...selection);
+  const maxEp = Math.max(...selection);
+  if (startEl) startEl.value = String(minEp);
+  if (endEl) endEl.value = String(maxEp);
+
+  seleccionarRangoDescarga(minEp, maxEp);
 }
 
 export function seleccionarRangoDescarga(start: number, end: number): void {
@@ -1307,7 +1689,7 @@ export function seleccionarRangoDescarga(start: number, end: number): void {
     cb.checked = epNum >= start && epNum <= end;
   });
 
-  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn').forEach((btn) => btn.classList.remove('active'));
+  document.querySelectorAll('#modal-descarga-temporada .dl-tool-btn[data-dl-mode]').forEach((btn) => btn.classList.remove('active'));
   document.querySelectorAll('#dl-range-chips .dl-range-btn').forEach((btn) => {
     const label = start === end ? `Ep. ${start}` : `${start}–${end}`;
     btn.classList.toggle('active', btn.textContent?.trim() === label);
@@ -1330,11 +1712,43 @@ export function filtrarListaEpisodiosDescarga(rawQuery: string): void {
   });
 }
 
-export async function iniciarDescargaLote(): Promise<void> {
-  const selected = Array.from(document.querySelectorAll('#descarga-ep-list .cb-dl-ep:checked')).map((el) =>
-    parseInt((el as HTMLInputElement).value, 10)
-  );
-  if (selected.length === 0) {
+function sortMp4CandidatesByPreference(candidates: any[], videoPref: VideoQualityPreference): any[] {
+  if (videoPref !== 'saver') return candidates;
+  return [...candidates].sort((a, b) => {
+    const aUrl = String(a?.url || '').toLowerCase();
+    const bUrl = String(b?.url || '').toLowerCase();
+    const aSaver = aUrl.includes('yourupload.com') ? 0 : 1;
+    const bSaver = bUrl.includes('yourupload.com') ? 0 : 1;
+    return aSaver - bSaver;
+  });
+}
+
+function classifyDownloadErrorReason(err: unknown, preferredAudio: 'SUB' | 'DUB'): string {
+  if (isQuotaExceededError(err)) return 'Espacio insuficiente';
+  const msg = err instanceof Error ? err.message : String(err || '');
+  if (/idioma|language/i.test(msg)) {
+    return `Sin enlace .MP4 en ${preferredAudio === 'DUB' ? 'Latino' : 'Sub Esp'}`;
+  }
+  if (/HTML|403|404|410|sin enlace/i.test(msg)) {
+    return 'Sin enlace .MP4 directo en este idioma';
+  }
+  if (/network|fetch|timeout|bloque|cortado|502|503|504/i.test(msg)) {
+    return 'Error de red (reintentar)';
+  }
+  return msg ? msg.slice(0, 64) : 'Error al descargar .MP4';
+}
+
+async function runDownloadEpisodesBatch(episodes: number[], options?: {
+  animeId?: string | number;
+  animeTitle?: string;
+  seasonNum?: number;
+  coverUrl?: string;
+  preferredAudio?: 'SUB' | 'DUB';
+  videoPref?: VideoQualityPreference;
+  destination?: DownloadDestination;
+  mergeIntoExisting?: boolean;
+}): Promise<void> {
+  if (episodes.length === 0) {
     showToast('Selecciona al menos un episodio.');
     return;
   }
@@ -1345,70 +1759,134 @@ export async function iniciarDescargaLote(): Promise<void> {
     title: state.anime?.title?.english || state.anime?.title?.romaji || 'Anime',
     coverImage: state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || ''
   };
-  const seasonNum = Number(season.seasonNumber || 1);
+
+  const seasonNum = options?.seasonNum ?? Number(season.seasonNumber || 1);
   const seasonTitle =
+    options?.animeTitle ||
     season.title ||
     season.english ||
     season.romaji ||
     state.anime?.title?.english ||
     state.anime?.title?.romaji ||
     'Anime';
-  const cleanSeriesTitle = getCleanBaseTitleForFilename(seasonTitle);
-  const seasonId = season.id || state.anime?.id || 0;
+  const seasonId = options?.animeId ?? (season.id || state.anime?.id || 0);
   const coverUrl =
-    season.coverImage ||
-    state.anime?.coverImage?.large ||
-    state.anime?.coverImage?.extraLarge ||
-    '';
+    options?.coverUrl ??
+    (season.coverImage || state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || '');
 
-  const qualityEl = document.getElementById('select-calidad-descarga') as HTMLSelectElement | null;
   const audioEl = document.getElementById('select-audio-descarga') as HTMLSelectElement | null;
-  const destEl = document.getElementById('select-destino-descarga') as HTMLSelectElement | null;
+  const preferredAudio: 'SUB' | 'DUB' =
+    options?.preferredAudio || (audioEl?.value === 'DUB' ? 'DUB' : 'SUB');
+  const videoPref: VideoQualityPreference = options?.videoPref || getSelectedVideoPreference();
+  const destination: DownloadDestination = options?.destination || getSelectedDownloadDestination();
 
-  const quality = qualityEl?.value || '1080p';
-  const preferredAudio = (audioEl?.value === 'DUB' ? 'DUB' : 'SUB') as 'SUB' | 'DUB';
-  const saveFileToDisk = destEl?.value !== 'cache';
+  if (destination !== 'device') {
+    const quotaCheck = await actualizarAvisoCuotaAnime(episodes.length, videoPref, destination);
+    if (quotaCheck.status === 'insufficient') {
+      showToast(`⚠️ ${quotaCheck.message}`);
+      return;
+    }
+    if (quotaCheck.status === 'low') {
+      showToast(`💾 ${quotaCheck.message}`);
+    }
+  }
+
+  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
+
+  if (seasonDownloadAbortCtrl) {
+    seasonDownloadAbortCtrl.abort();
+  }
+  seasonDownloadPaused = false;
+  resumePauseWaiters();
+  seasonDownloadAbortCtrl = new AbortController();
+  const signal = seasonDownloadAbortCtrl.signal;
 
   const baseSlug = seasonTitle
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 
-  const progBox = document.getElementById('season-dl-progress-box');
-  const progText = document.getElementById('season-dl-progress-text');
-  const progPctEl = document.getElementById('season-dl-progress-pct');
-  const progBar = document.getElementById('season-dl-progress-bar') as HTMLElement | null;
-  const startBtn = document.getElementById('btn-start-season-dl') as HTMLButtonElement | null;
-
-  if (seasonDownloadAbortCtrl) {
-    seasonDownloadAbortCtrl.abort();
+  const existingItemsMap = new Map<number, ActiveDownloadEpisodeState>();
+  if (options?.mergeIntoExisting && activeBatchSnapshot) {
+    for (const it of activeBatchSnapshot.items) {
+      existingItemsMap.set(it.episode, { ...it });
+    }
   }
-  seasonDownloadAbortCtrl = new AbortController();
-  const signal = seasonDownloadAbortCtrl.signal;
+  for (const ep of episodes) {
+    existingItemsMap.set(ep, {
+      episode: ep,
+      status: 'queued',
+      percent: 0,
+      loadedBytes: 0,
+      totalBytes: 0,
+      speedLabel: '',
+      etaLabel: ''
+    });
+  }
 
-  selected.forEach((ep) => setEpisodeCardDownloadState(ep, 'En cola', 'idle'));
-  if (progBox) progBox.classList.remove('hide');
-  if (progPctEl) progPctEl.textContent = '0%';
-  if (progBar) progBar.style.width = '0%';
+  const batchItems = Array.from(existingItemsMap.values()).sort((a, b) => a.episode - b.episode);
+
+  activeBatchSnapshot = {
+    batchId: `batch_${Date.now()}`,
+    animeId: seasonId,
+    animeTitle: seasonTitle,
+    season: seasonNum,
+    cover: coverUrl,
+    audio: preferredAudio,
+    videoPref,
+    destination,
+    isRunning: true,
+    isPaused: false,
+    totalCount: batchItems.length,
+    completedCount: batchItems.filter((x) => x.status === 'completed').length,
+    failedCount: batchItems.filter((x) => x.status === 'error').length,
+    overallPercent: 0,
+    activeEpisode: episodes[0],
+    activeDetailText: `Preparando Ep. ${episodes[0]}...`,
+    items: batchItems
+  };
+
+  episodes.forEach((ep) => setEpisodeCardDownloadState(ep, 'En cola', 'idle'));
   if (startBtn) {
     startBtn.disabled = true;
-    startBtn.textContent = `Descargando (${selected.length})...`;
+    startBtn.textContent = `Descargando (${episodes.length})...`;
   }
+  syncProgressPanelUI();
+  notifyDownloadManagerLive(true);
 
-  let mp4Count = 0;
-  let queuedCount = 0;
+  let downloadedNowCount = 0;
+
+  const recomputeOverall = () => {
+    if (!activeBatchSnapshot) return;
+    const items = activeBatchSnapshot.items;
+    activeBatchSnapshot.completedCount = items.filter((x) => x.status === 'completed').length;
+    activeBatchSnapshot.failedCount = items.filter((x) => x.status === 'error').length;
+    const sumPct = items.reduce((acc, it) => {
+      if (it.status === 'completed') return acc + 100;
+      if (it.status === 'downloading' || it.status === 'paused') return acc + it.percent;
+      return acc;
+    }, 0);
+    activeBatchSnapshot.overallPercent =
+      items.length > 0 ? Math.min(100, Math.round(sumPct / items.length)) : 0;
+  };
 
   try {
-    for (let idx = 0; idx < selected.length; idx += 1) {
-      if (signal.aborted) break;
-      const ep = selected[idx];
-      const basePct = Math.round((idx / selected.length) * 100);
-      setEpisodeCardDownloadState(ep, 'Resolviendo...', 'active');
-      if (progText) {
-        progText.textContent = `Resolviendo T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length})...`;
-      }
-      if (progPctEl) progPctEl.textContent = `${basePct}%`;
-      if (progBar) progBar.style.width = `${basePct}%`;
+    for (let idx = 0; idx < episodes.length; idx += 1) {
+      await waitIfDownloadPaused(signal);
+      if (signal.aborted || !activeBatchSnapshot) break;
+
+      const ep = episodes[idx];
+      const itemState = activeBatchSnapshot.items.find((x) => x.episode === ep);
+      if (!itemState) continue;
+
+      activeBatchSnapshot.activeEpisode = ep;
+      itemState.status = 'resolving';
+      itemState.errorReason = undefined;
+      activeBatchSnapshot.activeDetailText = `Ep. ${ep} · Buscando fuente .MP4 (${preferredAudio === 'DUB' ? 'Audio Latino' : 'Sub Español'})...`;
+      setEpisodeCardDownloadState(ep, 'Resolviendo fuente...', 'active');
+      recomputeOverall();
+      syncProgressPanelUI();
+      notifyDownloadManagerLive();
 
       let fallbackUrl = `https://animeav1.com/media/${baseSlug}/${ep}`;
       let mp4Candidates: any[] = [];
@@ -1419,109 +1897,231 @@ export async function iniciarDescargaLote(): Promise<void> {
         const ranked = videoSourceManager.rankRawSources(raw, preferredAudio);
         if (ranked[0]?.url) fallbackUrl = ranked[0].url;
 
-        mp4Candidates = ranked.filter(
-          (f) =>
-            f &&
-            f.url &&
-            (f.url.includes('mp4upload.com') || f.url.includes('yourupload.com') || /\.(mp4|webm)(\?|$)/i.test(f.url))
+        mp4Candidates = sortMp4CandidatesByPreference(
+          ranked.filter((f) => f && f.url && isDirectMp4DownloadCandidate(f.url)),
+          videoPref
         );
       } catch {
-        // fallback to queue if resolution fails
+        mp4Candidates = [];
       }
 
-      if (signal.aborted) break;
+      await waitIfDownloadPaused(signal);
+      if (signal.aborted || !activeBatchSnapshot) break;
 
-      const rawFilename = `${cleanSeriesTitle}_T${seasonNum}_Ep_${ep}.mp4`;
+      const cleanFilename = formatAnimeEpisodeFilename(seasonTitle, seasonNum, ep, preferredAudio);
       let downloadedMp4 = false;
+      let lastCandidateError: unknown = null;
 
-      if (nWin.NyAnimeOffline?.downloadAnimeEpisodeOrQueue) {
+      if (nWin.NyAnimeOffline?.downloadAnimeEpisodeOrQueue && mp4Candidates.length > 0) {
         for (const cand of mp4Candidates) {
-          if (signal.aborted) break;
+          await waitIfDownloadPaused(signal);
+          if (signal.aborted || !activeBatchSnapshot) break;
           try {
-            const extracted = await StreamExtractor.extract(cand.url);
+            const extracted = await StreamExtractor.extract(cand.url, { forceRefresh: true });
             if (!extracted || extracted.type !== 'mp4' || !extracted.streamUrl) continue;
+            if (extracted.detectedLanguage && extracted.detectedLanguage !== preferredAudio) {
+              continue;
+            }
 
+            itemState.status = 'downloading';
             const res = await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
               animeId: seasonId,
               animeTitle: seasonTitle,
               cover: coverUrl,
               season: seasonNum,
               episode: ep,
-              quality,
+              quality: videoPref,
+              audio: preferredAudio,
+              destination,
               directStreamUrl: extracted.streamUrl,
               fallbackWebUrl: fallbackUrl,
-              saveToDeviceFilename: saveFileToDisk ? rawFilename : undefined,
+              saveToDeviceFilename: destination !== 'app' ? cleanFilename : undefined,
+              allowWatchLaterFallback: false,
               signal,
-              onProgress: (pct: number, loadedBytes: number) => {
-                const overall = Math.min(100, Math.round(((idx + pct / 100) / selected.length) * 100));
-                const mb = (loadedBytes / (1024 * 1024)).toFixed(1);
-                setEpisodeCardDownloadState(ep, `${pct}% · ${mb} MB`, 'active');
-                if (progText) {
-                  progText.textContent = `Descargando T${seasonNum} · Ep. ${ep} (${idx + 1}/${selected.length}) · ${mb} MB`;
-                }
-                if (progPctEl) progPctEl.textContent = `${overall}%`;
-                if (progBar) progBar.style.width = `${overall}%`;
+              waitIfPaused: () => waitIfDownloadPaused(signal),
+              onProgress: (
+                pct: number,
+                loadedBytes: number,
+                totalBytes: number,
+                detail?: AnimeDownloadProgress
+              ) => {
+                if (!activeBatchSnapshot) return;
+                itemState.status = seasonDownloadPaused ? 'paused' : 'downloading';
+                itemState.percent = pct;
+                itemState.loadedBytes = loadedBytes;
+                itemState.totalBytes = totalBytes;
+                itemState.speedLabel = detail?.speedLabel || '';
+                itemState.etaLabel = detail?.etaLabel || '';
+
+                const loadedStr = formatBytesCompact(loadedBytes);
+                const totalStr = totalBytes > 0 ? ` / ${formatBytesCompact(totalBytes)}` : '';
+                const speedStr = itemState.speedLabel ? ` · ${itemState.speedLabel}` : '';
+                const etaStr = itemState.etaLabel ? ` · ${itemState.etaLabel}` : '';
+                activeBatchSnapshot.activeDetailText = `Ep. ${ep} · ${loadedStr}${totalStr}${speedStr}${etaStr}`;
+
+                setEpisodeCardDownloadState(
+                  ep,
+                  seasonDownloadPaused ? `Pausado (${pct}%)` : `Descargando ${pct}%`,
+                  seasonDownloadPaused ? 'warn' : 'active'
+                );
+                recomputeOverall();
+                syncProgressPanelUI();
+                notifyDownloadManagerLive();
               }
             });
+
             if (res.kind === 'anime-video') {
-              mp4Count += 1;
               downloadedMp4 = true;
-              dlModalOfflineSet.add(ep);
-              setEpisodeCardDownloadState(ep, 'Offline .MP4', 'done');
+              downloadedNowCount += 1;
+              itemState.status = 'completed';
+              itemState.percent = 100;
+              itemState.sizeBytes = res.sizeBytes;
+              itemState.loadedBytes = res.sizeBytes;
+              itemState.totalBytes = res.sizeBytes;
+              if (destination !== 'device') {
+                dlModalOfflineSet.add(ep);
+              }
+              setEpisodeCardDownloadState(
+                ep,
+                `✓ Descargado (${formatBytesCompact(res.sizeBytes)})`,
+                'done'
+              );
+              recomputeOverall();
+              syncProgressPanelUI();
+              notifyDownloadManagerLive(true);
               break;
             }
           } catch (candErr: any) {
-            if (candErr?.name === 'AbortError' || signal.aborted) throw candErr;
-            // Try next MP4 mirror candidate if this server failed or returned HTML
-          }
-        }
-
-        if (!downloadedMp4 && !signal.aborted) {
-          const res = await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
-            animeId: seasonId,
-            animeTitle: seasonTitle,
-            cover: coverUrl,
-            season: seasonNum,
-            episode: ep,
-            quality,
-            directStreamUrl: null,
-            fallbackWebUrl: fallbackUrl,
-            signal
-          });
-          if (res.kind === 'anime-video') {
-            mp4Count += 1;
-            dlModalOfflineSet.add(ep);
-            setEpisodeCardDownloadState(ep, 'Offline .MP4', 'done');
-          } else {
-            queuedCount += 1;
-            setEpisodeCardDownloadState(ep, 'Ver luego', 'warn');
+            if (candErr?.name === 'AbortError' || signal.aborted) {
+              throw candErr;
+            }
+            if (isQuotaExceededError(candErr)) {
+              itemState.status = 'error';
+              itemState.errorReason = 'Espacio insuficiente';
+              setEpisodeCardDownloadState(ep, '✕ Espacio insuficiente', 'error', true);
+              throw candErr;
+            }
+            lastCandidateError = candErr;
           }
         }
       }
+
+      if (!downloadedMp4 && !signal.aborted && activeBatchSnapshot) {
+        const reason =
+          mp4Candidates.length === 0
+            ? 'Sin enlace .MP4 directo en este idioma'
+            : classifyDownloadErrorReason(lastCandidateError, preferredAudio);
+        itemState.status = 'error';
+        itemState.errorReason = reason;
+        setEpisodeCardDownloadState(ep, `✕ ${reason}`, 'error', true);
+        recomputeOverall();
+        syncProgressPanelUI();
+        notifyDownloadManagerLive(true);
+      }
     }
 
-    if (!signal.aborted) {
-      if (progBar) progBar.style.width = '100%';
-      if (progPctEl) progPctEl.textContent = '100%';
+    if (!signal.aborted && activeBatchSnapshot) {
+      activeBatchSnapshot.isRunning = false;
+      activeBatchSnapshot.isPaused = false;
+      activeBatchSnapshot.activeEpisode = null;
+      recomputeOverall();
+      const failedCount = activeBatchSnapshot.failedCount;
+      const completedCount = activeBatchSnapshot.completedCount;
+      activeBatchSnapshot.activeDetailText =
+        failedCount > 0
+          ? `${completedCount} completados · ${failedCount} con error. Puedes reintentar los fallidos.`
+          : '';
+
       await DownloadManager.updateBadge();
       renderDetalleEpisodios();
-      cerrarModales();
-      if (mp4Count > 0) {
-        showToast(
-          `${mp4Count} episodio(s) guardados en modo offline${saveFileToDisk ? ' y descargados (.MP4)' : ''}${queuedCount > 0 ? ` (+${queuedCount} en Ver Luego)` : ''}.`
-        );
+      syncProgressPanelUI();
+      notifyDownloadManagerLive(true);
+
+      if (failedCount === 0) {
+        activeBatchSnapshot = null;
+        seasonDownloadMinimized = false;
+        syncProgressPanelUI();
+        if (document.getElementById('modal-descarga-temporada')?.classList.contains('active')) {
+          cerrarModales();
+        }
+        const destMsg =
+          destination === 'device'
+            ? 'descargados como archivo .MP4 en tu dispositivo'
+            : destination === 'both'
+              ? 'guardados en la app y exportados en .MP4'
+              : 'guardados para ver sin internet en la app';
+        showToast(`✓ ${downloadedNowCount} episodio(s) ${destMsg}.`);
       } else {
-        showToast(`${queuedCount} episodio(s) guardados en "Ver Luego".`);
+        showToast(
+          completedCount > 0
+            ? `${completedCount} descargado(s) · ${failedCount} fallido(s). Pulsa Reintentar fallidos.`
+            : `No se encontró enlace .MP4 directo en ${failedCount} episodio(s).`
+        );
       }
     }
   } catch (err: any) {
-    if (err?.name !== 'AbortError') {
-      showToast(`Error en descarga por lote: ${err?.message || err}`);
+    if (activeBatchSnapshot) {
+      activeBatchSnapshot.isRunning = false;
+      activeBatchSnapshot.isPaused = false;
+      recomputeOverall();
+    }
+    if (isQuotaExceededError(err)) {
+      await DownloadManager.updateBadge();
+      void actualizarAvisoCuotaAnime(episodes.length, videoPref, destination);
+      showToast(`⚠️ ${err?.message || 'Espacio insuficiente en el dispositivo. Descarga detenida y limpiada.'}`);
+    } else if (err?.name !== 'AbortError') {
+      showToast(`Error en descarga: ${err?.message || err}`);
     }
   } finally {
     seasonDownloadAbortCtrl = null;
-    if (progBox) progBox.classList.add('hide');
+    seasonDownloadPaused = false;
+    resumePauseWaiters();
+    syncProgressPanelUI();
     actualizarResumenSeleccionDescarga();
+    notifyDownloadManagerLive(true);
   }
+}
+
+export async function iniciarDescargaLote(): Promise<void> {
+  const selected = Array.from(document.querySelectorAll('#descarga-ep-list .cb-dl-ep:checked')).map((el) =>
+    parseInt((el as HTMLInputElement).value, 10)
+  );
+  await runDownloadEpisodesBatch(selected);
+}
+
+export async function reintentarEpisodioDescarga(ep: number): Promise<void> {
+  if (seasonDownloadAbortCtrl) {
+    showToast('Espera a que termine o pausa la descarga actual antes de reintentar.');
+    return;
+  }
+  const snap = activeBatchSnapshot;
+  await runDownloadEpisodesBatch([ep], {
+    animeId: snap?.animeId,
+    animeTitle: snap?.animeTitle,
+    seasonNum: snap?.season,
+    coverUrl: snap?.cover,
+    preferredAudio: snap?.audio,
+    videoPref: snap?.videoPref,
+    destination: snap?.destination,
+    mergeIntoExisting: Boolean(snap)
+  });
+}
+
+export async function reintentarEpisodiosFallidos(): Promise<void> {
+  if (!activeBatchSnapshot || seasonDownloadAbortCtrl) return;
+  const failedEps = activeBatchSnapshot.items
+    .filter((it) => it.status === 'error')
+    .map((it) => it.episode);
+  if (failedEps.length === 0) return;
+  await runDownloadEpisodesBatch(failedEps, {
+    animeId: activeBatchSnapshot.animeId,
+    animeTitle: activeBatchSnapshot.animeTitle,
+    seasonNum: activeBatchSnapshot.season,
+    coverUrl: activeBatchSnapshot.cover,
+    preferredAudio: activeBatchSnapshot.audio,
+    videoPref: activeBatchSnapshot.videoPref,
+    destination: activeBatchSnapshot.destination,
+    mergeIntoExisting: true
+  });
 }
 

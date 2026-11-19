@@ -9,6 +9,8 @@ ORIGINAL_REQUEST.md
 temp_search_ctx.txt
 CHECKPOINT_PROGRESO.md
 .agents/
+.aistudio/
+.playwright-cli/
 scratch/
 test_tbate_investigation.py
 

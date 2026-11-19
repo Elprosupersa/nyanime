@@ -10,12 +10,16 @@ import {
   cerrarModales,
   escHtml,
   getActiveManga,
+  getActiveModalElements,
+  isAnimeBatchDownloadRunning,
   nWin,
   safeImg,
   showToast,
   state,
+  syncModalBodyScrollLock,
   uiHooks
 } from './appState.ts';
+import { resolveModalDismissBehavior } from '../utils/uiPolishHelpers.ts';
 import { formatWatchDuration } from '../utils/profileStats.ts';
 import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
 import { sanitizeShortText, sanitizeUserScore } from '../utils/libraryEnhancements.ts';
@@ -41,9 +45,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" style="max-height:85vh;" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">🌐 Selector de Fuentes Mihon</div>
-        <div class="ny-dialog-close" onclick="cerrarModalFuentesManga()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModalFuentesManga()" aria-label="Cerrar selector de fuentes">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
         Selecciona el servidor o extensión para explorar capítulos completos y evitar restricciones de editoriales o enlaces bloqueados.
@@ -57,13 +61,14 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" style="max-height:80vh;" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">📥 Descargas para Lectura Offline</div>
-        <div class="ny-dialog-close" onclick="cerrarModalDescargasManga()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModalDescargasManga()" aria-label="Cerrar descargas de manga">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:14px;" id="descarga-manga-info">
         Descarga los capítulos a CacheStorage e IndexedDB de tu dispositivo para leer sin conexión a internet.
       </div>
+      <div id="dl-manga-storage-warning" class="hide" role="status" style="font-size:12px; font-weight:600; border-radius:10px; padding:10px 12px; margin-bottom:12px; line-height:1.4;"></div>
       <div id="manga-dl-progress-box" class="hide" style="background:rgba(255,26,64,0.08); border:1px solid rgba(255,26,64,0.3); border-radius:12px; padding:12px; margin-bottom:12px;">
         <div id="manga-dl-progress-text" style="font-size:12px; font-weight:700; color:#fff; margin-bottom:8px;">Preparando descarga...</div>
         <div style="width:100%; height:6px; background:rgba(255,255,255,0.1); border-radius:999px; overflow:hidden; margin-bottom:10px;">
@@ -80,23 +85,23 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" style="max-height:85vh;" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title" id="manga-modal-sheet-title">Ficha del Manga</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar ficha del manga">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="manga-modal-body"></div>
     </div>
   </div>
 
   <!-- MODAL: DESCARGA DE ANIME POR EPISODIOS -->
-  <div class="ny-dialog" id="modal-descarga-temporada" onclick="cerrarModales(event)">
+  <div class="ny-dialog" id="modal-descarga-temporada" onclick="cerrarOMinimizarModalDescargaTemporada(event)">
     <div class="ny-sheet ny-sheet-wide dl-modal-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header dl-sheet-header">
         <div>
           <div class="ny-dialog-title">Descargar Episodios</div>
-          <div class="dl-sheet-subtitle" id="descarga-temporada-subtitle">Selecciona episodios para guardar offline o en .MP4</div>
+          <div class="dl-sheet-subtitle" id="descarga-temporada-subtitle">Guarda episodios en .MP4 para ver sin internet o en tu dispositivo</div>
         </div>
-        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar modal de descarga">
+        <button type="button" class="ny-dialog-close" onclick="cerrarOMinimizarModalDescargaTemporada()" aria-label="Cerrar o minimizar modal de descarga">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
@@ -111,16 +116,32 @@ const MODALS_MARKUP = `
           <div class="dl-selection-count tabular-nums" id="dl-selection-summary">0 seleccionados</div>
         </div>
 
+        <div id="dl-anime-storage-meter" class="dl-estimate-card">
+          <div class="dl-estimate-head">
+            <span class="dl-estimate-label" id="dl-estimate-text">Selecciona episodios para estimar espacio</span>
+            <span class="dl-estimate-free tabular-nums" id="dl-estimate-free"></span>
+          </div>
+          <div class="dl-estimate-track">
+            <div id="dl-estimate-bar" class="dl-estimate-fill" style="width:0%;"></div>
+          </div>
+        </div>
+
+        <div id="dl-anime-storage-warning" class="hide" role="status" style="font-size:12px; font-weight:600; border-radius:10px; padding:10px 12px; line-height:1.4;"></div>
+
         <div id="season-dl-progress-box" class="dl-progress-panel hide">
           <div class="dl-progress-head">
             <span id="season-dl-progress-text" class="dl-progress-label">Preparando descarga...</span>
             <span id="season-dl-progress-pct" class="dl-progress-pct tabular-nums">0%</span>
           </div>
+          <div id="season-dl-progress-detail" class="dl-progress-detail tabular-nums"></div>
           <div class="dl-progress-track">
             <div id="season-dl-progress-bar" class="dl-progress-fill"></div>
           </div>
           <div class="dl-progress-actions">
-            <button type="button" class="dl-cancel-btn" onclick="cancelarDescargaTemporada()">Cancelar descarga</button>
+            <button type="button" id="btn-pause-season-dl" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">⏸ Pausar</button>
+            <button type="button" id="btn-minimize-season-dl" class="dl-action-btn" onclick="minimizarModalDescargaTemporada()">Seguir en segundo plano</button>
+            <button type="button" id="btn-retry-failed-dl" class="dl-action-btn primary hide" onclick="reintentarEpisodiosFallidos()">Reintentar fallidos</button>
+            <button type="button" id="btn-cancel-season-dl" class="dl-cancel-btn" onclick="cancelarDescargaTemporada()">Cancelar todo</button>
           </div>
         </div>
 
@@ -136,11 +157,38 @@ const MODALS_MARKUP = `
           </div>
         </div>
 
+        <div class="dl-range-custom-bar" aria-label="Selector rápido de rango">
+          <span class="dl-range-custom-label">Del Ep.</span>
+          <input type="number" id="dl-range-start" class="dl-range-num-input tabular-nums" min="1" value="1" aria-label="Episodio inicial">
+          <span class="dl-range-custom-label">al</span>
+          <input type="number" id="dl-range-end" class="dl-range-num-input tabular-nums" min="1" value="6" aria-label="Episodio final">
+          <button type="button" class="dl-tool-btn" onclick="aplicarRangoPersonalizadoDescarga()">Aplicar</button>
+        </div>
+
         <div class="dl-range-row hide" id="dl-range-chips" aria-label="Rangos de episodios"></div>
 
         <div class="dl-ep-grid" id="descarga-ep-list"></div>
 
-        <div class="dl-config-grid">
+        <div class="dl-dest-section">
+          <div class="dl-config-label">Destino de la descarga</div>
+          <div class="dl-dest-grid" id="dl-dest-options" role="radiogroup" aria-label="Destino de la descarga">
+            <button type="button" class="dl-dest-card active" data-dest="app" role="radio" aria-checked="true" onclick="seleccionarDestinoDescarga('app')">
+              <span class="dl-dest-title">Guardar en la app</span>
+              <span class="dl-dest-sub">Ver sin internet dentro de NyAnime TV</span>
+            </button>
+            <button type="button" class="dl-dest-card" data-dest="device" role="radio" aria-checked="false" onclick="seleccionarDestinoDescarga('device')">
+              <span class="dl-dest-title">Guardar archivo .MP4</span>
+              <span class="dl-dest-sub">Solo descarga .MP4 en tu dispositivo</span>
+            </button>
+            <button type="button" class="dl-dest-card" data-dest="both" role="radio" aria-checked="false" onclick="seleccionarDestinoDescarga('both')">
+              <span class="dl-dest-title">Ambos</span>
+              <span class="dl-dest-sub">En la app + archivo .MP4 en dispositivo</span>
+            </button>
+          </div>
+          <input type="hidden" id="select-destino-descarga" value="app">
+        </div>
+
+        <div class="dl-config-grid dl-config-grid-2">
           <label class="dl-config-field">
             <span class="dl-config-label">Audio preferido</span>
             <select id="select-audio-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
@@ -149,17 +197,10 @@ const MODALS_MARKUP = `
             </select>
           </label>
           <label class="dl-config-field">
-            <span class="dl-config-label">Calidad</span>
+            <span class="dl-config-label">Preferencia de video</span>
             <select id="select-calidad-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
-              <option value="1080p">1080p Full HD (.MP4)</option>
-              <option value="720p">720p HD Rápido (.MP4)</option>
-            </select>
-          </label>
-          <label class="dl-config-field">
-            <span class="dl-config-label">Destino</span>
-            <select id="select-destino-descarga" class="dl-config-select" onchange="actualizarResumenSeleccionDescarga()">
-              <option value="both">Caché offline + Archivo .MP4</option>
-              <option value="cache">Solo caché offline en la app</option>
+              <option value="auto">Mejor calidad disponible (Auto)</option>
+              <option value="saver">Ahorro de datos (menor peso)</option>
             </select>
           </label>
         </div>
@@ -222,9 +263,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">🎭 Editar Perfil y Foto</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar editor de perfil">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
 
       <div class="avatar-custom-preview-card">
@@ -260,9 +301,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">🏆 Tu Rango Otaku & Progreso</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar rango otaku">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="rank-modal-body" style="font-size:12.5px; color:var(--text-muted); line-height:1.6;">
         <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:12px;">
@@ -286,9 +327,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title" id="auth-modal-title">🔐 Iniciar Sesión con Correo</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar autenticación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="auth-email-error" style="display:none; background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:12px; color:#fca5a5; font-weight:600;"></div>
 
@@ -321,9 +362,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">🔄 Importar MyAnimeList / AniList</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar importador">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
         Ingresa tu nombre de usuario público para importar automáticamente tus listas a Favoritos y Seguimiento.
@@ -347,9 +388,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">📮 Caja de Sugerencias</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar sugerencias">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
         ¿Falta algún anime, temporada, o tienes una sugerencia? Escríbenos directamente:
@@ -371,9 +412,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">📲 Instalar NyAnime TV en tu Celular</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar guía de instalación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:14px; line-height:1.5;">
         Abre esta misma página en el navegador de tu teléfono para instalar <strong>NyAnime TV</strong> como app independiente (icono propio, pantalla completa y carga rápida).
@@ -414,9 +455,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">📁 Nueva Colección Personalizada</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar nueva colección">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
         Crea carpetas temáticas como "Para ver el finde", "Top Isekai" o "Clásicos 90s" para organizar tus animes y mangas.
@@ -460,9 +501,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title" id="review-modal-title">⭐ Calificar y Escribir Nota</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar calificación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="review-modal-subtitle" style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">Puntuación personal (1–10 ★) y notas privadas</div>
       <div style="margin-bottom:12px;">
@@ -489,22 +530,22 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">📊 Tu Resumen Semanal</div>
-        <div class="ny-dialog-close" onclick="cerrarModales()">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar resumen semanal">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="weekly-summary-body"></div>
     </div>
   </div>
 
-  <!-- MODAL: LIMPIAR PERFIL (3 CONFIRMACIONES SECUENCIALES) -->
-  <div class="ny-dialog" id="modal-wipe-profile" onclick="if(event.target===this) cancelarLimpiarPerfil()">
+  <!-- MODAL: LIMPIAR PERFIL (3 CONFIRMACIONES SECUENCIALES · MODAL CRÍTICO) -->
+  <div class="ny-dialog" id="modal-wipe-profile" role="alertdialog" aria-modal="true" aria-labelledby="wipe-step-title">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title" style="color:#ff8ea0;">⚠️ Restablecer Perfil</div>
-        <div class="ny-dialog-close" onclick="cancelarLimpiarPerfil()" aria-label="Cerrar confirmación de limpieza">
+        <button type="button" class="ny-dialog-close" onclick="cancelarLimpiarPerfil()" aria-label="Cerrar confirmación de limpieza">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div class="wipe-step-badge" id="wipe-step-badge">Confirmación 1 de 3</div>
       <div class="wipe-progress-track">
@@ -525,9 +566,9 @@ const MODALS_MARKUP = `
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
         <div class="ny-dialog-title">🔒 Sala Protegida</div>
-        <div class="ny-dialog-close" onclick="cerrarModalPasscodeWatchTogether()" aria-label="Cerrar acceso de sala">
+        <button type="button" class="ny-dialog-close" onclick="cerrarModalPasscodeWatchTogether()" aria-label="Cerrar acceso de sala">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </div>
+        </button>
       </div>
       <div id="wt-join-modal-sub" style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px;">
         Ingresa la contraseña de la sala o pega el enlace completo de invitación que compartió el anfitrión.
@@ -547,7 +588,53 @@ const MODALS_MARKUP = `
       </div>
     </div>
   </div>
+  <!-- INDICADOR FLOTANTE COMPACTO DE DESCARGA EN SEGUNDO PLANO -->
+  <button type="button" id="dl-floating-pill" class="dl-floating-pill hide" onclick="abrirDescargaEnCurso()" aria-label="Ver progreso de descarga en curso">
+    <span class="dl-floating-dot" aria-hidden="true"></span>
+    <span class="dl-floating-text tabular-nums" id="dl-floating-pill-text">Descargando...</span>
+    <span class="dl-floating-pct tabular-nums" id="dl-floating-pill-pct">0%</span>
+  </button>
 `;
+
+let modalEscapeListenerBound = false;
+let modalClassObserver: MutationObserver | null = null;
+
+function handleModalEscapeKey(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return;
+  const activeModals = getActiveModalElements();
+  if (activeModals.length === 0) return;
+
+  const topModal = activeModals[activeModals.length - 1];
+  const behavior = resolveModalDismissBehavior(topModal.id, {
+    isBatchDownloadRunning: isAnimeBatchDownloadRunning()
+  });
+
+  if (behavior === 'blocked') {
+    // Critical modals (e.g. #modal-wipe-profile) must only close via explicit Cancel/Close buttons.
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
+  e.preventDefault();
+  if (behavior === 'minimize' && typeof nWin.cerrarOMinimizarModalDescargaTemporada === 'function') {
+    nWin.cerrarOMinimizarModalDescargaTemporada();
+    return;
+  }
+  if (topModal.id === 'modal-wt-join-pass' && typeof nWin.cerrarModalPasscodeWatchTogether === 'function') {
+    nWin.cerrarModalPasscodeWatchTogether();
+    return;
+  }
+  if (topModal.id === 'modal-selector-fuentes-mihon' && typeof nWin.cerrarModalFuentesManga === 'function') {
+    nWin.cerrarModalFuentesManga();
+    return;
+  }
+  if (topModal.id === 'modal-descarga-manga-mihon' && typeof nWin.cerrarModalDescargasManga === 'function') {
+    nWin.cerrarModalDescargasManga();
+    return;
+  }
+  cerrarModales();
+}
 
 export function ensureModalsMounted(): void {
   const root = document.getElementById('ny-modals-root');
@@ -555,13 +642,39 @@ export function ensureModalsMounted(): void {
   root.innerHTML = MODALS_MARKUP;
   root.dataset.mounted = '1';
 
-  root.querySelectorAll('.modal-overlay, .ny-dialog').forEach(overlay => {
+  root.querySelectorAll<HTMLElement>('.modal-overlay, .ny-dialog').forEach((overlay) => {
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
+      if (e.target !== overlay) return;
+      const behavior = resolveModalDismissBehavior(overlay.id, {
+        isBatchDownloadRunning: isAnimeBatchDownloadRunning()
+      });
+      if (behavior === 'blocked') return;
+      if (behavior === 'minimize' && typeof nWin.cerrarOMinimizarModalDescargaTemporada === 'function') {
+        nWin.cerrarOMinimizarModalDescargaTemporada();
+      } else if (overlay.id === 'modal-wt-join-pass' && typeof nWin.cerrarModalPasscodeWatchTogether === 'function') {
+        nWin.cerrarModalPasscodeWatchTogether();
+      } else {
         cerrarModales();
       }
     });
   });
+
+  if (!modalClassObserver && typeof MutationObserver !== 'undefined') {
+    modalClassObserver = new MutationObserver(() => {
+      syncModalBodyScrollLock();
+    });
+    modalClassObserver.observe(root, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class']
+    });
+  }
+
+  if (!modalEscapeListenerBound) {
+    modalEscapeListenerBound = true;
+    document.addEventListener('keydown', handleModalEscapeKey);
+  }
+  syncModalBodyScrollLock();
 }
 
 let authModalMode: 'login' | 'register' = 'login';
@@ -835,7 +948,7 @@ export function abrirModalDescargas(): void {
   document.getElementById('modal-gestor-descargas')?.classList.add('active');
 }
 
-export function setDownloadManagerTab(tab: 'all' | 'anime' | 'watch-later' | 'manga'): void {
+export function setDownloadManagerTab(tab: 'all' | 'active' | 'anime' | 'watch-later' | 'manga'): void {
   DownloadManager.setTab(tab);
 }
 

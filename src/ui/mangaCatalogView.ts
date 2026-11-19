@@ -26,6 +26,13 @@ import {
   formatBytesHuman,
   getOfflineMangaLibrary
 } from '../services/offline.ts';
+import {
+  buildSkeletonCardsHtml,
+  buildStateCardHtml,
+  createRequestGuard
+} from '../utils/uiPolishHelpers.ts';
+
+const mangaCatalogGuard = createRequestGuard();
 
 function getMangaDexContentRatingsQuery(): string {
   const base = 'contentRating%5B%5D=safe&contentRating%5B%5D=suggestive';
@@ -505,17 +512,18 @@ export const MangaSourceManager = {
 
     container.innerHTML = this.sources.map(s => {
       const isActive = s.id === currentActive;
+      const safeIdArg = escHtml(String(s.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
       return `
-        <div class="mihon-source-card ${isActive ? 'active' : ''}" onclick="seleccionarFuenteManga('${s.id}')">
+        <div class="mihon-source-card ${isActive ? 'active' : ''}" onclick="seleccionarFuenteManga('${safeIdArg}')">
           <div class="mihon-source-info">
             <div class="mihon-source-name-row">
-              <span class="mihon-source-name">${s.name}</span>
-              <span class="mihon-source-badge ${s.isRecommended ? 'rec' : ''}">${s.badge}</span>
+              <span class="mihon-source-name">${escHtml(s.name)}</span>
+              <span class="mihon-source-badge ${s.isRecommended ? 'rec' : ''}">${escHtml(s.badge)}</span>
             </div>
-            <div class="mihon-source-desc">${s.desc}</div>
+            <div class="mihon-source-desc">${escHtml(s.desc)}</div>
             <div class="mihon-source-tags">
-              ${s.tags.map(t => `<span class="mihon-source-tag">${t}</span>`).join('')}
-              <span class="mihon-source-tag" style="color:#10b981;">⚡ ${s.speed}</span>
+              ${s.tags.map(t => `<span class="mihon-source-tag">${escHtml(t)}</span>`).join('')}
+              <span class="mihon-source-tag" style="color:#10b981;">⚡ ${escHtml(s.speed)}</span>
             </div>
           </div>
           <div class="mihon-source-radio">${isActive ? '✓' : ''}</div>
@@ -2674,27 +2682,50 @@ export async function loadOfflineMangaCatalogList(): Promise<any[]> {
 }
 
 export async function cargarMangasYNovelas(forceRefresh = false): Promise<void> {
+  const { seq } = mangaCatalogGuard.next();
   const container = document.getElementById('resultados-lectura');
-  if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  if (container) {
+    container.className = 'grid';
+    container.innerHTML = buildSkeletonCardsHtml(8, 'grid');
+  }
   renderContinuarLeyendoManga();
   if (forceRefresh && AniListMangaService.cache) {
     AniListMangaService.cache = {};
   }
   const tipo = state.tipoLecturaActual || 'ALL';
-  if (tipo === 'FAVORITES') {
-    mangaUiState.mangasCache = MangaFavoritesManager.getAll();
-  } else if (tipo === 'OFFLINE') {
-    mangaUiState.mangasCache = await loadOfflineMangaCatalogList();
-  } else {
-    let list = await AniListMangaService.getCatalog(tipo);
-    if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
-      list = await loadOfflineMangaCatalogList();
+  try {
+    let nextList: any[] = [];
+    if (tipo === 'FAVORITES') {
+      nextList = MangaFavoritesManager.getAll();
+    } else if (tipo === 'OFFLINE') {
+      nextList = await loadOfflineMangaCatalogList();
+    } else {
+      let list = await AniListMangaService.getCatalog(tipo);
+      if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        list = await loadOfflineMangaCatalogList();
+      }
+      nextList = list;
     }
-    mangaUiState.mangasCache = list;
+    if (!mangaCatalogGuard.isCurrent(seq)) return;
+    mangaUiState.mangasCache = nextList;
+    nWin._currentMangaGridList = mangaUiState.mangasCache;
+    lecturaUIState.spotlightIdx = 0;
+    renderGridLectura(mangaUiState.mangasCache);
+  } catch (err) {
+    if (!mangaCatalogGuard.isCurrent(seq)) return;
+    console.warn('Error cargando catálogo de lectura:', err);
+    if (container) {
+      container.className = 'grid';
+      container.innerHTML = buildStateCardHtml({
+        kind: 'error',
+        icon: '📡',
+        title: 'Error cargando catálogo de lectura',
+        message: 'No pudimos obtener las obras en este momento.',
+        retryLabel: '🔄 Reintentar',
+        retryOnClick: 'cargarMangasYNovelas(true)'
+      });
+    }
   }
-  nWin._currentMangaGridList = mangaUiState.mangasCache;
-  lecturaUIState.spotlightIdx = 0;
-  renderGridLectura(mangaUiState.mangasCache);
 }
 
 export function recargarCatalogoManga(): void {
@@ -2708,6 +2739,7 @@ export function limpiarHistorialManga(): void {
 }
 
 export async function cambiarTipoLectura(tipo: string, el: HTMLElement | null = null): Promise<void> {
+  const { seq } = mangaCatalogGuard.next();
   state.tipoLecturaActual = tipo;
   const input = document.getElementById('input-busqueda-manga') as HTMLInputElement | null;
   if (input) input.value = '';
@@ -2725,13 +2757,17 @@ export async function cambiarTipoLectura(tipo: string, el: HTMLElement | null = 
   const ctrlBar = document.getElementById('lectura-controls-bar');
   const featWrap = document.getElementById('lectura-featured-wrap');
   const container = document.getElementById('resultados-lectura');
-  if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  if (container) {
+    container.className = 'grid';
+    container.innerHTML = buildSkeletonCardsHtml(8, 'grid');
+  }
 
   if (tipo === 'KEIYOUSHI') {
     genreBar?.classList.add('hide');
     ctrlBar?.classList.add('hide');
     featWrap?.classList.add('hide');
     if (!KeiyoushiManager.loaded) await KeiyoushiManager.init();
+    if (!mangaCatalogGuard.isCurrent(seq)) return;
     KeiyoushiManager.render();
     return;
   }
@@ -2740,20 +2776,39 @@ export async function cambiarTipoLectura(tipo: string, el: HTMLElement | null = 
   ctrlBar?.classList.remove('hide');
   featWrap?.classList.remove('hide');
 
-  if (tipo === 'FAVORITES') {
-    mangaUiState.mangasCache = MangaFavoritesManager.getAll();
-  } else if (tipo === 'OFFLINE') {
-    mangaUiState.mangasCache = await loadOfflineMangaCatalogList();
-  } else {
-    let list = await AniListMangaService.getCatalog(tipo);
-    if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
-      list = await loadOfflineMangaCatalogList();
+  try {
+    let nextList: any[] = [];
+    if (tipo === 'FAVORITES') {
+      nextList = MangaFavoritesManager.getAll();
+    } else if (tipo === 'OFFLINE') {
+      nextList = await loadOfflineMangaCatalogList();
+    } else {
+      let list = await AniListMangaService.getCatalog(tipo);
+      if ((!list || list.length === 0) && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        list = await loadOfflineMangaCatalogList();
+      }
+      nextList = list;
     }
-    mangaUiState.mangasCache = list;
+    if (!mangaCatalogGuard.isCurrent(seq)) return;
+    mangaUiState.mangasCache = nextList;
+    nWin._currentMangaGridList = mangaUiState.mangasCache;
+    lecturaUIState.spotlightIdx = 0;
+    renderGridLectura(mangaUiState.mangasCache);
+  } catch (err) {
+    if (!mangaCatalogGuard.isCurrent(seq)) return;
+    console.warn('Error cambiando tipo de lectura:', err);
+    if (container) {
+      container.className = 'grid';
+      container.innerHTML = buildStateCardHtml({
+        kind: 'error',
+        icon: '📡',
+        title: 'No se pudo cargar esta sección',
+        message: 'Intenta recargar el catálogo nuevamente.',
+        retryLabel: '🔄 Reintentar',
+        retryOnClick: 'cargarMangasYNovelas(true)'
+      });
+    }
   }
-  nWin._currentMangaGridList = mangaUiState.mangasCache;
-  lecturaUIState.spotlightIdx = 0;
-  renderGridLectura(mangaUiState.mangasCache);
 }
 
 export function cambiarGeneroLectura(genero: string): void {
@@ -2934,18 +2989,35 @@ export async function buscarMangaMultiFuente(query: string): Promise<any[]> {
 export function onMangaSearchInput(val: string): void {
   if (mangaSearchDebounce) clearTimeout(mangaSearchDebounce);
   if (!val || val.trim().length === 0) {
+    mangaCatalogGuard.invalidate();
     nWin._currentMangaGridList = mangaUiState.mangasCache;
     renderGridLectura(mangaUiState.mangasCache);
     return;
   }
   mangaSearchDebounce = setTimeout(async () => {
+    const { seq } = mangaCatalogGuard.next();
     const container = document.getElementById('resultados-lectura');
-    if (container) container.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+    if (container) {
+      container.className = 'grid';
+      container.innerHTML = buildSkeletonCardsHtml(8, 'grid');
+    }
     try {
       const results = await buscarMangaMultiFuente(val.trim());
+      if (!mangaCatalogGuard.isCurrent(seq)) return;
       renderGridLectura(results);
     } catch {
-      renderGridLectura([]);
+      if (!mangaCatalogGuard.isCurrent(seq)) return;
+      if (container) {
+        container.className = 'grid';
+        container.innerHTML = buildStateCardHtml({
+          kind: 'error',
+          icon: '📡',
+          title: 'Error en la búsqueda de mangas',
+          message: 'Comprueba tu conexión e inténtalo de nuevo.',
+          retryLabel: '🔄 Reintentar',
+          retryOnClick: 'recargarCatalogoManga()'
+        });
+      }
     }
   }, 300);
 }
@@ -2994,19 +3066,16 @@ export function renderGridLectura(customList: any[] | null = null): void {
   if (!filtered || filtered.length === 0) {
     container.className = 'grid';
     const isOfflineTab = state.tipoLecturaActual === 'OFFLINE';
-    container.innerHTML = `
-      <div style="grid-column: 1/-1; text-align:center; color: var(--text-muted); padding: 36px 20px;">
-        <div style="font-size:28px; margin-bottom:8px;">${isOfflineTab ? '💾' : '📖'}</div>
-        <div style="font-size:15px; font-weight:700; color:var(--text-main); margin-bottom:6px;">
-          ${isOfflineTab ? 'Aún no tienes capítulos en caché' : 'No se encontraron obras con estos filtros'}
-        </div>
-        <div style="font-size:12px; max-width:340px; margin:0 auto;">
-          ${isOfflineTab
-            ? 'Abre cualquier manga y pulsa 📥 en un capítulo (o "💾 Caché" / "💾 Guardar" dentro del lector) para leerlo sin conexión a internet.'
-            : 'Prueba seleccionando "Todos los géneros" o cambiando la categoría activa.'}
-        </div>
-      </div>
-    `;
+    container.innerHTML = buildStateCardHtml({
+      kind: 'empty',
+      icon: isOfflineTab ? '💾' : '📖',
+      title: isOfflineTab ? 'Aún no tienes capítulos en caché' : 'No se encontraron obras con estos filtros',
+      message: isOfflineTab
+        ? 'Abre cualquier manga y pulsa 📥 en un capítulo (o "💾 Guardar" dentro del lector) para leerlo sin conexión.'
+        : 'Prueba seleccionando "Todos los géneros" o recargando el catálogo.',
+      retryLabel: isOfflineTab ? undefined : '🔄 Recargar catálogo',
+      retryOnClick: isOfflineTab ? undefined : 'recargarCatalogoManga()'
+    });
     return;
   }
 

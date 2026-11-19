@@ -1,5 +1,7 @@
 import { registerSW } from 'virtual:pwa-register';
 import {
+  detectActiveMediaSession,
+  evaluateSwUpdateLifecycleAction,
   findMismatchedServiceWorkers,
   isDevServiceWorkerScript,
   shouldAllowSwTriggeredReload,
@@ -25,8 +27,10 @@ interface PWAWindow extends Window {
     isIOS: () => boolean;
     isOnline: () => boolean;
     hasUpdateReady: () => boolean;
+    hasDeferredUpdate: () => boolean;
+    flushDeferredUpdatePrompt: () => void;
     install: () => Promise<boolean>;
-    applyUpdate: () => Promise<void>;
+    applyUpdate: (opts?: { allowDuringMedia?: boolean }) => Promise<void>;
     openInstallModal: () => void;
     closeInstallModal: () => void;
     refreshUI: () => void;
@@ -61,7 +65,95 @@ const ua = window.navigator.userAgent.toLowerCase();
 const isIOSDevice = /iphone|ipad|ipod/.test(ua);
 let isOnlineState = typeof navigator !== 'undefined' ? navigator.onLine : true;
 let updateReadyState = false;
+let deferredUpdatePending = false;
+let updatePromptShown = false;
 let userRequestedUpdate = false;
+let allowUpdateDuringMedia = false;
+let mediaIdleObserver: MutationObserver | null = null;
+let mediaIdlePollTimer: number | null = null;
+
+function stopWatchingMediaSessionIdle(): void {
+  if (mediaIdleObserver) {
+    try {
+      mediaIdleObserver.disconnect();
+    } catch {
+      // ignore
+    }
+    mediaIdleObserver = null;
+  }
+  if (mediaIdlePollTimer !== null) {
+    window.clearInterval(mediaIdlePollTimer);
+    mediaIdlePollTimer = null;
+  }
+}
+
+function showNonIntrusiveUpdateToast(): void {
+  updatePromptShown = true;
+  deferredUpdatePending = false;
+  stopWatchingMediaSessionIdle();
+  pwaWin.showToast?.('Nueva versión lista para aplicar', {
+    label: 'Actualizar',
+    durationMs: 9000,
+    onClick: () => {
+      void applyPWAUpdate({ allowDuringMedia: true });
+    }
+  });
+}
+
+function flushDeferredUpdatePromptIfSafe(): void {
+  if (!updateReadyState && !deferredUpdatePending) {
+    stopWatchingMediaSessionIdle();
+    return;
+  }
+  const session = detectActiveMediaSession(typeof document !== 'undefined' ? document : null);
+  const action = evaluateSwUpdateLifecycleAction({
+    isPlayingVideo: session.isPlayingVideo,
+    isReadingManga: session.isReadingManga,
+    isDownloading: session.isDownloading,
+    alreadyPrompted: updatePromptShown
+  });
+  if (action === 'defer') {
+    deferredUpdatePending = true;
+    watchForMediaSessionIdle();
+    return;
+  }
+  if (action === 'prompt') {
+    showNonIntrusiveUpdateToast();
+  }
+}
+
+function watchForMediaSessionIdle(): void {
+  if (typeof document === 'undefined' || mediaIdleObserver) return;
+  const watchedIds = [
+    'pantalla-reproductor',
+    'pantalla-lector',
+    'season-dl-progress-box',
+    'manga-dl-progress-box'
+  ];
+  const checkNow = () => {
+    if (!deferredUpdatePending) {
+      stopWatchingMediaSessionIdle();
+      return;
+    }
+    const session = detectActiveMediaSession(document);
+    if (!session.isBusy) {
+      flushDeferredUpdatePromptIfSafe();
+    }
+  };
+
+  if (typeof MutationObserver !== 'undefined') {
+    mediaIdleObserver = new MutationObserver(checkNow);
+    for (const id of watchedIds) {
+      const el = document.getElementById(id);
+      if (el) {
+        mediaIdleObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+      }
+    }
+  }
+  if (mediaIdlePollTimer === null) {
+    mediaIdlePollTimer = window.setInterval(checkNow, 4000);
+  }
+}
 
 async function cleanupMismatchedRegistrations(swUrl: string): Promise<void> {
   if (!('serviceWorker' in navigator) || typeof navigator.serviceWorker.getRegistrations !== 'function') {
@@ -80,20 +172,63 @@ if (import.meta.env.DEV) {
   void cleanupMismatchedRegistrations('/dev-sw.js');
 }
 
+let hadInitialSwController = Boolean(
+  typeof navigator !== 'undefined' &&
+  'serviceWorker' in navigator &&
+  navigator.serviceWorker.controller
+);
+
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadInitialSwController) {
+      hadInitialSwController = true;
+      return;
+    }
+    const session = detectActiveMediaSession(typeof document !== 'undefined' ? document : null);
+    if (
+      shouldAllowSwTriggeredReload({
+        userRequested: userRequestedUpdate,
+        isUpdate: true,
+        isPlayingVideo: session.isPlayingVideo,
+        isReadingManga: session.isReadingManga,
+        isDownloading: session.isDownloading,
+        allowDuringMedia: allowUpdateDuringMedia
+      })
+    ) {
+      trySafeReload(window.sessionStorage, () => {
+        window.location.reload();
+      });
+      return;
+    }
+    // Background SW activation (e.g. skipWaiting + clientsClaim): NEVER reload abruptly.
+    // Defer prompt while watching anime, reading manga, or downloading.
+    updateReadyState = true;
+    flushDeferredUpdatePromptIfSafe();
+  });
+}
+
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
     updateReadyState = true;
-    pwaWin.showToast?.('Nueva versión disponible', {
-      label: 'Actualizar',
-      durationMs: 9000,
-      onClick: () => {
-        void applyPWAUpdate();
-      }
-    });
+    updatePromptShown = false;
+    flushDeferredUpdatePromptIfSafe();
   },
   onNeedReload() {
-    if (!shouldAllowSwTriggeredReload({ userRequested: userRequestedUpdate })) {
+    const session = detectActiveMediaSession(typeof document !== 'undefined' ? document : null);
+    if (
+      !shouldAllowSwTriggeredReload({
+        userRequested: userRequestedUpdate,
+        isUpdate: true,
+        isPlayingVideo: session.isPlayingVideo,
+        isReadingManga: session.isReadingManga,
+        isDownloading: session.isDownloading,
+        allowDuringMedia: allowUpdateDuringMedia
+      })
+    ) {
+      updateReadyState = true;
+      deferredUpdatePending = true;
+      watchForMediaSessionIdle();
       return;
     }
     trySafeReload(window.sessionStorage, () => {
@@ -101,20 +236,44 @@ const updateSW = registerSW({
     });
   },
   onOfflineReady() {
-    pwaWin.showToast?.('NyAnime listo para abrirse rápido como App');
+    const session = detectActiveMediaSession(typeof document !== 'undefined' ? document : null);
+    if (!session.isBusy) {
+      pwaWin.showToast?.('NyAnime listo para abrirse rápido como App');
+    }
   },
   onRegisteredSW(swUrl) {
     void cleanupMismatchedRegistrations(swUrl);
   }
 });
 
-async function applyPWAUpdate(): Promise<void> {
+async function applyPWAUpdate(opts: { allowDuringMedia?: boolean } = {}): Promise<void> {
+  const session = detectActiveMediaSession(typeof document !== 'undefined' ? document : null);
+  if (session.isBusy && opts.allowDuringMedia !== true) {
+    updateReadyState = true;
+    deferredUpdatePending = true;
+    watchForMediaSessionIdle();
+    return;
+  }
+
   userRequestedUpdate = true;
+  allowUpdateDuringMedia = Boolean(opts.allowDuringMedia);
   updateReadyState = false;
+  deferredUpdatePending = false;
+  stopWatchingMediaSessionIdle();
+
   try {
     await updateSW(true);
+    // If skipWaiting already activated the updated SW silently in the background,
+    // no waiting worker remains to fire `controlling`, so reload safely now on user action.
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration().catch(() => null) : null;
+    if (!reg?.waiting) {
+      trySafeReload(window.sessionStorage, () => {
+        window.location.reload();
+      });
+    }
   } catch {
     userRequestedUpdate = false;
+    allowUpdateDuringMedia = false;
   }
 }
 
@@ -283,7 +442,7 @@ async function subscribeWebPush(
   const reg = await getActiveSwRegistration();
   if (reg) {
     try {
-      const keyResp = await fetch('/api/push/vapid-public-key');
+      const keyResp = await fetch('/api/push/vapid-public-key', { credentials: 'same-origin' });
       if (keyResp.ok) {
         const { publicKey } = (await keyResp.json()) as { publicKey?: string };
         if (publicKey) {
@@ -323,6 +482,7 @@ async function subscribeWebPush(
   try {
     const saveResp = await fetch('/api/push/subscribe', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         uid,
@@ -363,6 +523,7 @@ async function unsubscribeWebPush(): Promise<boolean> {
     if (sub || fcmToken) {
       await fetch('/api/push/unsubscribe', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(sub?.endpoint ? { endpoint: sub.endpoint } : {}),
@@ -407,6 +568,7 @@ async function sendTestPush(): Promise<boolean> {
     const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/test', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...(endpoint ? { endpoint } : {}),
@@ -428,6 +590,7 @@ async function dispatchAiringPush(
     const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/check-airing', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...(endpoint ? { endpoint } : {}),
@@ -447,6 +610,7 @@ async function sendWeeklyDigestPush(headline: string): Promise<boolean> {
     const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/send-weekly-summary', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...(endpoint ? { endpoint } : {}),
@@ -466,6 +630,8 @@ pwaWin.NyAnimePWA = {
   isIOS: () => isIOSDevice,
   isOnline: () => isOnlineState,
   hasUpdateReady: () => updateReadyState,
+  hasDeferredUpdate: () => deferredUpdatePending,
+  flushDeferredUpdatePrompt: flushDeferredUpdatePromptIfSafe,
   install: promptNativeInstall,
   applyUpdate: applyPWAUpdate,
   openInstallModal: openPWAInstallModal,

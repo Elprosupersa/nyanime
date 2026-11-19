@@ -5,6 +5,7 @@ import {
   escHtml,
   getActiveManga,
   handleOpenExternal,
+  hasActiveModal,
   mostrarToast,
   nWin,
   nativeFetchJson,
@@ -43,7 +44,13 @@ import {
   normalizeMangaReaderMode,
   stepSpreadIndex
 } from '../utils/mangaReaderHelpers.ts';
+import {
+  createRequestGuard,
+  resolveMangaReaderShortcutAction
+} from '../utils/uiPolishHelpers.ts';
 
+const readerChapterGuard = createRequestGuard();
+let readerKeydownListener: ((e: KeyboardEvent) => void) | null = null;
 let lectorHudVisible = true;
 const readerCurrentSettings: {
   mode: MangaReaderMode;
@@ -272,6 +279,7 @@ export function cambiarAVersionInglesCapitulo(targetChapNum: number): void {
 
 export async function abrirLectorManga(idx: number): Promise<void> {
   flushMangaReaderPage();
+  const { seq } = readerChapterGuard.next();
 
   const listSource = mangaUiState.capitulosLectorList.length > 0
     ? mangaUiState.capitulosLectorList
@@ -309,6 +317,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       let hasFallbackPages = false;
       try {
         const testFb = await MangaDex.getChapterPages(capitulo, activeManga?.title, capitulo.chapterNum, null, activeManga?.altTitles);
+        if (!readerChapterGuard.isCurrent(seq)) return;
         if (testFb?.pages?.length > 0) {
           hasFallbackPages = true;
           capitulo.externalUrl = null;
@@ -319,6 +328,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       } catch {
         // ignore
       }
+      if (!readerChapterGuard.isCurrent(seq)) return;
       if (!hasFallbackPages) {
         mostrarToast(`Abriendo capítulo en portal oficial (${capitulo.group || 'Oficial'})...`, 'info');
         handleOpenExternal(capitulo.externalUrl);
@@ -345,6 +355,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
     lector.classList.remove('hide');
     lector.scrollTo(0, 0);
   }
+  attachReaderKeyboardNavigation();
 
   const savedPageBeforeSave = MangaHistoryManager.getSavedPageNumber(activeManga.id, capitulo.chapterNum);
   lastTrackedReaderPage = savedPageBeforeSave;
@@ -367,6 +378,16 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       [activeManga?.id, activeManga?.dexId, capitulo.mangaId],
       capitulo.chapterNum
     );
+    if (!readerChapterGuard.isCurrent(seq)) {
+      if (offlineMatch?.pages?.length) {
+        offlineMatch.pages.forEach((u) => {
+          if (u.startsWith('blob:')) {
+            try { URL.revokeObjectURL(u); } catch { /* ignore */ }
+          }
+        });
+      }
+      return;
+    }
     if (offlineMatch && offlineMatch.pages.length > 0) {
       activeReaderBlobUrls = [...offlineMatch.pages];
       readerCurrentOfflineManifestId = offlineMatch.manifest.id;
@@ -393,10 +414,14 @@ export async function abrirLectorManga(idx: number): Promise<void> {
         mangaUiState.idiomaMangaSeleccionado || 'es',
         activeManga?.altTitles
       );
+      if (!readerChapterGuard.isCurrent(seq)) return;
     } catch (ePages) {
+      if (!readerChapterGuard.isCurrent(seq)) return;
       console.warn('[abrirLectorManga] Error inicial en getChapterPages:', ePages);
     }
   }
+
+  if (!readerChapterGuard.isCurrent(seq)) return;
 
   const pages: string[] = resPages?.pages?.length > 0 ? resPages.pages : (resPages?.saverPages || []);
   if (!isOfflineServed && pages.length > 0) {
@@ -422,18 +447,19 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       ? (cc.english.find((c: any) => Math.abs(parseFloat(c.chapterNum) - parseFloat(capitulo.chapterNum)) < 0.001) || cc.english[0])
       : null;
     if (content) {
+      const safeExternalArg = escHtml(String(capitulo.externalUrl || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
       content.innerHTML = `
-        <div style="text-align:center; padding:50px 20px; color:#94a3b8;">
-          <div style="font-size:36px; margin-bottom:12px;">📑</div>
-          <div style="font-size:17px; font-weight:700; color:#fff; margin-bottom:8px;">Servidor de Lectura No Disponible</div>
-          <div style="font-size:13px; line-height:1.5; color:#cbd5e1; max-width:340px; margin:0 auto 20px;">
-            No se pudieron cargar páginas para este capítulo en el idioma seleccionado. Puedes reintentar, cambiar de fuente o abrir explícitamente la versión en Inglés si está disponible.
+        <div class="ny-state-card is-error" style="max-width:440px; margin:44px auto;">
+          <div class="ny-state-icon">📑</div>
+          <div class="ny-state-title">Servidor de lectura no disponible</div>
+          <div class="ny-state-message">
+            No se pudieron cargar páginas para este capítulo en el idioma seleccionado. Puedes reintentar, cambiar de fuente o abrir la versión en Inglés si está disponible.
           </div>
-          <div style="display:flex; flex-direction:column; gap:10px; max-width:280px; margin:0 auto;">
-            <button class="chip active" style="padding:10px 16px; font-weight:600;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">🔄 Reintentar Carga</button>
-            ${enFallbackCap ? `<button class="chip" style="padding:10px 16px; border-color:rgba(255,255,255,0.22); color:#fff;" onclick="cambiarAVersionInglesCapitulo(${enFallbackCap.chapterNum})">🇬🇧 Leer Cap. ${escHtml(enFallbackCap.chapter)} en Inglés</button>` : ''}
-            <button class="chip" style="padding:10px 16px;" onclick="mostrarModalFuentesManga()">🌐 Cambiar de Fuente en Mihon</button>
-            ${capitulo.externalUrl ? `<button class="chip" style="padding:10px 16px;" onclick="handleOpenExternal('${escHtml(capitulo.externalUrl)}')">📖 Abrir en Portal Oficial (${escHtml(capitulo.group || 'Oficial')})</button>` : ''}
+          <div class="ny-state-actions" style="flex-direction:column; width:100%; max-width:280px;">
+            <button type="button" class="ny-retry-btn" style="width:100%;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">🔄 Reintentar carga</button>
+            ${enFallbackCap ? `<button type="button" class="chip" style="width:100%; padding:10px 16px; border-color:rgba(255,255,255,0.22); color:#fff;" onclick="cambiarAVersionInglesCapitulo(${Number(enFallbackCap.chapterNum)})">🇬🇧 Leer Cap. ${escHtml(enFallbackCap.chapter)} en Inglés</button>` : ''}
+            <button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="mostrarModalFuentesManga()">🌐 Cambiar de fuente</button>
+            ${capitulo.externalUrl ? `<button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="handleOpenExternal('${safeExternalArg}')">📖 Abrir en portal oficial (${escHtml(capitulo.group || 'Oficial')})</button>` : ''}
           </div>
         </div>
       `;
@@ -450,6 +476,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
   const nextCap = mangaUiState.capitulosLectorList[mangaUiState.capituloActualIdx + 1];
   if (nextCap && activeManga && !isOfflineServed && !isOfflineNow) {
     setTimeout(() => {
+      if (!readerChapterGuard.isCurrent(seq)) return;
       void prefetchCapituloObjetivoManga(activeManga, nextCap);
     }, 500);
   }
@@ -502,7 +529,7 @@ export function renderActiveMangaReaderPages(restorePage = 1): void {
 
   applyReaderZoom(1.0);
   initReaderGestures();
-  bindReaderKeyboardNavigation();
+  attachReaderKeyboardNavigation();
 
   continuousChapterArmed = false;
   isContinuousAdvancing = false;
@@ -615,20 +642,73 @@ export function navegarSpreadLector(
   renderCurrentSpread();
 }
 
-function bindReaderKeyboardNavigation(): void {
-  if (nWin._nyMangaReaderKeyBound) return;
+function detachReaderKeyboardNavigation(): void {
+  if (readerKeydownListener) {
+    document.removeEventListener('keydown', readerKeydownListener);
+    readerKeydownListener = null;
+  }
+  nWin._nyMangaReaderKeyBound = false;
+}
+
+function attachReaderKeyboardNavigation(): void {
+  if (readerKeydownListener) return;
   nWin._nyMangaReaderKeyBound = true;
-  document.addEventListener('keydown', (e) => {
+
+  readerKeydownListener = (e: KeyboardEvent) => {
     const lector = document.getElementById('pantalla-lector');
-    if (!lector || lector.classList.contains('hide')) return;
-    if (readerCurrentSettings.mode === 'webtoon') return;
-    const tag = String(document.activeElement?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const readerActive = Boolean(lector && !lector.classList.contains('hide'));
+    if (!readerActive) return;
+
+    const hasOpenSheet = Boolean(
+      document.getElementById('mihon-quick-caps-sheet')?.classList.contains('open') ||
+      document.getElementById('mihon-reader-settings-sheet')?.classList.contains('open')
+    );
+
+    const action = resolveMangaReaderShortcutAction(
+      {
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        target: e.target || document.activeElement
+      },
+      {
+        readerActive,
+        hasOpenModal: hasActiveModal(),
+        hasOpenSheet,
+        mode: readerCurrentSettings.mode
+      }
+    );
+    if (!action) return;
+
+    if (action === 'close-sheet') {
       e.preventDefault();
-      navegarSpreadLector(e.key);
+      cerrarQuickCapsSheet();
+      cerrarAjustesLector();
+      return;
     }
-  });
+
+    if (action === 'toggle-hud') {
+      e.preventDefault();
+      toggleLectorHUD();
+      return;
+    }
+
+    if (action === 'scroll-up' || action === 'scroll-down') {
+      if (!lector) return;
+      e.preventDefault();
+      const step = Math.round(window.innerHeight * 0.72);
+      lector.scrollBy({ top: action === 'scroll-down' ? step : -step, behavior: 'smooth' });
+      return;
+    }
+
+    if (action === 'prev-page' || action === 'next-page') {
+      e.preventDefault();
+      navegarSpreadLector(e.key === 'ArrowLeft' ? 'ArrowLeft' : 'ArrowRight');
+    }
+  };
+
+  document.addEventListener('keydown', readerKeydownListener);
 }
 
 export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void> {
@@ -1216,6 +1296,10 @@ export function setReaderWidth(w: string, skipCloud = false): void {
 }
 
 export function cerrarLector(): void {
+  readerChapterGuard.invalidate();
+  detachReaderKeyboardNavigation();
+  cerrarQuickCapsSheet();
+  cerrarAjustesLector();
   flushMangaReaderPage();
   applyReaderZoom(1.0);
   const content = document.getElementById('lector-content');
@@ -1238,4 +1322,5 @@ export function cerrarLector(): void {
     }
   }
   if (nWin.Store?.setActiveChapter) nWin.Store.setActiveChapter(null);
+  nWin.NyAnimePWA?.flushDeferredUpdatePrompt?.();
 }

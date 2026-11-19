@@ -1,9 +1,21 @@
 import { escapeHTML, safeImageUrl } from '../utils/sanitize.ts';
 import { buildVideoDownloadProxyUrl, sanitizeDownloadFilename } from '../utils/proxySecurity.ts';
 import {
+  DOWNLOAD_CHUNK_BYTES,
   computeStorageMeter,
+  estimateAnimeBatchBytes,
+  estimateMangaBatchBytes,
+  evaluateStorageQuota,
+  formatAnimeEpisodeFilename,
+  formatBytesCompact,
+  formatSpeedAndEta,
   groupOfflineManifests,
-  type DownloadManagerFilterTab
+  isQuotaExceededError,
+  parseContentRangeHeader,
+  type ActiveDownloadBatchSnapshot,
+  type DownloadDestination,
+  type DownloadManagerFilterTab,
+  type StorageQuotaAssessment
 } from '../utils/downloadHelpers.ts';
 
 export const OFFLINE_MANGA_CACHE = 'nyanime-offline-manga-v1';
@@ -75,10 +87,24 @@ export interface MangaDownloadProgress {
   bytesDownloaded: number;
 }
 
+export interface AnimeDownloadProgress {
+  percent: number;
+  loadedBytes: number;
+  totalBytes: number;
+  speedMbps: number;
+  speedLabel: string;
+  etaSeconds: number | null;
+  etaLabel: string;
+  chunkIndex: number;
+  totalChunks: number;
+}
+
 export interface StorageSummary {
   usageBytes: number;
   quotaBytes: number;
   offlineBytes: number;
+  animeBytes: number;
+  mangaBytes: number;
   mangaChaptersCount: number;
   animeFilesCount: number;
   watchLaterCount: number;
@@ -101,6 +127,69 @@ export async function ensurePersistentStorage(): Promise<boolean> {
     // Ignore storage persistence errors on unsupported browsers
   }
   return false;
+}
+
+export async function checkStorageSpaceForDownload(
+  requiredBytes: number,
+  estimateProvider?: () => Promise<{ usage?: number; quota?: number }>
+): Promise<StorageQuotaAssessment> {
+  try {
+    const estimator =
+      estimateProvider ||
+      (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.estimate === 'function'
+        ? () => navigator.storage.estimate()
+        : null);
+
+    if (!estimator) {
+      return evaluateStorageQuota({ requiredBytes, supported: false });
+    }
+
+    const est = await estimator();
+    return evaluateStorageQuota({
+      usageBytes: Number(est?.usage || 0),
+      quotaBytes: Number(est?.quota || 0),
+      requiredBytes,
+      supported: Number(est?.quota || 0) > 0
+    });
+  } catch {
+    return evaluateStorageQuota({ requiredBytes, supported: false });
+  }
+}
+
+async function deleteOfflineRecordOnly(id: string): Promise<void> {
+  try {
+    const db = await openOfflineDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('Error eliminando registro offline'));
+    });
+    db.close();
+  } catch {
+    // Ignore secondary cleanup error if IndexedDB is unavailable
+  }
+}
+
+async function cleanupOfflineDownloadArtifacts(params: {
+  id: string;
+  cacheName: string;
+  cacheKeys: Iterable<string>;
+}): Promise<void> {
+  if (typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open(params.cacheName);
+      const uniqueKeys = Array.from(new Set(Array.from(params.cacheKeys).filter(Boolean)));
+      await Promise.all(uniqueKeys.map((k) => cache.delete(k).catch(() => false)));
+    } catch {
+      // Ignore secondary cache cleanup error
+    }
+  }
+  await deleteOfflineRecordOnly(params.id);
+}
+
+function buildQuotaExceededError(message: string): DOMException {
+  return new DOMException(message, 'QuotaExceededError');
 }
 
 function openOfflineDB(): Promise<IDBDatabase> {
@@ -319,7 +408,7 @@ async function cacheMangaCoverBestEffort(
   try {
     const existing = await cache.match(coverKey);
     if (existing) return coverKey;
-    const resp = await fetch(resolveFetchUrl(cover));
+    const resp = await fetch(resolveFetchUrl(cover), { credentials: 'same-origin' });
     if (!resp.ok) return undefined;
     const blob = await resp.blob();
     if (blob.size < 100) return undefined;
@@ -398,14 +487,28 @@ export async function downloadMangaChapterOffline(params: {
 
   await ensurePersistentStorage();
 
+  const preflightQuota = await checkStorageSpaceForDownload(estimateMangaBatchBytes(1));
+  if (preflightQuota.status === 'insufficient') {
+    throw buildQuotaExceededError(preflightQuota.message);
+  }
+
   const offlineId = buildMangaChapterOfflineId(mangaId, chapterNum);
   const cache = await caches.open(OFFLINE_MANGA_CACHE);
   const pageKeys: string[] = new Array(pageUrls.length);
+  const writtenCacheKeys = new Set<string>();
+  const internalAbortCtrl = new AbortController();
+  const onExternalAbort = () => internalAbortCtrl.abort();
+  if (signal?.aborted) {
+    throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+  }
+  signal?.addEventListener('abort', onExternalAbort, { once: true });
+
   let totalBytes = 0;
   let completedPages = 0;
+  let workers: Promise<void>[] = [];
 
   const fetchSinglePage = async (index: number): Promise<void> => {
-    if (signal?.aborted) {
+    if (signal?.aborted || internalAbortCtrl.signal.aborted) {
       throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
     }
 
@@ -414,21 +517,24 @@ export async function downloadMangaChapterOffline(params: {
     let lastStatus = 0;
 
     for (const candidate of candidates) {
-      if (signal?.aborted) {
+      if (signal?.aborted || internalAbortCtrl.signal.aborted) {
         throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
       }
       try {
         const proxyUrl = resolveFetchUrl(candidate);
         const reqCtrl = new AbortController();
         const timeoutId = setTimeout(() => reqCtrl.abort(), 10000);
-        const onUserAbort = () => reqCtrl.abort();
-        signal?.addEventListener('abort', onUserAbort, { once: true });
+        const onAbort = () => reqCtrl.abort();
+        internalAbortCtrl.signal.addEventListener('abort', onAbort, { once: true });
         let resp: Response;
         try {
-          resp = await fetch(proxyUrl, { signal: reqCtrl.signal });
+          resp = await fetch(proxyUrl, {
+            signal: reqCtrl.signal,
+            credentials: 'same-origin'
+          });
         } finally {
           clearTimeout(timeoutId);
-          signal?.removeEventListener('abort', onUserAbort);
+          internalAbortCtrl.signal.removeEventListener('abort', onAbort);
         }
         lastStatus = resp.status;
         if (!resp.ok) continue;
@@ -436,8 +542,8 @@ export async function downloadMangaChapterOffline(params: {
         if (blob.size < 100) continue;
         downloadedBlob = blob;
         break;
-      } catch (err: any) {
-        if (signal?.aborted) {
+      } catch {
+        if (signal?.aborted || internalAbortCtrl.signal.aborted) {
           throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
         }
       }
@@ -445,6 +551,10 @@ export async function downloadMangaChapterOffline(params: {
 
     if (!downloadedBlob) {
       throw new Error(`Fallo al descargar página ${index + 1}${lastStatus ? ` (${lastStatus})` : ''}`);
+    }
+
+    if (signal?.aborted || internalAbortCtrl.signal.aborted) {
+      throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
     }
 
     totalBytes += downloadedBlob.size;
@@ -456,6 +566,7 @@ export async function downloadMangaChapterOffline(params: {
         'X-Offline-Manga': offlineId
       }
     });
+    writtenCacheKeys.add(cacheKey);
     await cache.put(cacheKey, cachedResp);
     pageKeys[index] = cacheKey;
     completedPages += 1;
@@ -473,46 +584,74 @@ export async function downloadMangaChapterOffline(params: {
   try {
     const concurrency = Math.min(3, pageUrls.length);
     let nextIdx = 0;
-    const workers = Array.from({ length: concurrency }, async () => {
+    workers = Array.from({ length: concurrency }, async () => {
       while (nextIdx < pageUrls.length) {
+        if (signal?.aborted || internalAbortCtrl.signal.aborted) {
+          throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+        }
         const myIdx = nextIdx;
         nextIdx += 1;
         await fetchSinglePage(myIdx);
       }
     });
     await Promise.all(workers);
+
+    if (signal?.aborted || internalAbortCtrl.signal.aborted) {
+      throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+    }
+
+    const coverCacheKey = await cacheMangaCoverBestEffort(cache, mangaId, cover || mangaMeta?.cover);
+
+    if (signal?.aborted || internalAbortCtrl.signal.aborted) {
+      throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+    }
+
+    const manifest: OfflineChapterManifest = {
+      id: offlineId,
+      kind: 'manga',
+      mediaId: String(mangaId),
+      title: mangaTitle,
+      cover: cover || mangaMeta?.cover,
+      coverCacheKey,
+      chapterNum,
+      chapterLabel,
+      chapterTitle: chapterTitle || `Capítulo ${chapterLabel}`,
+      lang: lang || 'es',
+      group: group || 'Offline 💾',
+      mangaMeta,
+      pageKeys,
+      pageCount: pageKeys.length,
+      sizeBytes: totalBytes,
+      status: 'completed',
+      createdAt: Date.now()
+    };
+
+    await putOfflineManifest(manifest);
+    return manifest;
   } catch (err) {
-    // Limpiar descargas parciales de este capítulo cancelado o fallido
-    await Promise.all(
-      pageKeys.filter(Boolean).map((k) => cache.delete(k).catch(() => false))
-    );
+    internalAbortCtrl.abort();
+    if (workers.length > 0) {
+      await Promise.allSettled(workers);
+    }
+    const allPotentialKeys = [
+      ...writtenCacheKeys,
+      ...pageKeys.filter(Boolean),
+      ...Array.from({ length: pageUrls.length }, (_, idx) => buildOfflinePageCacheKey(offlineId, idx))
+    ];
+    await cleanupOfflineDownloadArtifacts({
+      id: offlineId,
+      cacheName: OFFLINE_MANGA_CACHE,
+      cacheKeys: allPotentialKeys
+    });
+    if (isQuotaExceededError(err)) {
+      throw buildQuotaExceededError(
+        'Espacio de almacenamiento insuficiente en el dispositivo. Se limpiaron las páginas incompletas.'
+      );
+    }
     throw err;
+  } finally {
+    signal?.removeEventListener('abort', onExternalAbort);
   }
-
-  const coverCacheKey = await cacheMangaCoverBestEffort(cache, mangaId, cover || mangaMeta?.cover);
-
-  const manifest: OfflineChapterManifest = {
-    id: offlineId,
-    kind: 'manga',
-    mediaId: String(mangaId),
-    title: mangaTitle,
-    cover: cover || mangaMeta?.cover,
-    coverCacheKey,
-    chapterNum,
-    chapterLabel,
-    chapterTitle: chapterTitle || `Capítulo ${chapterLabel}`,
-    lang: lang || 'es',
-    group: group || 'Offline 💾',
-    mangaMeta,
-    pageKeys,
-    pageCount: pageKeys.length,
-    sizeBytes: totalBytes,
-    status: 'completed',
-    createdAt: Date.now()
-  };
-
-  await putOfflineManifest(manifest);
-  return manifest;
 }
 
 export async function getOfflineMangaChapterPages(
@@ -721,94 +860,411 @@ export async function deleteOfflineSeriesGroup(
   return removed;
 }
 
-export async function downloadAnimeEpisodeOrQueue(params: {
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Descarga cancelada por el usuario', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export interface DownloadAnimeEpisodeParams {
   animeId: string | number;
   animeTitle: string;
   cover?: string;
   season: number;
   episode: number;
   quality: string;
+  audio?: 'SUB' | 'DUB';
+  destination?: DownloadDestination;
   directStreamUrl?: string | null;
   fallbackWebUrl: string;
   saveToDeviceFilename?: string;
-  onProgress?: (percent: number, loadedBytes: number, totalBytes: number) => void;
+  allowWatchLaterFallback?: boolean;
+  chunkSizeBytes?: number;
+  maxRetriesPerChunk?: number;
+  retryBaseDelayMs?: number;
+  waitIfPaused?: () => Promise<void>;
+  onProgress?: (
+    percent: number,
+    loadedBytes: number,
+    totalBytes: number,
+    detail?: AnimeDownloadProgress
+  ) => void;
   signal?: AbortSignal;
-}): Promise<OfflineChapterManifest> {
+}
+
+export async function downloadAnimeEpisodeOrQueue(
+  params: DownloadAnimeEpisodeParams
+): Promise<OfflineChapterManifest> {
   const id = `anime_${params.animeId}_s${params.season}_e${params.episode}`;
   const directStr = String(params.directStreamUrl || '');
   const isDirectVideo =
     Boolean(directStr) &&
     (directStr.startsWith('/api/video-proxy?') || /\.(mp4|webm|mkv)(\?|$)/i.test(directStr));
 
-  if (isDirectVideo && params.directStreamUrl && typeof caches !== 'undefined') {
-    await ensurePersistentStorage();
-    const resp = await fetch(params.directStreamUrl, { signal: params.signal });
-    if (!resp.ok) {
-      throw new Error(`No se pudo descargar el video (${resp.status})`);
-    }
-    const respCt = (resp.headers.get('content-type') || '').toLowerCase();
-    if (respCt.includes('text/html') || respCt.includes('application/xhtml')) {
-      throw new Error('El servidor devolvió una página HTML en lugar del flujo de video .MP4');
+  const destination: DownloadDestination =
+    params.destination || (params.saveToDeviceFilename ? 'both' : 'app');
+  const saveToApp = destination === 'app' || destination === 'both';
+  const saveToDevice = destination === 'device' || destination === 'both';
+  const audioTag: 'SUB' | 'DUB' = params.audio === 'DUB' ? 'DUB' : 'SUB';
+  const allowWatchLaterFallback = params.allowWatchLaterFallback !== false;
+
+  if (isDirectVideo && params.directStreamUrl && (!saveToApp || typeof caches !== 'undefined')) {
+    if (params.signal?.aborted) {
+      throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
     }
 
-    const total = Number(resp.headers.get('content-length') || '0');
-    const reader = resp.body?.getReader();
-    const chunks: Uint8Array[] = [];
-    let loaded = 0;
-
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          loaded += value.byteLength;
-          const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 50;
-          params.onProgress?.(pct, loaded, total);
-        }
+    if (saveToApp) {
+      await ensurePersistentStorage();
+      const estimatedBytes = estimateAnimeBatchBytes(1, params.quality);
+      const preflightQuota = await checkStorageSpaceForDownload(estimatedBytes);
+      if (preflightQuota.status === 'insufficient') {
+        throw buildQuotaExceededError(preflightQuota.message);
       }
     }
 
-    const blob = new Blob(chunks as BlobPart[], { type: respCt.includes('video/') ? respCt : 'video/mp4' });
-    if (blob.size === 0 || (total > 65536 && blob.size < 32768)) {
-      throw new Error('El flujo de video descargado está incompleto o vacío');
-    }
+    const downloadFilename =
+      params.saveToDeviceFilename ||
+      formatAnimeEpisodeFilename(params.animeTitle, params.season, params.episode, audioTag);
+
+    const fetchUrl = directStr.includes('download=1')
+      ? directStr
+      : buildVideoDownloadProxyUrl(directStr, downloadFilename);
 
     const cacheKey = `https://nyanime.offline/anime/${encodeURIComponent(id)}.mp4`;
-    const cache = await caches.open(OFFLINE_ANIME_CACHE);
-    await cache.put(
-      cacheKey,
-      new Response(blob, {
-        status: 200,
-        headers: { 'Content-Type': blob.type }
-      })
-    );
+    const chunkSize = Math.max(64 * 1024, Math.floor(params.chunkSizeBytes || DOWNLOAD_CHUNK_BYTES));
+    const maxRetries = Math.max(0, Math.floor(params.maxRetriesPerChunk ?? 2));
+    const retryBaseDelayMs = Math.max(50, Math.floor(params.retryBaseDelayMs ?? 600));
+    let activeReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
-    if (params.saveToDeviceFilename) {
-      const objUrl = URL.createObjectURL(blob);
-      activeObjectUrls.push(objUrl);
-      triggerBrowserFileDownload(objUrl, params.saveToDeviceFilename);
-    }
+    const startedAt = Date.now();
+    let pausedMs = 0;
 
-    const manifest: OfflineChapterManifest = {
-      id,
-      kind: 'anime-video',
-      mediaId: String(params.animeId),
-      title: params.animeTitle,
-      cover: params.cover,
-      season: params.season,
-      episode: params.episode,
-      quality: params.quality,
-      url: cacheKey,
-      sizeBytes: blob.size,
-      status: 'completed',
-      createdAt: Date.now()
+    const awaitPauseGate = async (): Promise<void> => {
+      if (params.signal?.aborted) {
+        throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+      }
+      if (!params.waitIfPaused) return;
+      const pauseStart = Date.now();
+      await params.waitIfPaused();
+      pausedMs += Math.max(0, Date.now() - pauseStart);
+      if (params.signal?.aborted) {
+        throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+      }
     };
-    await putOfflineManifest(manifest);
-    return manifest;
+
+    const emitProgress = (
+      loadedBytes: number,
+      totalBytes: number,
+      chunkIndex: number,
+      totalChunks: number
+    ) => {
+      const elapsedMs = Math.max(150, Date.now() - startedAt - pausedMs);
+      const pct =
+        totalBytes > 0
+          ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+          : loadedBytes > 0
+            ? 50
+            : 0;
+      const stats = formatSpeedAndEta(loadedBytes, totalBytes, elapsedMs);
+      params.onProgress?.(pct, loadedBytes, totalBytes, {
+        percent: pct,
+        loadedBytes,
+        totalBytes,
+        speedMbps: stats.speedMbps,
+        speedLabel: stats.speedLabel,
+        etaSeconds: stats.etaSeconds,
+        etaLabel: stats.etaLabel,
+        chunkIndex,
+        totalChunks
+      });
+    };
+
+    const fetchRangeChunkWithRetry = async (
+      start: number,
+      end: number
+    ): Promise<Response> => {
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        await awaitPauseGate();
+        try {
+          const resp = await fetch(fetchUrl, {
+            signal: params.signal,
+            credentials: 'same-origin',
+            headers: {
+              Range: `bytes=${start}-${end}`
+            }
+          });
+          if (!resp.ok) {
+            // Do not retry 4xx permanent errors (403, 404, 410, 416)
+            if (resp.status >= 400 && resp.status < 500 && resp.status !== 408 && resp.status !== 429) {
+              throw new Error(`No se pudo descargar el video (${resp.status})`);
+            }
+            throw new Error(`Error temporal del servidor (${resp.status})`);
+          }
+          const respCt = (resp.headers.get('content-type') || '').toLowerCase();
+          if (respCt.includes('text/html') || respCt.includes('application/xhtml')) {
+            throw new Error('El servidor devolvió una página HTML en lugar del flujo de video .MP4');
+          }
+          return resp;
+        } catch (err: any) {
+          if (err?.name === 'AbortError' || params.signal?.aborted) {
+            throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+          }
+          lastErr = err;
+          if (
+            err instanceof Error &&
+            (/HTML|403|404|410|416/i.test(err.message) || attempt >= maxRetries)
+          ) {
+            throw err;
+          }
+          await sleepWithAbort(retryBaseDelayMs * (attempt + 1), params.signal);
+        }
+      }
+      throw lastErr instanceof Error ? lastErr : new Error('Error de red al descargar bloque de video');
+    };
+
+    const readResponseBodyChunks = async (
+      resp: Response,
+      targetChunks: Uint8Array[],
+      onBytes: (delta: number) => void
+    ): Promise<number> => {
+      let chunkBytes = 0;
+      const reader = resp.body?.getReader();
+      if (reader) {
+        activeReader = reader;
+        try {
+          while (true) {
+            if (params.signal?.aborted) {
+              throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+            }
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value && value.byteLength > 0) {
+              targetChunks.push(value);
+              chunkBytes += value.byteLength;
+              onBytes(value.byteLength);
+            }
+          }
+        } finally {
+          if (activeReader === reader) activeReader = undefined;
+        }
+        return chunkBytes;
+      }
+
+      const buf = new Uint8Array(await resp.arrayBuffer());
+      if (buf.byteLength > 0) {
+        targetChunks.push(buf);
+        chunkBytes = buf.byteLength;
+        onBytes(buf.byteLength);
+      }
+      return chunkBytes;
+    };
+
+    try {
+      const assembledChunks: Uint8Array[] = [];
+      let loadedBytes = 0;
+      let totalBytes = 0;
+      let detectedMime = 'video/mp4';
+
+      // Chunk 0: bytes=0-(chunkSize-1) reveals exact total file size via Content-Range
+      const firstEnd = chunkSize - 1;
+      const firstResp = await fetchRangeChunkWithRetry(0, firstEnd);
+      const firstCt = (firstResp.headers.get('content-type') || '').toLowerCase();
+      if (firstCt.includes('video/')) {
+        detectedMime = firstCt.split(';')[0].trim() || 'video/mp4';
+      }
+
+      const contentRange = parseContentRangeHeader(firstResp.headers.get('content-range'));
+      const contentLengthHeader = Number(firstResp.headers.get('content-length') || '0');
+
+      if (firstResp.status === 206 && contentRange && contentRange.total > 0) {
+        totalBytes = contentRange.total;
+        if (saveToApp) {
+          const exactQuota = await checkStorageSpaceForDownload(totalBytes);
+          if (exactQuota.status === 'insufficient') {
+            await firstResp.body?.cancel().catch(() => {});
+            throw buildQuotaExceededError(exactQuota.message);
+          }
+        }
+
+        const totalChunks = Math.max(1, Math.ceil(totalBytes / chunkSize));
+        const firstChunkBytes = await readResponseBodyChunks(firstResp, assembledChunks, (delta) => {
+          loadedBytes += delta;
+          emitProgress(loadedBytes, totalBytes, 1, totalChunks);
+        });
+
+        if (firstChunkBytes === 0) {
+          throw new Error('El servidor devolvió un bloque inicial vacío');
+        }
+
+        let nextStart = Math.max(contentRange.end + 1, loadedBytes);
+        let chunkIdx = 2;
+
+        while (nextStart < totalBytes) {
+          await awaitPauseGate();
+          const rangeEnd = Math.min(totalBytes - 1, nextStart + chunkSize - 1);
+          const expectedLen = rangeEnd - nextStart + 1;
+
+          let chunkSucceeded = false;
+          let lastChunkErr: unknown = null;
+
+          for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+            await awaitPauseGate();
+            const chunkLocalBuffers: Uint8Array[] = [];
+            let chunkReceived = 0;
+            try {
+              const resp = await fetchRangeChunkWithRetry(nextStart, rangeEnd);
+              if (resp.status !== 206) {
+                await resp.body?.cancel().catch(() => {});
+                throw new Error(`El servidor no respetó la descarga por bloques (${resp.status})`);
+              }
+              await readResponseBodyChunks(resp, chunkLocalBuffers, (delta) => {
+                chunkReceived += delta;
+                emitProgress(loadedBytes + chunkReceived, totalBytes, chunkIdx, totalChunks);
+              });
+              if (chunkReceived === 0) {
+                throw new Error('Bloque de video vacío recibido del servidor');
+              }
+              // Verify chunk wasn't silently cut off far short of requested bytes
+              if (expectedLen > 65536 && chunkReceived < Math.floor(expectedLen * 0.9)) {
+                throw new Error('Bloque de video cortado a mitad de transferencia');
+              }
+              for (const part of chunkLocalBuffers) {
+                assembledChunks.push(part);
+              }
+              loadedBytes += chunkReceived;
+              emitProgress(loadedBytes, totalBytes, chunkIdx, totalChunks);
+              chunkSucceeded = true;
+              break;
+            } catch (err: any) {
+              if (err?.name === 'AbortError' || params.signal?.aborted) {
+                throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+              }
+              lastChunkErr = err;
+              if (attempt >= maxRetries) {
+                throw err;
+              }
+              await sleepWithAbort(retryBaseDelayMs * (attempt + 1), params.signal);
+            }
+          }
+
+          if (!chunkSucceeded) {
+            throw lastChunkErr instanceof Error
+              ? lastChunkErr
+              : new Error('Error de red durante la descarga por bloques');
+          }
+
+          nextStart = rangeEnd + 1;
+          chunkIdx += 1;
+        }
+      } else {
+        // Fallback for small files or origins returning 200 OK instead of 206 Partial Content
+        totalBytes = contentLengthHeader > 0 ? contentLengthHeader : 0;
+        if (saveToApp && totalBytes > 0) {
+          const exactQuota = await checkStorageSpaceForDownload(totalBytes);
+          if (exactQuota.status === 'insufficient') {
+            await firstResp.body?.cancel().catch(() => {});
+            throw buildQuotaExceededError(exactQuota.message);
+          }
+        }
+        await readResponseBodyChunks(firstResp, assembledChunks, (delta) => {
+          loadedBytes += delta;
+          emitProgress(loadedBytes, totalBytes, 1, 1);
+        });
+      }
+
+      if (params.signal?.aborted) {
+        throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+      }
+
+      const blob = new Blob(assembledChunks as BlobPart[], { type: detectedMime });
+      if (blob.size === 0 || (totalBytes > 65536 && blob.size < Math.floor(totalBytes * 0.98))) {
+        throw new Error('El flujo de video descargado está incompleto o vacío');
+      }
+
+      emitProgress(blob.size, totalBytes || blob.size, Math.max(1, Math.ceil(blob.size / chunkSize)), Math.max(1, Math.ceil(blob.size / chunkSize)));
+
+      const manifest: OfflineChapterManifest = {
+        id,
+        kind: 'anime-video',
+        mediaId: String(params.animeId),
+        title: params.animeTitle,
+        cover: params.cover,
+        season: params.season,
+        episode: params.episode,
+        quality: params.quality,
+        lang: audioTag,
+        url: saveToApp ? cacheKey : undefined,
+        sizeBytes: blob.size,
+        status: 'completed',
+        createdAt: Date.now()
+      };
+
+      if (saveToApp) {
+        const cache = await caches.open(OFFLINE_ANIME_CACHE);
+        await cache.put(
+          cacheKey,
+          new Response(blob, {
+            status: 200,
+            headers: {
+              'Content-Type': blob.type || 'video/mp4',
+              'Content-Length': String(blob.size)
+            }
+          })
+        );
+
+        if (params.signal?.aborted) {
+          throw new DOMException('Descarga cancelada por el usuario', 'AbortError');
+        }
+
+        await putOfflineManifest(manifest);
+      }
+
+      if (saveToDevice) {
+        const objUrl = URL.createObjectURL(blob);
+        activeObjectUrls.push(objUrl);
+        triggerBrowserFileDownload(objUrl, downloadFilename);
+      }
+
+      return manifest;
+    } catch (err) {
+      if (activeReader) {
+        await activeReader.cancel().catch(() => {});
+      }
+      if (saveToApp) {
+        await cleanupOfflineDownloadArtifacts({
+          id,
+          cacheName: OFFLINE_ANIME_CACHE,
+          cacheKeys: [cacheKey]
+        });
+      }
+      if (isQuotaExceededError(err)) {
+        throw buildQuotaExceededError(
+          err instanceof Error && err.message && /espacio|insuficiente/i.test(err.message)
+            ? err.message
+            : 'Espacio insuficiente en el dispositivo para guardar este episodio .MP4. Se limpiaron los archivos incompletos.'
+        );
+      }
+      throw err;
+    }
   }
 
-  // Honest watch-later saving when provider only offers third-party embed iframe
+  if (!allowWatchLaterFallback) {
+    throw new Error('Sin enlace .MP4 directo disponible en este idioma');
+  }
+
+  // Legacy watch-later fallback only when explicitly permitted
   const manifest: OfflineChapterManifest = {
     id,
     kind: 'watch-later',
@@ -818,14 +1274,24 @@ export async function downloadAnimeEpisodeOrQueue(params: {
     season: params.season,
     episode: params.episode,
     quality: params.quality,
+    lang: audioTag,
     url: params.fallbackWebUrl,
     sizeBytes: 0,
     status: 'watch-later',
-    note: 'El servidor usa un reproductor iframe externo no descargable. Guardado en Ver Luego.',
+    note: 'Guardado para ver con conexión dentro de NyAnime TV.',
     createdAt: Date.now()
   };
   await putOfflineManifest(manifest);
   return manifest;
+}
+
+export async function downloadAnimeEpisodeChunked(
+  params: Omit<DownloadAnimeEpisodeParams, 'allowWatchLaterFallback'>
+): Promise<OfflineChapterManifest> {
+  return downloadAnimeEpisodeOrQueue({
+    ...params,
+    allowWatchLaterFallback: false
+  });
 }
 
 export async function getOfflineAnimeVideoBlobUrl(offlineId: string): Promise<string | null> {
@@ -871,29 +1337,41 @@ export function triggerBrowserFileDownload(streamOrProxyUrl: string, rawFilename
 
 export async function exportOfflineAnimeToDevice(offlineId: string): Promise<boolean> {
   const manifest = await getOfflineManifestById(offlineId);
-  if (!manifest) return false;
-  const baseName = `${manifest.title}_T${manifest.season || 1}_Ep_${manifest.episode || 1}.mp4`;
-  if (manifest.kind === 'anime-video') {
-    const blobUrl = await getOfflineAnimeVideoBlobUrl(offlineId);
-    if (!blobUrl) return false;
-    triggerBrowserFileDownload(blobUrl, baseName);
-    return true;
-  }
-  return false;
+  if (!manifest || manifest.kind !== 'anime-video') return false;
+  const audioTag = manifest.lang === 'DUB' || manifest.lang === 'LAT' ? 'LAT' : 'SUB';
+  const baseName = formatAnimeEpisodeFilename(
+    manifest.title,
+    Number(manifest.season || 1),
+    Number(manifest.episode || 1),
+    audioTag
+  );
+  const blobUrl = await getOfflineAnimeVideoBlobUrl(offlineId);
+  if (!blobUrl) return false;
+  triggerBrowserFileDownload(blobUrl, baseName);
+  return true;
 }
 
 export async function getStorageSummary(): Promise<StorageSummary> {
   const items = await getAllOfflineManifests();
   let offlineBytes = 0;
+  let animeBytes = 0;
+  let mangaBytes = 0;
   let mangaChaptersCount = 0;
   let animeFilesCount = 0;
   let watchLaterCount = 0;
 
   for (const item of items) {
-    offlineBytes += Number(item.sizeBytes || 0);
-    if (item.kind === 'manga') mangaChaptersCount += 1;
-    else if (item.kind === 'anime-video') animeFilesCount += 1;
-    else watchLaterCount += 1;
+    const sz = Number(item.sizeBytes || 0);
+    offlineBytes += sz;
+    if (item.kind === 'manga') {
+      mangaChaptersCount += 1;
+      mangaBytes += sz;
+    } else if (item.kind === 'anime-video') {
+      animeFilesCount += 1;
+      animeBytes += sz;
+    } else {
+      watchLaterCount += 1;
+    }
   }
 
   let usageBytes = offlineBytes;
@@ -922,6 +1400,8 @@ export async function getStorageSummary(): Promise<StorageSummary> {
     usageBytes,
     quotaBytes,
     offlineBytes,
+    animeBytes,
+    mangaBytes,
     mangaChaptersCount,
     animeFilesCount,
     watchLaterCount,
@@ -930,12 +1410,90 @@ export async function getStorageSummary(): Promise<StorageSummary> {
 }
 
 export function formatBytesHuman(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 MB';
-  const mb = bytes / (1024 * 1024);
-  if (mb < 1) {
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
-  return `${mb.toFixed(1)} MB`;
+  return formatBytesCompact(bytes);
+}
+
+function renderActiveQueueSection(batch: ActiveDownloadBatchSnapshot): string {
+  const safeTitle = escapeHTML(batch.animeTitle || 'Anime');
+  const statusBadge = batch.isPaused
+    ? 'En pausa'
+    : batch.isRunning
+      ? 'Descargando'
+      : batch.failedCount > 0
+        ? `${batch.failedCount} con error`
+        : 'Completado';
+  const rows = batch.items
+    .map((it) => {
+      let tone = 'idle';
+      let label = 'En cola';
+      if (it.status === 'resolving') {
+        tone = 'active';
+        label = 'Resolviendo fuente...';
+      } else if (it.status === 'downloading') {
+        tone = 'active';
+        const mbLoaded = formatBytesCompact(it.loadedBytes);
+        const mbTotal = it.totalBytes > 0 ? ` / ${formatBytesCompact(it.totalBytes)}` : '';
+        const speedPart = it.speedLabel ? ` · ${it.speedLabel}` : '';
+        label = `Descargando ${it.percent}% · ${mbLoaded}${mbTotal}${speedPart}`;
+      } else if (it.status === 'paused') {
+        tone = 'warn';
+        label = `Pausado (${it.percent}%)`;
+      } else if (it.status === 'completed') {
+        tone = 'done';
+        label = `✓ Descargado${it.sizeBytes ? ` (${formatBytesCompact(it.sizeBytes)})` : ''}`;
+      } else if (it.status === 'error') {
+        tone = 'error';
+        label = `✕ ${it.errorReason || 'Error al descargar'}`;
+      }
+      return `
+        <div class="dl-item-row dl-queue-row" data-queue-ep="${it.episode}">
+          <div class="dl-item-info-col">
+            <div class="dl-item-ep tabular-nums">T${batch.season} · Ep. ${it.episode}</div>
+            <div class="dl-ep-live-state ${tone} tabular-nums">${escapeHTML(label)}</div>
+          </div>
+          ${
+            it.status === 'error'
+              ? `<button type="button" class="dl-action-btn primary" onclick="reintentarEpisodioDescarga(${it.episode})">Reintentar</button>`
+              : ''
+          }
+        </div>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="dl-section-label">Descarga en curso</div>
+    <section class="dl-group-card dl-active-queue-card">
+      <div class="dl-active-queue-head">
+        <div class="dl-group-title-wrap">
+          <div class="dl-group-title">${safeTitle} · T${batch.season}</div>
+          <div class="dl-item-meta tabular-nums">${escapeHTML(statusBadge)} · ${batch.completedCount} de ${batch.totalCount} completados (${batch.overallPercent}%)</div>
+          ${
+            batch.activeDetailText
+              ? `<div class="dl-active-detail tabular-nums">${escapeHTML(batch.activeDetailText)}</div>`
+              : ''
+          }
+        </div>
+        <div class="dl-item-actions">
+          ${
+            batch.isRunning
+              ? `<button type="button" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">${batch.isPaused ? '▶ Reanudar' : '⏸ Pausar'}</button>
+                 <button type="button" class="dl-action-btn danger" onclick="cancelarDescargaTemporada()">Cancelar</button>`
+              : ''
+          }
+          ${
+            batch.failedCount > 0 && !batch.isRunning
+              ? `<button type="button" class="dl-action-btn primary" onclick="reintentarEpisodiosFallidos()">Reintentar fallidos</button>`
+              : ''
+          }
+        </div>
+      </div>
+      <div class="dl-progress-track dl-active-queue-track">
+        <div class="dl-progress-fill" style="width:${batch.overallPercent}%;"></div>
+      </div>
+      <div class="dl-group-items">${rows}</div>
+    </section>
+  `;
 }
 
 export async function renderOfflineDownloadsModal(
@@ -945,6 +1503,7 @@ export async function renderOfflineDownloadsModal(
     activeTab?: DownloadManagerFilterTab;
     query?: string;
     tabsContainerEl?: HTMLElement | null;
+    activeBatch?: ActiveDownloadBatchSnapshot | null;
   }
 ): Promise<void> {
   if (!containerEl) return;
@@ -954,38 +1513,50 @@ export async function renderOfflineDownloadsModal(
   const query = String(options?.query || '');
   const grouped = groupOfflineManifests(items, query);
   const meter = computeStorageMeter(summary);
+  const activeBatch = options?.activeBatch || null;
+  const activeQueueCount =
+    activeBatch && (activeBatch.isRunning || activeBatch.failedCount > 0)
+      ? activeBatch.items.filter((i) => i.status !== 'completed').length || activeBatch.totalCount
+      : 0;
 
   if (storageInfoEl) {
-    const quotaPart = meter.quotaBytes > 0 ? ` / ${formatBytesHuman(meter.quotaBytes)} disponibles` : '';
+    const freePart =
+      meter.quotaBytes > 0 ? `${formatBytesCompact(meter.freeBytes)} disponibles` : 'Cuota estándar';
     const statusLabel = summary.storagePersisted ? 'Almacenamiento protegido' : 'Almacenamiento estándar';
     storageInfoEl.innerHTML = `
       <div class="dl-storage-head">
         <div>
           <div class="dl-storage-title">Espacio Offline en Dispositivo</div>
-          <div class="dl-storage-meta tabular-nums">${formatBytesHuman(meter.offlineBytes)} guardados · ${formatBytesHuman(meter.usedBytes)} usados${quotaPart}</div>
+          <div class="dl-storage-meta tabular-nums">${formatBytesCompact(meter.offlineBytes)} usados en la app · ${freePart}</div>
         </div>
         <span class="dl-storage-state ${summary.storagePersisted ? 'protected' : 'standard'}">${statusLabel}</span>
       </div>
-      <div class="dl-storage-track" role="progressbar" aria-valuenow="${meter.pct}" aria-valuemin="0" aria-valuemax="100">
-        <div class="dl-storage-fill" style="width:${meter.pct}%;"></div>
+      <div class="dl-storage-track dl-storage-track-segmented" role="progressbar" aria-valuenow="${meter.pct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="dl-storage-seg-anime" style="width:${meter.animePct}%;" title="Animes Offline (.MP4)"></div>
+        <div class="dl-storage-seg-manga" style="width:${meter.mangaPct}%;" title="Mangas Offline"></div>
       </div>
       <div class="dl-storage-breakdown tabular-nums">
-        <span>${meter.animeFilesCount} ${meter.animeFilesCount === 1 ? 'episodio .MP4' : 'episodios .MP4'}</span>
-        <span aria-hidden="true">·</span>
-        <span>${meter.watchLaterCount} en Ver Luego</span>
-        <span aria-hidden="true">·</span>
-        <span>${meter.mangaChaptersCount} ${meter.mangaChaptersCount === 1 ? 'capítulo manga' : 'capítulos manga'}</span>
+        <span class="dl-legend-item"><i class="dl-legend-dot anime"></i>Animes: ${formatBytesCompact(meter.animeBytes)} (${meter.animeFilesCount})</span>
+        <span class="dl-legend-item"><i class="dl-legend-dot manga"></i>Mangas: ${formatBytesCompact(meter.mangaBytes)} (${meter.mangaChaptersCount})</span>
+        ${
+          meter.quotaBytes > 0
+            ? `<span class="dl-legend-item"><i class="dl-legend-dot free"></i>Libre: ${formatBytesCompact(meter.freeBytes)}</span>`
+            : ''
+        }
       </div>
     `;
   }
 
   if (options?.tabsContainerEl) {
     const tabs: Array<{ id: DownloadManagerFilterTab; label: string; count: number }> = [
-      { id: 'all', label: 'Todos', count: grouped.counts.all },
-      { id: 'anime', label: 'Animes (.MP4)', count: grouped.counts.anime },
-      { id: 'watch-later', label: 'Ver Luego', count: grouped.counts.watchLater },
-      { id: 'manga', label: 'Mangas', count: grouped.counts.manga }
+      { id: 'all', label: 'Todos', count: grouped.counts.all + (activeBatch?.isRunning ? 1 : 0) },
+      { id: 'active', label: 'En curso', count: activeQueueCount },
+      { id: 'anime', label: 'Animes Offline (.MP4)', count: grouped.counts.anime },
+      { id: 'manga', label: 'Mangas Offline', count: grouped.counts.manga }
     ];
+    if (grouped.counts.watchLater > 0) {
+      tabs.push({ id: 'watch-later', label: 'Ver Luego', count: grouped.counts.watchLater });
+    }
     options.tabsContainerEl.innerHTML = tabs
       .map(
         (t) => `
@@ -998,11 +1569,25 @@ export async function renderOfflineDownloadsModal(
       .join('');
   }
 
-  if (items.length === 0) {
+  if (activeTab === 'active') {
+    if (activeBatch && (activeBatch.isRunning || activeBatch.items.length > 0)) {
+      containerEl.innerHTML = renderActiveQueueSection(activeBatch);
+    } else {
+      containerEl.innerHTML = `
+        <div class="dl-empty-state">
+          <div class="dl-empty-title">Sin descargas en curso</div>
+          <div class="dl-empty-desc">Cuando inicies una descarga de episodios podrás ver aquí la velocidad, pausar, reanudar o reintentar fallidos.</div>
+        </div>
+      `;
+    }
+    return;
+  }
+
+  if (items.length === 0 && !(activeBatch && (activeBatch.isRunning || activeBatch.failedCount > 0))) {
     containerEl.innerHTML = `
       <div class="dl-empty-state">
         <div class="dl-empty-title">Sin descargas almacenadas</div>
-        <div class="dl-empty-desc">Abre cualquier anime y pulsa <strong>Descargar</strong> para guardar episodios en caché offline o exportarlos como archivo .MP4.</div>
+        <div class="dl-empty-desc">Abre cualquier anime y pulsa <strong>Descargar</strong> para guardar episodios reales en .MP4 y verlos sin internet.</div>
       </div>
     `;
     return;
@@ -1014,6 +1599,10 @@ export async function renderOfflineDownloadsModal(
 
   const sectionsHtml: string[] = [];
 
+  if (activeTab === 'all' && activeBatch && (activeBatch.isRunning || activeBatch.failedCount > 0)) {
+    sectionsHtml.push(renderActiveQueueSection(activeBatch));
+  }
+
   if (showAnime && grouped.animeGroups.length > 0) {
     const animeCards = grouped.animeGroups
       .map((group) => {
@@ -1024,7 +1613,8 @@ export async function renderOfflineDownloadsModal(
           .map((item) => {
             const safeId = escapeHTML(item.id);
             const epLabel = `T${item.season || 1} · Ep. ${item.episode || 1}`;
-            const metaText = `${escapeHTML(item.quality || 'HD')} · ${formatBytesHuman(item.sizeBytes)}`;
+            const langLabel = item.lang === 'DUB' || item.lang === 'LAT' ? 'Latino' : 'Sub Esp';
+            const metaText = `${langLabel} · .MP4 Offline · ${formatBytesCompact(item.sizeBytes)}`;
             return `
               <div class="dl-item-row" data-offline-id="${safeId}">
                 <div class="dl-item-info">
@@ -1032,9 +1622,9 @@ export async function renderOfflineDownloadsModal(
                   <span class="dl-item-meta tabular-nums">${metaText}</span>
                 </div>
                 <div class="dl-item-actions">
-                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Reproducir</button>
-                  <button type="button" class="dl-action-btn" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Guardar archivo .MP4 en tu dispositivo">Guardar .MP4</button>
-                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${escapeHTML(epLabel)}">Eliminar</button>
+                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">▶ Reproducir offline</button>
+                  <button type="button" class="dl-action-btn" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Exportar archivo .MP4 a tu dispositivo sin volver a descargar">⬇ Exportar .MP4</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${escapeHTML(epLabel)}">🗑</button>
                 </div>
               </div>
             `;
@@ -1051,16 +1641,64 @@ export async function renderOfflineDownloadsModal(
               }
               <div class="dl-group-title-wrap">
                 <div class="dl-group-title">${safeTitle}</div>
-                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'episodio' : 'episodios'} · ${formatBytesHuman(group.totalBytes)}</div>
+                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'episodio' : 'episodios'} · ${formatBytesCompact(group.totalBytes)}</div>
               </div>
-              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('anime', '${safeMediaId}')">Borrar serie</button>
+              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('anime', '${safeMediaId}')">Eliminar serie</button>
             </div>
             <div class="dl-group-items">${rowsHtml}</div>
           </section>
         `;
       })
       .join('');
-    sectionsHtml.push(`<div class="dl-section-label">Animes descargados</div>${animeCards}`);
+    sectionsHtml.push(`<div class="dl-section-label">Animes Offline (.MP4)</div>${animeCards}`);
+  }
+
+  if (showManga && grouped.mangaGroups.length > 0) {
+    const mangaCards = grouped.mangaGroups
+      .map((group) => {
+        const safeMediaId = escapeHTML(group.mediaId);
+        const safeTitle = escapeHTML(group.title);
+        const coverThumb = safeImageUrl(group.cover);
+        const rowsHtml = group.items
+          .map((item) => {
+            const safeId = escapeHTML(item.id);
+            const capLabel = `Cap. ${escapeHTML(item.chapterLabel || item.chapterNum || 1)}`;
+            const metaText = `${item.pageCount || 0} págs · ${formatBytesCompact(item.sizeBytes)}`;
+            return `
+              <div class="dl-item-row" data-offline-id="${safeId}">
+                <div class="dl-item-info">
+                  <span class="dl-item-ep tabular-nums">${capLabel}</span>
+                  <span class="dl-item-meta tabular-nums">${metaText}</span>
+                </div>
+                <div class="dl-item-actions">
+                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Leer offline</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${capLabel}">🗑</button>
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+        return `
+          <section class="dl-group-card" data-group-kind="manga" data-media-id="${safeMediaId}">
+            <div class="dl-group-head">
+              ${
+                coverThumb
+                  ? `<img src="${escapeHTML(coverThumb)}" alt="${safeTitle}" class="dl-group-cover" referrerpolicy="no-referrer">`
+                  : `<div class="dl-group-cover dl-group-cover-fallback" aria-hidden="true">MG</div>`
+              }
+              <div class="dl-group-title-wrap">
+                <div class="dl-group-title">${safeTitle}</div>
+                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'capítulo' : 'capítulos'} · ${formatBytesCompact(group.totalBytes)}</div>
+              </div>
+              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('manga', '${safeMediaId}')">Eliminar serie</button>
+            </div>
+            <div class="dl-group-items">${rowsHtml}</div>
+          </section>
+        `;
+      })
+      .join('');
+    sectionsHtml.push(`<div class="dl-section-label">Mangas Offline</div>${mangaCards}`);
   }
 
   if (showWatchLater && grouped.watchLaterItems.length > 0) {
@@ -1079,66 +1717,18 @@ export async function renderOfflineDownloadsModal(
               }
               <div class="dl-item-info-col">
                 <div class="dl-item-title">${safeTitle}</div>
-                <div class="dl-item-meta tabular-nums">T${item.season || 1} · Ep. ${item.episode || 1} · Enlace externo (sin descarga directa)</div>
+                <div class="dl-item-meta tabular-nums">T${item.season || 1} · Ep. ${item.episode || 1} · Requiere conexión (sin archivo .MP4 offline)</div>
               </div>
             </div>
             <div class="dl-item-actions">
-              ${item.url ? `<button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Abrir</button>` : ''}
-              <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${safeTitle}">Eliminar</button>
+              <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">▶ Ver en NyAnime</button>
+              <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${safeTitle}">🗑</button>
             </div>
           </div>
         `;
       })
       .join('');
-    sectionsHtml.push(`<div class="dl-section-label">Guardados en Ver Luego</div><div class="dl-flat-stack">${wlRows}</div>`);
-  }
-
-  if (showManga && grouped.mangaGroups.length > 0) {
-    const mangaCards = grouped.mangaGroups
-      .map((group) => {
-        const safeMediaId = escapeHTML(group.mediaId);
-        const safeTitle = escapeHTML(group.title);
-        const coverThumb = safeImageUrl(group.cover);
-        const rowsHtml = group.items
-          .map((item) => {
-            const safeId = escapeHTML(item.id);
-            const capLabel = `Cap. ${escapeHTML(item.chapterLabel || item.chapterNum || 1)}`;
-            const metaText = `${item.pageCount || 0} págs · ${formatBytesHuman(item.sizeBytes)}`;
-            return `
-              <div class="dl-item-row" data-offline-id="${safeId}">
-                <div class="dl-item-info">
-                  <span class="dl-item-ep tabular-nums">${capLabel}</span>
-                  <span class="dl-item-meta tabular-nums">${metaText}</span>
-                </div>
-                <div class="dl-item-actions">
-                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Leer</button>
-                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${capLabel}">Eliminar</button>
-                </div>
-              </div>
-            `;
-          })
-          .join('');
-
-        return `
-          <section class="dl-group-card" data-group-kind="manga" data-media-id="${safeMediaId}">
-            <div class="dl-group-head">
-              ${
-                coverThumb
-                  ? `<img src="${escapeHTML(coverThumb)}" alt="${safeTitle}" class="dl-group-cover" referrerpolicy="no-referrer">`
-                  : `<div class="dl-group-cover dl-group-cover-fallback" aria-hidden="true">MG</div>`
-              }
-              <div class="dl-group-title-wrap">
-                <div class="dl-group-title">${safeTitle}</div>
-                <div class="dl-group-meta tabular-nums">${group.itemCount} ${group.itemCount === 1 ? 'capítulo' : 'capítulos'} · ${formatBytesHuman(group.totalBytes)}</div>
-              </div>
-              <button type="button" class="dl-group-delete-btn" onclick="eliminarGrupoOffline('manga', '${safeMediaId}')">Borrar manga</button>
-            </div>
-            <div class="dl-group-items">${rowsHtml}</div>
-          </section>
-        `;
-      })
-      .join('');
-    sectionsHtml.push(`<div class="dl-section-label">Mangas guardados offline</div>${mangaCards}`);
+    sectionsHtml.push(`<div class="dl-section-label">Guardados en Ver Luego (requiere conexión)</div><div class="dl-flat-stack">${wlRows}</div>`);
   }
 
   if (sectionsHtml.length === 0) {

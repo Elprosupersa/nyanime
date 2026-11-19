@@ -508,7 +508,7 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
   }
 
   const abortCtrl = new AbortController();
-  const connectTimer = setTimeout(() => abortCtrl.abort(), 15_000);
+  const connectTimer = setTimeout(() => abortCtrl.abort(), 20_000);
   let activeNodeStream: Readable | null = null;
   let activeUpstreamBody: ReadableStream<Uint8Array> | null = null;
   const unbindAbort = bindClientDisconnectAbort(req, res, abortCtrl, () => {
@@ -681,7 +681,7 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
     res.setHeader('Accept-Ranges', upstream.headers.get('accept-ranges') || 'bytes');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Accel-Buffering', 'no');
-    if (isDownload) {
+    if (isDownload && upstream.status !== 206) {
       const safeFile = sanitizeDownloadFilename(parsed.searchParams.get('filename') || '', 'nyanime_episodio.mp4');
       res.setHeader('Content-Disposition', `attachment; filename="${safeFile}"`);
     }

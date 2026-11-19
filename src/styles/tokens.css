@@ -1,0 +1,29 @@
+    :root {
+      /* Palette: Red & Black OLED Anti-Slop (Linear / Cyber-Crimson) */
+      --primary: #ff1a40;
+      --primary-hover: #e11d48;
+      --primary-glow: rgba(255, 26, 64, 0.40);
+      --primary-light: rgba(255, 26, 64, 0.15);
+      --primary-dark: #991b1b;
+      --gold: #f59e0b;
+      --gold-glow: rgba(245, 158, 11, 0.35);
+      --bg-dark: #050507;
+      --bg-dark-oled: #000000;
+      --bg-card: #0c0d12;
+      --bg-card-hover: #15161f;
+      --bg-glass: rgba(8, 9, 13, 0.92);
+      --bg-glass-heavy: rgba(5, 5, 8, 0.96);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.04);
+      --border-active: rgba(255, 26, 64, 0.60);
+      --border-glass: rgba(255, 26, 64, 0.20);
+      --radius-xl: 20px;
+      --radius-lg: 14px;
+      --radius-md: 10px;
+      --radius-sm: 6px;
+      --transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      --bottom-nav-height: 68px;
+    }

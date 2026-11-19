@@ -12,10 +12,21 @@ export interface StorageLike {
   setItem: (key: string, value: string) => void;
 }
 
+export interface ActiveMediaSessionState {
+  isPlayingVideo: boolean;
+  isReadingManga: boolean;
+  isDownloading: boolean;
+  isBusy: boolean;
+}
+
 export interface SwReloadDecisionInput {
   userRequested: boolean;
   isExternal?: boolean;
   isUpdate?: boolean;
+  isPlayingVideo?: boolean;
+  isReadingManga?: boolean;
+  isDownloading?: boolean;
+  allowDuringMedia?: boolean;
 }
 
 export interface MinimalSwRegistration {
@@ -36,8 +47,80 @@ export function isProdServiceWorkerScript(scriptUrl: string | null | undefined):
 
 export function shouldAllowSwTriggeredReload(input: SwReloadDecisionInput): boolean {
   // Never auto-reload on background/external SW activations (mobile resume, multi-tab, PWA launch).
-  // Only allow reload when the user explicitly confirmed an update prompt.
-  return input.userRequested === true;
+  // Only allow reload when the user explicitly confirmed an update prompt AND is not mid-playback/reading/download
+  // (unless explicitly forced via the user clicking the update action).
+  if (input.userRequested !== true) {
+    return false;
+  }
+  const mediaOrDownloadActive = Boolean(
+    input.isPlayingVideo || input.isReadingManga || input.isDownloading
+  );
+  if (mediaOrDownloadActive && input.allowDuringMedia !== true) {
+    return false;
+  }
+  return true;
+}
+
+export function evaluateSwUpdateLifecycleAction(input: {
+  isPlayingVideo?: boolean;
+  isReadingManga?: boolean;
+  isDownloading?: boolean;
+  alreadyPrompted?: boolean;
+}): 'defer' | 'prompt' | 'noop' {
+  if (input.isPlayingVideo || input.isReadingManga || input.isDownloading) {
+    return 'defer';
+  }
+  if (input.alreadyPrompted) {
+    return 'noop';
+  }
+  return 'prompt';
+}
+
+export function detectActiveMediaSession(doc?: Document | null): ActiveMediaSessionState {
+  if (!doc) {
+    return {
+      isPlayingVideo: false,
+      isReadingManga: false,
+      isDownloading: false,
+      isBusy: false
+    };
+  }
+
+  const playerEl = doc.getElementById('pantalla-reproductor');
+  const playerVisible = Boolean(playerEl && !playerEl.classList.contains('hide'));
+
+  let nativeVideoPlaying = false;
+  try {
+    const videos = doc.querySelectorAll('video');
+    for (const v of Array.from(videos)) {
+      if (!v.paused && !v.ended && v.readyState >= 2) {
+        nativeVideoPlaying = true;
+        break;
+      }
+    }
+  } catch {
+    // ignore DOM query errors
+  }
+
+  const pipActive = Boolean((doc as Document & { pictureInPictureElement?: Element | null }).pictureInPictureElement);
+  const isPlayingVideo = playerVisible || nativeVideoPlaying || pipActive;
+
+  const readerEl = doc.getElementById('pantalla-lector');
+  const isReadingManga = Boolean(readerEl && !readerEl.classList.contains('hide'));
+
+  const animeDlBox = doc.getElementById('season-dl-progress-box');
+  const mangaDlBox = doc.getElementById('manga-dl-progress-box');
+  const isDownloading = Boolean(
+    (animeDlBox && !animeDlBox.classList.contains('hide')) ||
+    (mangaDlBox && !mangaDlBox.classList.contains('hide'))
+  );
+
+  return {
+    isPlayingVideo,
+    isReadingManga,
+    isDownloading,
+    isBusy: isPlayingVideo || isReadingManga || isDownloading
+  };
 }
 
 export function readReloadGuardState(storage: StorageLike | null | undefined): ReloadGuardState {

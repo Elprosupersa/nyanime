@@ -7,6 +7,7 @@ import {
   UserManager,
   escHtml,
   fetchWithTimeout,
+  hasActiveModal,
   nativeFetchHtml,
   nWin,
   onProxyUpstreamEvent,
@@ -81,6 +82,16 @@ import {
   withProviderTimeout
 } from '../utils/animeSources.ts';
 import { isDomainAllowlisted } from '../utils/proxySecurity.ts';
+import {
+  buildStateCardHtml,
+  createRequestGuard,
+  resolvePlayerShortcutAction
+} from '../utils/uiPolishHelpers.ts';
+
+const aniSkipRequestGuard = createRequestGuard();
+const episodeResolveGuard = createRequestGuard();
+const sourceExecutionGuard = createRequestGuard();
+let playerKeydownListener: ((e: KeyboardEvent) => void) | null = null;
 
 export interface NormalizedSourceInput {
   providerId: string;
@@ -1943,6 +1954,7 @@ let _watchTogetherClockTimer: ReturnType<typeof setInterval> | null = null;
 let _wtDriftCheckTick = 0;
 
 function resetAniSkipState(): void {
+  aniSkipRequestGuard.invalidate();
   activeAniSkipIntervals = [];
   activeAniSkipSegment = null;
   aniSkipDismissedIds = new Set<string>();
@@ -2025,12 +2037,13 @@ export function descartarAniSkipOverlay(): void {
 async function fetchAniSkipForEpisode(malId: number | string | undefined, ep: number): Promise<void> {
   const url = buildAniSkipUrl(malId, ep);
   if (!url) return;
+  const { seq, signal } = aniSkipRequestGuard.next();
   const snapshotEp = ep;
   try {
-    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(url)}&probe=1`, {}, 4500);
-    if (!res.ok) return;
+    const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(url)}&probe=1`, { signal }, 4500);
+    if (!res.ok || !aniSkipRequestGuard.isCurrent(seq)) return;
     const json = await res.json().catch(() => null);
-    if (state.epActual !== snapshotEp) return;
+    if (!aniSkipRequestGuard.isCurrent(seq) || state.epActual !== snapshotEp) return;
     activeAniSkipIntervals = parseAniSkipResponse(json);
   } catch {
     // ignore optional AniSkip lookup failure
@@ -3782,6 +3795,7 @@ export function abrirReproductor(ep: number): void {
   resetAniSkipState();
   syncAutoSkipButtonUI();
   renderWatchTogetherPanel();
+  attachPlayerKeyboardShortcuts();
   state.epActual = ep;
   state.fuenteActualIdx = 0;
 
@@ -3847,6 +3861,9 @@ function teardownActiveMediaElement(container: HTMLElement | null): void {
 }
 
 export function cerrarReproductor(): void {
+  episodeResolveGuard.invalidate();
+  sourceExecutionGuard.invalidate();
+  detachPlayerKeyboardShortcuts();
   flushPlayerProgress();
   resetWatchTimeTrackers();
   resetAniSkipState();
@@ -3866,6 +3883,7 @@ export function cerrarReproductor(): void {
   if (vidCont) vidCont.innerHTML = '';
   const detalle = document.getElementById('pantalla-detalle');
   if (detalle && state.anime) detalle.classList.remove('hide');
+  nWin.NyAnimePWA?.flushDeferredUpdatePrompt?.();
 }
 
 function findFirstPlayableSourceIndex(list: NormalizedSource[], startAfterIdx = -1): number {
@@ -4104,6 +4122,8 @@ export async function resolverYReproducirFuente(): Promise<void> {
   const serversWrap = document.getElementById('player-servers-wrap');
   if (!container || !statusLabel || !statusDot) return;
 
+  const { seq } = episodeResolveGuard.next();
+  sourceExecutionGuard.invalidate();
   cancelUpNextCountdown();
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
@@ -4119,13 +4139,14 @@ export async function resolverYReproducirFuente(): Promise<void> {
 
   try {
     const context = await resolverContextoEpisodio(epActual);
+    if (!episodeResolveGuard.isCurrent(seq) || state.epActual !== epActual) return;
     void fetchAniSkipForEpisode(context.malId, epActual);
     const rawSources = await videoSourceManager.fetchRawSources(context);
-    if (state.epActual !== epActual) return;
+    if (!episodeResolveGuard.isCurrent(seq) || state.epActual !== epActual) return;
 
     statusLabel.textContent = 'Verificando salud de servidores y clasificando audio...';
     const verifiedSources = await videoSourceManager.probeAndVerifySources(context, rawSources, state.modoAudio);
-    if (state.epActual !== epActual) return;
+    if (!episodeResolveGuard.isCurrent(seq) || state.epActual !== epActual) return;
 
     state.rawFuentesEpisodio = verifiedSources;
     updateAudioServerCountsUI(verifiedSources);
@@ -4140,12 +4161,15 @@ export async function resolverYReproducirFuente(): Promise<void> {
     }
 
     await ejecutarFuenteActiva();
+    if (!episodeResolveGuard.isCurrent(seq)) return;
 
     const currentSeason = state.seasons?.[state.temporadaActualIdx] || { totalEpisodes: 1 };
     if (epActual < (currentSeason.totalEpisodes || 1)) {
       setTimeout(async () => {
+        if (!episodeResolveGuard.isCurrent(seq)) return;
         try {
           const nextCtx = await resolverContextoEpisodio(epActual + 1);
+          if (!episodeResolveGuard.isCurrent(seq)) return;
           void videoSourceManager.fetchRawSources(nextCtx);
         } catch {
           // ignore prefetch failure
@@ -4153,16 +4177,23 @@ export async function resolverYReproducirFuente(): Promise<void> {
       }, 1200);
     }
   } catch (err) {
+    if (!episodeResolveGuard.isCurrent(seq)) return;
     console.error('Error al resolver fuente:', err);
     statusDot.className = 'status-dot error';
     statusLabel.textContent = 'Sin servidores automáticos para este episodio.';
     container.innerHTML = `
-      <div class="loader" style="height:100%; padding:20px; text-align:center;">
-        <span style="color:#ef4444; font-weight:700; margin-bottom:10px;">❌ No se encontraron servidores activos.</span>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
-          <button class="chip active" style="background:var(--primary); color:white;" onclick="resolverYReproducirFuente()">🔄 Reintentar búsqueda</button>
-          <button class="chip" onclick="seleccionarAudio(state.modoAudio === 'SUB' ? 'LATINO' : 'SUB')">🌐 Probar otro idioma</button>
-        </div>
+      <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; background:#090b10;">
+        ${buildStateCardHtml({
+          kind: 'error',
+          compact: true,
+          icon: '🎬',
+          title: 'Sin servidores activos',
+          message: 'No encontramos fuentes reproducibles para este episodio en el idioma seleccionado.',
+          retryLabel: '🔄 Reintentar búsqueda',
+          retryOnClick: 'resolverYReproducirFuente()',
+          secondaryLabel: '🌐 Probar otro idioma',
+          secondaryOnClick: "seleccionarAudio(state.modoAudio === 'SUB' ? 'LATINO' : 'SUB')"
+        })}
       </div>
     `;
   }
@@ -4191,6 +4222,7 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   const extBtn = document.getElementById('btn-open-external-stream') as HTMLAnchorElement | null;
   if (!container || !statusLabel || !statusDot) return;
 
+  const { seq: execSeq } = sourceExecutionGuard.next();
   cancelUpNextCountdown();
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
@@ -4285,7 +4317,11 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   if (canTryNativeExtract) {
     try {
       const directStream = await StreamExtractor.extract(fuente.url);
-      if (state.epActual !== activeEpSnapshot || (state.fuenteActualIdx % state.fuentesRankeadas.length) !== activeIdxSnapshot) {
+      if (
+        !sourceExecutionGuard.isCurrent(execSeq) ||
+        state.epActual !== activeEpSnapshot ||
+        (state.fuenteActualIdx % state.fuentesRankeadas.length) !== activeIdxSnapshot
+      ) {
         return;
       }
       if (directStream && directStream.type === 'mp4' && directStream.streamUrl) {
@@ -4549,58 +4585,111 @@ export function probarFuenteAlternativa(): void {
   void ejecutarFuenteActiva();
 }
 
-export function bindPlayerKeyboardShortcuts(): void {
-  if (nWin._nyPlayerKeyboardBound) return;
+export function detachPlayerKeyboardShortcuts(): void {
+  if (playerKeydownListener) {
+    document.removeEventListener('keydown', playerKeydownListener);
+    playerKeydownListener = null;
+  }
+  nWin._nyPlayerKeyboardBound = false;
+}
+
+export function attachPlayerKeyboardShortcuts(): void {
+  if (playerKeydownListener) return;
   nWin._nyPlayerKeyboardBound = true;
 
-  document.addEventListener('keydown', (e) => {
+  playerKeydownListener = (e: KeyboardEvent) => {
     const rep = document.getElementById('pantalla-reproductor');
-    if (!rep || rep.classList.contains('hide')) return;
-    const tag = String(document.activeElement?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    const playerActive = Boolean(rep && !rep.classList.contains('hide'));
+    if (!playerActive) return;
+
+    const hasActiveAniSkip = Boolean(
+      activeAniSkipSegment && !aniSkipDismissedIds.has(activeAniSkipSegment.skipId)
+    );
+    const action = resolvePlayerShortcutAction(
+      {
+        key: e.key,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        target: e.target || document.activeElement
+      },
+      {
+        playerActive,
+        hasOpenModal: hasActiveModal(),
+        hasActiveAniSkip
+      }
+    );
+    if (!action) return;
 
     const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
-    const lower = e.key.toLowerCase();
 
-    if ((e.key === ' ' || lower === 'k') && vidEl) {
+    if (action === 'toggle-play') {
+      if (!vidEl) return;
       e.preventDefault();
       if (vidEl.paused) void vidEl.play().catch(() => {});
       else vidEl.pause();
       return;
     }
 
-    if (lower === 'm' && vidEl) {
+    if (action === 'toggle-mute') {
+      if (!vidEl) return;
       e.preventDefault();
       vidEl.muted = !vidEl.muted;
       showToast(vidEl.muted ? '🔇 Silenciado' : '🔊 Sonido activado');
       return;
     }
 
-    if (lower === 'f') {
+    if (action === 'toggle-fullscreen') {
       e.preventDefault();
       togglePantallaCompleta();
       return;
     }
 
-    if (e.key === 'ArrowRight') {
-      if (vidEl && !e.shiftKey && Number.isFinite(vidEl.duration)) {
+    if (action === 'skip-intro') {
+      if (!vidEl || !hasActiveAniSkip) return;
+      e.preventDefault();
+      saltarSegmentoAniSkipActiva();
+      return;
+    }
+
+    if (action === 'seek-forward-10') {
+      if (vidEl && Number.isFinite(vidEl.duration)) {
         e.preventDefault();
         vidEl.currentTime = Math.min(vidEl.duration, vidEl.currentTime + 10);
-      } else {
+      } else if (e.key === 'ArrowRight') {
         navegarEpisodioPlayer(1);
       }
       return;
     }
 
-    if (e.key === 'ArrowLeft') {
-      if (vidEl && !e.shiftKey) {
+    if (action === 'seek-back-10') {
+      if (vidEl) {
         e.preventDefault();
         vidEl.currentTime = Math.max(0, vidEl.currentTime - 10);
-      } else {
+      } else if (e.key === 'ArrowLeft') {
         navegarEpisodioPlayer(-1);
       }
+      return;
     }
-  });
+
+    if (action === 'next-ep') {
+      e.preventDefault();
+      navegarEpisodioPlayer(1);
+      return;
+    }
+
+    if (action === 'prev-ep') {
+      e.preventDefault();
+      navegarEpisodioPlayer(-1);
+    }
+  };
+
+  document.addEventListener('keydown', playerKeydownListener);
+}
+
+export function bindPlayerKeyboardShortcuts(): void {
+  attachPlayerKeyboardShortcuts();
 }
 
 export function copiarEnlaceStreaming(): void {
@@ -4724,6 +4813,7 @@ export async function descargarEpisodioActual(): Promise<void> {
     fuenteActiva?.url ||
     `https://tioanime.com/ver/${cleanSeriesTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${state.epActual}`;
 
+  const preferredAudio: 'SUB' | 'DUB' = state.modoAudio === 'DUB' ? 'DUB' : 'SUB';
   const mp4Candidates = [
     fuenteActiva,
     ...fuentes.filter((f) => f && f !== fuenteActiva)
@@ -4732,59 +4822,70 @@ export async function descargarEpisodioActual(): Promise<void> {
       f &&
       f.url &&
       !videoSourceManager.failedSourcesInSession.has(f.url) &&
-      (f.url.includes('mp4upload.com') || f.url.includes('yourupload.com') || /\.(mp4|webm)(\?|$)/i.test(f.url))
+      !f.url.toLowerCase().includes('.m3u8') &&
+      (f.url.includes('mp4upload.com') ||
+        f.url.includes('yourupload.com') ||
+        (f.url.includes('archive.org/download/') && /\.(mp4|webm|mkv)(\?|$)/i.test(f.url)) ||
+        /\.(mp4|webm)(\?|$)/i.test(f.url))
   );
 
-  const rawFilename = `${cleanSeriesTitle}_T${seasonNum}_Ep_${state.epActual}.mp4`;
+  const cleanSlugTitle = cleanSeriesTitle
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s_-]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '_')
+    .slice(0, 64) || 'Anime';
+  const epPad = String(Math.max(1, Number(state.epActual || 1))).padStart(2, '0');
+  const rawFilename = `${cleanSlugTitle}_T${seasonNum}_Ep${epPad}_${preferredAudio === 'DUB' ? 'LAT' : 'SUB'}.mp4`;
 
   if (nWin.NyAnimeOffline?.downloadAnimeEpisodeOrQueue) {
+    let lastErrorMessage = '';
     for (const cand of mp4Candidates) {
       try {
-        const extracted = await StreamExtractor.extract(cand.url);
-        if (extracted?.type === 'mp4' && extracted.streamUrl) {
-          showToast(`📥 Descargando T${seasonNum} · Ep ${state.epActual} (.MP4)...`);
-          const res = await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
-            animeId: seasonId,
-            animeTitle: `${cleanSeriesTitle} (T${seasonNum})`,
-            cover: state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || '',
-            season: seasonNum,
-            episode: state.epActual,
-            quality: '1080p',
-            directStreamUrl: extracted.streamUrl,
-            fallbackWebUrl: cand.url || fallbackUrl,
-            saveToDeviceFilename: rawFilename
-          });
-          await DownloadManager.updateBadge();
-          if (res.kind === 'anime-video') {
-            nWin.renderDetalleEpisodios?.();
-            showToast(`Archivo .MP4 descargado: ${cleanSeriesTitle} T${seasonNum} Ep ${state.epActual}`);
-            return;
-          }
+        const extracted = await StreamExtractor.extract(cand.url, { forceRefresh: true });
+        if (!extracted || extracted.type !== 'mp4' || !extracted.streamUrl) continue;
+        if (extracted.detectedLanguage && extracted.detectedLanguage !== preferredAudio) {
+          continue;
         }
-      } catch {
-        // try next MP4 candidate if rate-limited or broken
+
+        showToast(`📥 Descargando T${seasonNum} · Ep ${state.epActual} (.MP4 por bloques)...`);
+        const res = await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
+          animeId: seasonId,
+          animeTitle: `${cleanSeriesTitle} (T${seasonNum})`,
+          cover: state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || '',
+          season: seasonNum,
+          episode: state.epActual,
+          quality: 'auto',
+          audio: preferredAudio,
+          destination: 'both',
+          directStreamUrl: extracted.streamUrl,
+          fallbackWebUrl: cand.url || fallbackUrl,
+          saveToDeviceFilename: rawFilename,
+          allowWatchLaterFallback: false
+        });
+        await DownloadManager.updateBadge();
+        if (res.kind === 'anime-video') {
+          nWin.renderDetalleEpisodios?.();
+          const mbSize = (Number(res.sizeBytes || 0) / (1024 * 1024)).toFixed(1);
+          showToast(`✓ Ep. ${state.epActual} guardado offline (${mbSize} MB) y exportado en .MP4`);
+          return;
+        }
+      } catch (err: any) {
+        lastErrorMessage = err?.message || 'Error de red durante la descarga';
+        if (err?.name === 'QuotaExceededError' || /espacio.*insuficiente/i.test(lastErrorMessage)) {
+          showToast(`⚠️ ${lastErrorMessage}`);
+          return;
+        }
       }
     }
 
-    try {
-      showToast('Guardando enlace real en Ver Luego...');
-      await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
-        animeId: seasonId,
-        animeTitle: `${cleanSeriesTitle} (T${seasonNum})`,
-        cover: state.anime?.coverImage?.large || state.anime?.coverImage?.extraLarge || '',
-        season: seasonNum,
-        episode: state.epActual,
-        quality: '1080p',
-        directStreamUrl: null,
-        fallbackWebUrl: fallbackUrl
-      });
-      await DownloadManager.updateBadge();
-      showToast('🔖 Guardado en "Ver Luego" con enlace real');
-      return;
-    } catch (err: any) {
-      showToast(`No se pudo descargar: ${err?.message || err}`);
-      return;
-    }
+    showToast(
+      lastErrorMessage
+        ? `No se pudo descargar Ep. ${state.epActual}: ${lastErrorMessage}`
+        : `Sin enlace .MP4 directo en ${preferredAudio === 'DUB' ? 'Audio Latino' : 'Sub Español'} para este episodio.`
+    );
+    return;
   }
   showToast('Motor de descargas no disponible.');
 }

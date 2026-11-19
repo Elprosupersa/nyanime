@@ -35,6 +35,10 @@ import {
   type OAuthAccountSession,
   type OAuthProviderId
 } from '../utils/scrobble.ts';
+import {
+  computeBodyScrollLock,
+  resolveModalDismissBehavior
+} from '../utils/uiPolishHelpers.ts';
 
 export { generarPortadaSVG };
 export type { AnimeListStatus, CustomList, OAuthAccountSession, OAuthProviderId };
@@ -78,6 +82,8 @@ export interface NyWindow extends Window {
   escapeHTML?: (val: unknown) => string;
   safeImageUrl?: (url: string, fallback?: string) => string;
   safeExternalUrl?: (url: string) => string;
+  cerrarModalFuentesManga?: (event?: Event) => void;
+  cerrarModalDescargasManga?: (event?: Event) => void;
   Hls?: any;
   FirebaseAuth?: any;
   firebaseSync?: any;
@@ -100,6 +106,9 @@ export interface NyWindow extends Window {
   cerrarLectorManga?: () => void;
   reproducirVideoOfflineCacheado?: (manifest: any) => Promise<void>;
   cancelarDescargaTemporada?: () => void;
+  abrirModalDescargas?: () => void;
+  getActiveAnimeDownloadSnapshot?: () => any;
+  cerrarOMinimizarModalDescargaTemporada?: (event?: Event) => void;
   handleAndroidBackButton?: () => string;
   UserManager?: typeof UserManager;
   FavoritesManager?: typeof FavoritesManager;
@@ -552,9 +561,35 @@ export function generarIconoFuenteSVG(nombre: string): string {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(rawSvg);
 }
 
-export function cerrarModales(event?: Event): void {
+export function getActiveModalElements(): HTMLElement[] {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>('.modal-overlay.active, .modal-overlay.open, .ny-dialog.active, .ny-dialog.open')
+  );
+}
+
+export function hasActiveModal(): boolean {
+  return getActiveModalElements().length > 0;
+}
+
+export function syncModalBodyScrollLock(): boolean {
+  const activeIds = getActiveModalElements().map((el) => el.id || 'modal');
+  const shouldLock = computeBodyScrollLock(activeIds);
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.toggle('ny-modal-open', shouldLock);
+  }
+  return shouldLock;
+}
+
+export function cerrarModales(event?: Event, options?: { forceCritical?: boolean }): void {
   if (event && event.target && event.target !== event.currentTarget) return;
-  document.querySelectorAll('.modal-overlay, .ny-dialog').forEach(m => m.classList.remove('active', 'open'));
+  const forceCritical = options?.forceCritical === true;
+  document.querySelectorAll<HTMLElement>('.modal-overlay, .ny-dialog').forEach((m) => {
+    if (!forceCritical && resolveModalDismissBehavior(m.id) === 'blocked') {
+      return;
+    }
+    m.classList.remove('active', 'open');
+  });
+  syncModalBodyScrollLock();
 }
 
 export function cambiarTab(tab: string): void {
@@ -566,24 +601,22 @@ export function cambiarTab(tab: string): void {
   if (detManga) detManga.classList.add('hide');
 
   const rep = document.getElementById('pantalla-reproductor');
-  if (rep) {
-    if (!rep.classList.contains('hide')) {
-      uiHooks.flushPlayerProgress();
-    }
+  if (rep && !rep.classList.contains('hide')) {
+    uiHooks.cerrarReproductor();
+  } else if (rep) {
     rep.classList.add('hide');
     const vid = document.getElementById('contenedor-video');
     if (vid) vid.innerHTML = '';
   }
 
   const lec = document.getElementById('pantalla-lector');
-  if (lec) {
-    if (!lec.classList.contains('hide')) {
-      uiHooks.flushMangaReaderPage();
-    }
+  if (lec && !lec.classList.contains('hide')) {
+    uiHooks.cerrarLector();
+  } else if (lec) {
     lec.classList.add('hide');
   }
 
-  cerrarModales();
+  cerrarModales(undefined, { forceCritical: true });
 
   const screens = ['inicio', 'emision', 'lectura', 'busqueda', 'favoritos', 'perfil'];
   screens.forEach(s => {
@@ -1982,7 +2015,7 @@ export const MangaHistoryManager = {
 
 export const DownloadManager = {
   KEY: 'nyanime_downloads_v1',
-  activeTab: 'all' as 'all' | 'anime' | 'watch-later' | 'manga',
+  activeTab: 'all' as 'all' | 'active' | 'anime' | 'watch-later' | 'manga',
   searchQuery: '',
   getAll(): any[] {
     try { return JSON.parse(localStorage.getItem(this.KEY) || '[]') || []; } catch { return []; }
@@ -1997,7 +2030,7 @@ export const DownloadManager = {
     this.save(list);
     void this.renderDownloadsModal();
   },
-  setTab(tab: 'all' | 'anime' | 'watch-later' | 'manga'): void {
+  setTab(tab: 'all' | 'active' | 'anime' | 'watch-later' | 'manga'): void {
     this.activeTab = tab;
     void this.renderDownloadsModal();
   },
@@ -2087,15 +2120,39 @@ export const DownloadManager = {
           if (typeof nWin.reproducirVideoOfflineCacheado === 'function') {
             await nWin.reproducirVideoOfflineCacheado(m);
           }
-        } else if (m.url) {
-          const safeUrl = nWin.safeExternalUrl ? nWin.safeExternalUrl(m.url) : m.url;
-          if (safeUrl) handleOpenExternal(safeUrl);
+        } else {
+          // Legacy watch-later item: ALWAYS open inside NyAnime TV's internal player, NEVER an external embed tab
+          cerrarModales();
+          const cleanTitle = String(m.title || 'Anime').replace(/\s*\(T\d+\)\s*$/i, '').trim();
+          const numericId = Number(m.mediaId);
+          const epNum = Math.max(1, Number(m.episode || 1));
+          const targetAnime =
+            FavoritesManager.getEntry(m.mediaId) ||
+            (Number.isFinite(numericId) && numericId > 0
+              ? {
+                  id: numericId,
+                  title: { english: cleanTitle, romaji: cleanTitle },
+                  coverImage: { large: m.cover || '', extraLarge: m.cover || '' },
+                  episodes: epNum
+                }
+              : {
+                  id: m.mediaId || Date.now(),
+                  title: { english: cleanTitle, romaji: cleanTitle },
+                  coverImage: { large: m.cover || '', extraLarge: m.cover || '' },
+                  episodes: epNum
+                });
+          if (typeof uiHooks.abrirDetalle === 'function') {
+            await uiHooks.abrirDetalle(targetAnime);
+          }
+          if (typeof nWin.abrirReproductor === 'function') {
+            await nWin.abrirReproductor(epNum);
+          }
         }
       };
       nWin.NyAnimeOffline.exportMp4 = async (offlineId: string) => {
         if (typeof nWin.NyAnimeOffline.exportOfflineAnimeToDevice === 'function') {
           const ok = await nWin.NyAnimeOffline.exportOfflineAnimeToDevice(offlineId);
-          showToast(ok ? 'Guardando archivo .MP4 en tu dispositivo...' : 'No se pudo exportar el archivo .MP4.');
+          showToast(ok ? 'Exportando archivo .MP4 desde caché local...' : 'No se pudo exportar el archivo .MP4.');
         }
       };
       nWin.NyAnimeOffline.deleteItem = async (offlineId: string) => {
@@ -2113,10 +2170,15 @@ export const DownloadManager = {
         }
         showToast('Elemento eliminado del almacenamiento offline.');
       };
+      const activeBatch =
+        typeof nWin.getActiveAnimeDownloadSnapshot === 'function'
+          ? nWin.getActiveAnimeDownloadSnapshot()
+          : null;
       await nWin.NyAnimeOffline.renderOfflineDownloadsModal(container, summaryEl, {
         activeTab: this.activeTab,
         query: this.searchQuery,
-        tabsContainerEl: tabsEl
+        tabsContainerEl: tabsEl,
+        activeBatch
       });
       await this.updateBadge();
       return;
@@ -2237,11 +2299,19 @@ export function setupTouchGestures(): void {
     }
 
     const detalle = document.getElementById('pantalla-detalle');
-    const activeModal = document.querySelector('.modal-overlay.active, .modal-overlay.open, .ny-dialog.active, .ny-dialog.open');
+    const activeModal = document.querySelector<HTMLElement>('.modal-overlay.active, .modal-overlay.open, .ny-dialog.active, .ny-dialog.open');
 
     if (activeModal && dx > 80) {
+      const behavior = resolveModalDismissBehavior(activeModal.id, {
+        isBatchDownloadRunning: isAnimeBatchDownloadRunning()
+      });
+      if (behavior === 'blocked') return;
       if (navigator.vibrate) navigator.vibrate(15);
-      cerrarModales();
+      if (behavior === 'minimize' && typeof nWin.cerrarOMinimizarModalDescargaTemporada === 'function') {
+        nWin.cerrarOMinimizarModalDescargaTemporada();
+      } else {
+        cerrarModales();
+      }
       return;
     }
 
@@ -2251,4 +2321,9 @@ export function setupTouchGestures(): void {
       return;
     }
   }, { passive: true });
+}
+
+export function isAnimeBatchDownloadRunning(): boolean {
+  const snap = nWin.getActiveAnimeDownloadSnapshot?.();
+  return Boolean(snap && (snap.status === 'running' || snap.status === 'paused'));
 }

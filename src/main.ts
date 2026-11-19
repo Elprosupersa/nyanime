@@ -270,24 +270,33 @@ import {
 } from './ui/mangaReaderView.ts';
 
 import {
+  abrirDescargaEnCurso,
   abrirDetalle,
   abrirModalDescargaTemporada,
   actualizarResumenSeleccionDescarga,
   aplicarFiltroDescargaEpisodios,
+  aplicarRangoPersonalizadoDescarga,
   cambiarCategoriaDetalleAnime,
   cancelarDescargaTemporada,
   cerrarDetalle,
+  cerrarOMinimizarModalDescargaTemporada,
   filtrarListaEpisodiosDescarga,
+  getActiveAnimeDownloadSnapshot,
   getActiveDetailAnimeEntry,
   iniciarDescargaLote,
   iniciarOContinuarAnime,
+  minimizarModalDescargaTemporada,
+  reintentarEpisodioDescarga,
+  reintentarEpisodiosFallidos,
   renderDetalleEpisodios,
+  seleccionarDestinoDescarga,
   seleccionarRangoDescarga,
   seleccionarTemporadaDetalle,
   toggleCrunchySeasonMenu,
   toggleEpisodeMarkMode,
   toggleFavoriteCurrentAnime,
   toggleItemCustomList,
+  togglePausaDescargaTemporada,
   toggleDetalleLibraryMenu,
   quitarAnimeDetalleDeBiblioteca,
   toggleTodosEpisodiosDescarga,
@@ -299,7 +308,6 @@ import {
   abrirSalaWatchTogetherDesdeCodigo,
   actualizarEstadoVistoPlayerUI,
   aplicarTiempoManualWatchTogether,
-  bindPlayerKeyboardShortcuts,
   cerrarModalPasscodeWatchTogether,
   cerrarReproductor,
   confirmarPasscodeWatchTogether,
@@ -710,9 +718,18 @@ Object.assign(mWin, {
   abrirModalDescargaTemporada,
   actualizarResumenSeleccionDescarga,
   aplicarFiltroDescargaEpisodios,
+  aplicarRangoPersonalizadoDescarga,
+  seleccionarDestinoDescarga,
   seleccionarRangoDescarga,
   filtrarListaEpisodiosDescarga,
   cancelarDescargaTemporada,
+  togglePausaDescargaTemporada,
+  minimizarModalDescargaTemporada,
+  cerrarOMinimizarModalDescargaTemporada,
+  abrirDescargaEnCurso,
+  getActiveAnimeDownloadSnapshot,
+  reintentarEpisodioDescarga,
+  reintentarEpisodiosFallidos,
   toggleTodosEpisodiosDescarga,
   iniciarDescargaLote,
   renderDetalleEpisodios,
@@ -761,8 +778,6 @@ Object.assign(mWin, {
   videoSourceManager,
   StreamExtractor
 });
-
-bindPlayerKeyboardShortcuts();
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => initApp(), { once: true });

@@ -41,14 +41,31 @@ import {
   normalizeSlugText,
   parseHentaiLaCatalogData
 } from '../utils/animeSources.ts';
+import {
+  buildSkeletonCardsHtml,
+  buildStateCardHtml,
+  createRequestGuard
+} from '../utils/uiPolishHelpers.ts';
+
+const homeCatalogGuard = createRequestGuard();
+const homeGenreGuard = createRequestGuard();
 
 export async function cargarCatalogoHome(): Promise<void> {
   const cacheKey = 'home_catalog_v3';
   const cached = CacheManager.get(cacheKey);
   if (cached) {
+    homeCatalogGuard.invalidate();
     renderHomeContent(cached);
     return;
   }
+
+  const { seq, signal } = homeCatalogGuard.next();
+  ['lista-tendencias', 'lista-populares', 'lista-emision'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el.children.length === 0) {
+      el.innerHTML = buildSkeletonCardsHtml(6, 'row');
+    }
+  });
 
   const query = `
     query {
@@ -82,15 +99,39 @@ export async function cargarCatalogoHome(): Promise<void> {
     const res = await fetch(ANILIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({ query }),
+      signal
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    if (!homeCatalogGuard.isCurrent(seq)) return;
     if (data?.data) {
       CacheManager.set(cacheKey, data.data);
       renderHomeContent(data.data);
+      return;
     }
+    throw new Error('Respuesta vacía de AniList');
   } catch (err) {
+    if (!homeCatalogGuard.isCurrent(seq)) return;
     console.error('Error al cargar catálogo:', err);
+    const tendEl = document.getElementById('lista-tendencias');
+    if (tendEl) {
+      tendEl.innerHTML = buildStateCardHtml({
+        kind: 'error',
+        compact: true,
+        icon: '📡',
+        title: 'No se pudo cargar el catálogo',
+        message: 'Revisa tu conexión a internet e inténtalo de nuevo.',
+        retryLabel: '🔄 Reintentar',
+        retryOnClick: 'cargarCatalogoHome()'
+      });
+    }
+    ['lista-populares', 'lista-emision'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && el.querySelector('.ny-skeleton-card')) {
+        el.innerHTML = '';
+      }
+    });
     void renderSmartRecommendations();
   }
 }
@@ -372,6 +413,11 @@ export function renderCategorias(): void {
 }
 
 export async function filtrarPorGenero(genero: string): Promise<void> {
+  const { seq, signal } = homeGenreGuard.next();
+  const popEl = document.getElementById('lista-populares');
+  if (popEl) {
+    popEl.innerHTML = buildSkeletonCardsHtml(6, 'row');
+  }
   const query = `
     query ($genre: String) {
       Page(perPage: 15) {
@@ -385,14 +431,40 @@ export async function filtrarPorGenero(genero: string): Promise<void> {
     const res = await fetch(ANILIST_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables: { genre: genero } })
+      body: JSON.stringify({ query, variables: { genre: genero } }),
+      signal
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (data?.data?.Page?.media) {
-      renderHScroll('lista-populares', data.data.Page.media);
+    if (!homeGenreGuard.isCurrent(seq)) return;
+    const items = data?.data?.Page?.media;
+    if (Array.isArray(items) && items.length > 0) {
+      renderHScroll('lista-populares', items);
+    } else if (popEl) {
+      popEl.innerHTML = buildStateCardHtml({
+        kind: 'empty',
+        compact: true,
+        icon: '🎬',
+        title: `Sin resultados en ${genero}`,
+        message: 'Intenta con otra categoría o vuelve a ver todos los populares.',
+        retryLabel: 'Ver todos',
+        retryOnClick: 'cargarCatalogoHome()'
+      });
     }
   } catch {
-    // ignore
+    if (!homeGenreGuard.isCurrent(seq)) return;
+    if (popEl) {
+      const safeGenreArg = escHtml(String(genero).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+      popEl.innerHTML = buildStateCardHtml({
+        kind: 'error',
+        compact: true,
+        icon: '⚠️',
+        title: `Error cargando ${genero}`,
+        message: 'No se pudo filtrar el catálogo en este momento.',
+        retryLabel: '🔄 Reintentar',
+        retryOnClick: `filtrarPorGenero('${safeGenreArg}')`
+      });
+    }
   }
 }
 
@@ -1336,7 +1408,14 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
   } catch (e) {
     if (reqId !== searchReqSeq) return;
     console.error('Error al buscar:', e);
-    container.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color: var(--text-muted); margin-top:20px;">Error al conectar con la búsqueda.</div>';
+    container.innerHTML = buildStateCardHtml({
+      kind: 'error',
+      icon: '📡',
+      title: 'Error al conectar con la búsqueda',
+      message: 'Comprueba tu conexión e inténtalo nuevamente.',
+      retryLabel: '🔄 Reintentar',
+      retryOnClick: 'realizarBusqueda()'
+    });
     renderSearchPagination(null);
   }
 }
@@ -1351,15 +1430,16 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
 
   if (animeList.length === 0 && mangaList.length === 0) {
     const emptyTitle = term
-      ? `Sin resultados para "${escHtml(term)}"`
+      ? `Sin resultados para "${term}"`
       : 'Sin resultados para esta combinación de filtros';
-    container.innerHTML = `
-      <div style="grid-column: 1/-1; text-align:center; padding:42px 20px; color:var(--text-muted);">
-        <div style="font-size:32px; margin-bottom:10px;">🔎</div>
-        <div style="font-size:15px; font-weight:700; color:#fff; margin-bottom:6px;">${emptyTitle}</div>
-        <div style="font-size:12px;">Prueba cambiando el género, año o quitando alguno de los filtros activos.</div>
-      </div>
-    `;
+    container.innerHTML = buildStateCardHtml({
+      kind: 'empty',
+      icon: '🔎',
+      title: emptyTitle,
+      message: 'Prueba cambiando el género, año o limpiando los filtros activos.',
+      retryLabel: hasActiveDirectoryFilters(searchDirectoryFilters) ? 'Limpiar filtros' : undefined,
+      retryOnClick: hasActiveDirectoryFilters(searchDirectoryFilters) ? 'resetSearchFilters()' : undefined
+    });
     return;
   }
 

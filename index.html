@@ -916,14 +916,14 @@
   <!-- PANTALLA REPRODUCTOR -->
   <div id="pantalla-reproductor" class="hide">
     <div class="rep-header">
-      <button type="button" class="btn-circle" style="width:36px; height:36px;" onclick="cerrarReproductor()" aria-label="Volver al anime">
+      <button type="button" class="btn-circle rep-circle-btn" onclick="cerrarReproductor()" aria-label="Volver al anime">
         <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
       </button>
       <div class="rep-title-wrap">
         <div class="rep-title" id="rep-titulo">Cargando...</div>
         <div class="rep-ep-subtitle" id="rep-ep-subtitle"></div>
       </div>
-      <button type="button" class="btn-circle" style="width:36px; height:36px;" onclick="descargarEpisodioActual()" title="Descargar este episodio" aria-label="Descargar episodio actual">
+      <button type="button" class="btn-circle rep-circle-btn" onclick="descargarEpisodioActual()" title="Descargar este episodio" aria-label="Descargar episodio actual">
         <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
       </button>
     </div>
@@ -1037,14 +1037,14 @@
   <!-- PANTALLA LECTOR WEBTOON -->
   <div id="pantalla-lector" class="hide" onclick="toggleLectorHUD(event)">
     <div class="lector-header" id="lector-header-bar">
-      <button type="button" class="btn-circle" style="width:36px; height:36px;" onclick="cerrarLector()" aria-label="Cerrar lector">
+      <button type="button" class="btn-circle lector-circle-btn" onclick="cerrarLector()" aria-label="Cerrar lector">
         <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
       </button>
       <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%;" id="lector-titulo">Capítulo 1</div>
       <div style="display:flex; gap:6px; align-items:center;">
         <button type="button" class="chip" id="btn-lector-cache" style="font-size:11px; padding:5px 10px; font-weight:800;" onclick="toggleCacheCapituloActualLector(event)" aria-label="Guardar capítulo en caché sin conexión">💾 Guardar</button>
         <button type="button" class="chip" style="font-size:11px; padding:5px 12px; font-weight:800;" onclick="abrirQuickCapsSheet(event)">📑 Caps ▾</button>
-        <button type="button" class="btn-circle" style="width:34px; height:34px;" onclick="abrirAjustesLector(event)" title="Ajustes de Lectura" aria-label="Ajustes de lectura">
+        <button type="button" class="btn-circle lector-circle-btn" onclick="abrirAjustesLector(event)" title="Ajustes de Lectura" aria-label="Ajustes de lectura">
           <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </button>
       </div>
@@ -1066,7 +1066,7 @@
     <div class="mihon-quick-caps-sheet" id="mihon-quick-caps-sheet" onclick="event.stopPropagation()">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
         <span style="font-weight:800; font-size:15px; color:#fff;" id="quick-caps-sheet-title">Saltar a Capítulo</span>
-        <button type="button" class="btn-circle" style="width:30px; height:30px;" onclick="cerrarQuickCapsSheet()" aria-label="Cerrar selector de capítulos">✕</button>
+        <button type="button" class="btn-circle lector-sheet-close-btn" onclick="cerrarQuickCapsSheet()" aria-label="Cerrar selector de capítulos">✕</button>
       </div>
       <div class="mihon-quick-caps-list" id="mihon-quick-caps-list"></div>
     </div>
@@ -1074,7 +1074,7 @@
     <div class="mihon-quick-caps-sheet" id="mihon-reader-settings-sheet" onclick="event.stopPropagation()">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
         <span style="font-weight:800; font-size:15px; color:#fff;">⚙️ Ajustes del Lector</span>
-        <button type="button" class="btn-circle" style="width:30px; height:30px;" onclick="cerrarAjustesLector()" aria-label="Cerrar ajustes del lector">✕</button>
+        <button type="button" class="btn-circle lector-sheet-close-btn" onclick="cerrarAjustesLector()" aria-label="Cerrar ajustes del lector">✕</button>
       </div>
       <div style="display:flex; flex-direction:column; gap:14px; margin-top:14px; max-height:66vh; overflow-y:auto;">
         <div>

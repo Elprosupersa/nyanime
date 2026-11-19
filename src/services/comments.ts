@@ -1,4 +1,5 @@
 import { escapeHTML, formatRelativeTime, safeImageUrl } from '../utils/sanitize.ts';
+import { buildStateCardHtml, createRequestGuard } from '../utils/uiPolishHelpers.ts';
 import {
   FirebaseCommentsBridge,
   FirebaseAuthBridge,
@@ -61,6 +62,10 @@ export function formatRemainingChars(
   };
 }
 
+function toSafeJsSingleQuotedArg(value: number | string): string {
+  return escapeHTML(String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+
 export function renderCommentCardMarkup(
   c: EpisodeCommentRecord,
   options: {
@@ -77,6 +82,9 @@ export function renderCommentCardMarkup(
   const safeTime = escapeHTML(formatRelativeTime(toEpochMs(c.createdAt)));
   const isMine = Boolean(options.currentUid && c.uid === options.currentUid);
   const isSpoiler = Boolean(c.isSpoiler);
+  const safeAnimeArg = toSafeJsSingleQuotedArg(options.animeId);
+  const safeEpArg = toSafeJsSingleQuotedArg(options.ep);
+  const safeCommentArg = toSafeJsSingleQuotedArg(c.id);
 
   const textMarkup = isSpoiler
     ? `
@@ -107,7 +115,7 @@ export function renderCommentCardMarkup(
         ${textMarkup}
         ${
           isMine
-            ? `<div class="comment-footer"><button class="comment-like-btn" onclick="CommentsManager.deleteComment(${Number(options.animeId)}, ${Number(options.ep)}, '${escapeHTML(c.id)}')">🗑️ Eliminar</button></div>`
+            ? `<div class="comment-footer"><button type="button" class="comment-like-btn" onclick="CommentsManager.deleteComment('${safeAnimeArg}', '${safeEpArg}', '${safeCommentArg}')">🗑️ Eliminar</button></div>`
             : ''
         }
       </div>
@@ -123,6 +131,8 @@ function toEpochMs(createdAt: unknown): number {
   }
   return Date.now();
 }
+
+const commentsRequestGuard = createRequestGuard();
 
 export const RealCommentsManager = {
   lastPostedAt: 0,
@@ -166,11 +176,13 @@ export const RealCommentsManager = {
     if (countEl) countEl.textContent = `(${this.loadedComments.length})`;
 
     if (this.loadedComments.length === 0) {
-      container.innerHTML = `
-        <div style="text-align:center; padding:18px 14px; color:var(--text-muted); font-size:12px; background:rgba(255,255,255,0.02); border:1px dashed var(--border-color); border-radius:12px;">
-          Todavía no hay comentarios en este episodio. ¡Sé el primero en opinar!
-        </div>
-      `;
+      container.innerHTML = buildStateCardHtml({
+        kind: 'empty',
+        compact: true,
+        icon: '💬',
+        title: 'Sin comentarios todavía',
+        message: 'Sé el primero en compartir tu opinión sobre este episodio.'
+      });
       return;
     }
 
@@ -178,8 +190,10 @@ export const RealCommentsManager = {
       .map((c) => renderCommentCardMarkup(c, { currentUid, animeId, ep }))
       .join('');
 
+    const safeAnimeArg = toSafeJsSingleQuotedArg(animeId);
+    const safeEpArg = toSafeJsSingleQuotedArg(ep);
     const loadMoreHtml = this.hasMorePages
-      ? `<button type="button" class="comment-load-more-btn" id="btn-load-more-comments" onclick="CommentsManager.loadMore(${Number(animeId)}, ${Number(ep)})">Cargar comentarios anteriores</button>`
+      ? `<button type="button" class="comment-load-more-btn" id="btn-load-more-comments" onclick="CommentsManager.loadMore('${safeAnimeArg}', '${safeEpArg}')">Cargar comentarios anteriores</button>`
       : '';
 
     container.innerHTML = cardsHtml + loadMoreHtml;
@@ -190,6 +204,7 @@ export const RealCommentsManager = {
     const countEl = document.getElementById('comments-count');
     if (!container) return;
 
+    const { seq } = commentsRequestGuard.next();
     this.updateCharCounter();
     const epKey = this.buildEpisodeKey(animeId, ep);
     const fbUser = FirebaseAuthBridge.getCurrentUser();
@@ -199,13 +214,15 @@ export const RealCommentsManager = {
       this.lastDocCursor = null;
       this.hasMorePages = false;
       if (countEl) countEl.textContent = '(0)';
-      container.innerHTML = `
-        <div style="text-align:center; padding:20px 14px; color:var(--text-muted); font-size:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:12px;">
-          <div style="font-size:20px; margin-bottom:6px;">💬</div>
-          <div>Inicia sesión con Google o Correo para leer y publicar comentarios reales de la comunidad en Firestore.</div>
-          <button class="chip active" style="margin-top:10px; padding:7px 14px;" onclick="cambiarTab('perfil')">Ir a Iniciar Sesión</button>
-        </div>
-      `;
+      container.innerHTML = buildStateCardHtml({
+        kind: 'empty',
+        compact: true,
+        icon: '💬',
+        title: 'Únete a la conversación',
+        message: 'Inicia sesión con Google o Correo para leer y publicar comentarios de la comunidad.',
+        retryLabel: 'Ir a Iniciar Sesión',
+        retryOnClick: "cambiarTab('perfil')"
+      });
       return;
     }
 
@@ -213,23 +230,30 @@ export const RealCommentsManager = {
 
     try {
       const page = await FirebaseCommentsBridge.listCommentsPage(epKey, null, COMMENTS_PAGE_SIZE);
+      if (!commentsRequestGuard.isCurrent(seq)) return;
       this.loadedComments = page.items;
       this.lastDocCursor = page.lastDoc;
       this.hasMorePages = page.hasMore;
       this.renderLoadedList(container, animeId, ep, fbUser.uid);
     } catch (err) {
+      if (!commentsRequestGuard.isCurrent(seq)) return;
       if (countEl) countEl.textContent = '(0)';
       const rawMsg = err instanceof Error ? err.message : 'Error cargando comentarios';
       let friendlyMsg = 'No se pudieron cargar los comentarios en este momento.';
       if (!rawMsg.trim().startsWith('{') && !rawMsg.includes('Missing or insufficient permissions')) {
         friendlyMsg = rawMsg;
       }
-      container.innerHTML = `
-        <div style="text-align:center; padding:18px 14px; color:var(--text-secondary); font-size:12px; background:rgba(255,255,255,0.02); border:1px dashed var(--border-color); border-radius:12px;">
-          <div style="margin-bottom:8px;">${escapeHTML(friendlyMsg)}</div>
-          <button type="button" class="chip active" style="padding:6px 14px;" onclick="CommentsManager.render(${Number(animeId)}, ${Number(ep)})">🔄 Reintentar</button>
-        </div>
-      `;
+      const safeAnimeArg = toSafeJsSingleQuotedArg(animeId);
+      const safeEpArg = toSafeJsSingleQuotedArg(ep);
+      container.innerHTML = buildStateCardHtml({
+        kind: 'error',
+        compact: true,
+        icon: '⚠️',
+        title: 'Error cargando comentarios',
+        message: friendlyMsg,
+        retryLabel: '🔄 Reintentar',
+        retryOnClick: `CommentsManager.render('${safeAnimeArg}', '${safeEpArg}')`
+      });
     }
   },
 
@@ -238,6 +262,7 @@ export const RealCommentsManager = {
     const fbUser = FirebaseAuthBridge.getCurrentUser();
     if (!container || !fbUser || fbUser.isAnonymous || !this.lastDocCursor) return;
 
+    const currentSeq = commentsRequestGuard.currentSeq();
     const btn = document.getElementById('btn-load-more-comments') as HTMLButtonElement | null;
     if (btn) {
       btn.disabled = true;
@@ -247,6 +272,7 @@ export const RealCommentsManager = {
     try {
       const epKey = this.buildEpisodeKey(animeId, ep);
       const nextPage = await FirebaseCommentsBridge.listCommentsPage(epKey, this.lastDocCursor, COMMENTS_PAGE_SIZE);
+      if (!commentsRequestGuard.isCurrent(currentSeq)) return;
       const seen = new Set(this.loadedComments.map((c) => c.id));
       for (const item of nextPage.items) {
         if (!seen.has(item.id)) {
@@ -257,6 +283,7 @@ export const RealCommentsManager = {
       this.hasMorePages = nextPage.hasMore;
       this.renderLoadedList(container, animeId, ep, fbUser.uid);
     } catch (err) {
+      if (!commentsRequestGuard.isCurrent(currentSeq)) return;
       if (btn) {
         btn.disabled = false;
         btn.textContent = 'Reintentar cargar comentarios';
