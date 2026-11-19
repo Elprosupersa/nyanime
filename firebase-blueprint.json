@@ -376,6 +376,10 @@
         "weeklySummaryPush": {
           "type": "boolean"
         },
+        "showAdultContent": {
+          "type": "boolean",
+          "description": "Controla si se muestran fuentes y títulos +18 (apagado por defecto)."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -612,6 +616,14 @@
         "playbackTime": {
           "type": "number"
         },
+        "isPlaying": {
+          "type": "boolean",
+          "description": "Estado ancla de reproducción para cálculo de tiempo en cliente."
+        },
+        "anchorTime": {
+          "type": "number",
+          "description": "Segundo exacto del ancla al momento de updatedAt."
+        },
         "updatedAtMs": {
           "type": "integer"
         },
@@ -676,6 +688,11 @@
         "lastSeenMs": {
           "type": "integer"
         },
+        "accessHash": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Hash SHA-256 de passcode o inviteToken verificado al unirse."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -685,7 +702,7 @@
           "format": "date-time"
         }
       },
-      "required": ["uid", "roomId", "displayName", "avatar", "lastSeenMs", "createdAt", "updatedAt"]
+      "required": ["uid", "roomId", "displayName", "avatar", "lastSeenMs", "accessHash", "createdAt", "updatedAt"]
     },
     "WatchRoomMessage": {
       "title": "WatchRoomMessage",

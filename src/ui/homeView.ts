@@ -2,6 +2,7 @@ import {
   ANILIST_URL,
   type AnimeListStatus,
   AnimeWatchedManager,
+  AppPreferencesManager,
   CacheManager,
   FavoritesManager,
   HistoryManager,
@@ -30,11 +31,13 @@ import {
   createDefaultDirectoryFilters,
   filterMediaByLetter,
   getSupportedYears,
+  getVisibleDirectoryGenres,
   hasActiveDirectoryFilters,
   mapDirectoryFiltersToAniListVariables
 } from '../utils/directoryFilters.ts';
 import {
   HentaiLaCatalogItem,
+  filterSafeMediaList,
   normalizeSlugText,
   parseHentaiLaCatalogData
 } from '../utils/animeSources.ts';
@@ -551,9 +554,14 @@ function syncSearchFilterControlsUI(): void {
 }
 
 export function initSearchDirectoryFilters(): void {
+  const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+  const visibleGenres = getVisibleDirectoryGenres(showAdult);
+  if (!showAdult && searchDirectoryFilters.genre === 'hentai') {
+    searchDirectoryFilters.genre = '';
+  }
   populateSelectOptions('search-filter-genre', [
     { id: '', label: 'Todos los Géneros' },
-    ...JKANIME_GENRES.map(g => ({ id: g.id, label: g.label }))
+    ...visibleGenres.map(g => ({ id: g.id, label: g.label }))
   ]);
   populateSelectOptions('search-filter-type', JKANIME_FILTER_CONFIG.TYPES);
   populateSelectOptions('search-filter-status', JKANIME_FILTER_CONFIG.STATUS);
@@ -910,14 +918,15 @@ function buildFallbackAnimeDirectoryResults(
   }
 
   let allPool = Array.from(poolMap.values());
+  const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
 
-  if (cleanVars.isAdult === true) {
+  if (showAdult && cleanVars.isAdult === true) {
     const adultItems = allPool.filter(
       (m) => m.isAdult === true || (Array.isArray(m.genres) && m.genres.some((g: string) => /hentai|ecchi/i.test(g)))
     );
     if (adultItems.length > 0) allPool = adultItems;
   } else {
-    allPool = allPool.filter((m) => !m.isAdult);
+    allPool = filterSafeMediaList(allPool, showAdult);
   }
 
   if (effectiveSearch) {
@@ -1033,14 +1042,18 @@ async function fetchAniListAnimeDirectory(
     }
   `;
 
+  const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
   const cleanVars: Record<string, any> = {};
   for (const [k, v] of Object.entries(variables)) {
     if (v !== undefined && v !== null && v !== '') {
       cleanVars[k] = v;
     }
   }
+  if (!showAdult) {
+    cleanVars.isAdult = false;
+  }
 
-  const cacheKey = `dir_anime_v4_${JSON.stringify(cleanVars)}_${letter}`;
+  const cacheKey = `dir_anime_v5_${showAdult ? 'adult' : 'safe'}_${JSON.stringify(cleanVars)}_${letter}`;
   const memHit = animeDirectoryMemCache.get(cacheKey);
   if (memHit && memHit.items.length > 0) return memHit;
   const storageHit = CacheManager.get(cacheKey);
@@ -1133,7 +1146,7 @@ async function fetchAniListAnimeDirectory(
     }
   }
 
-  if (effectiveSearch || cleanVars.isAdult === true) {
+  if (showAdult && (effectiveSearch || cleanVars.isAdult === true)) {
     try {
       const hlaUrl = buildHentaiLaCatalogUrl({
         page: Number(cleanVars.page || 1),
@@ -1185,6 +1198,8 @@ async function fetchAniListAnimeDirectory(
     }
   }
 
+  filtered = filterSafeMediaList(filtered, showAdult);
+
   if (filtered.length === 0 && !effectiveSearch) {
     return buildFallbackAnimeDirectoryResults(cleanVars, letter, effectiveSearch);
   }
@@ -1206,6 +1221,16 @@ async function fetchAniListAnimeDirectory(
   }
 
   return result;
+}
+
+export function refreshCatalogForAdultContentPref(): void {
+  animeDirectoryMemCache.clear();
+  initSearchDirectoryFilters();
+  const input = document.getElementById('input-busqueda') as HTMLInputElement | null;
+  const term = input?.value?.trim() || '';
+  if (shouldRunSearchForCurrentState(term)) {
+    void realizarBusqueda(term, 1);
+  }
 }
 
 export { HENTAILA_GENRES, type HentaiLaCatalogItem };
@@ -1264,7 +1289,8 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
     (searchMediaTypeFilter === 'ALL' && !hasAnimeOnlyFilter);
 
   try {
-    const animeVars = mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'ANIME');
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+    const animeVars = mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'ANIME', showAdult);
     const animePromise = includeAnime
       ? fetchAniListAnimeDirectory(
           animeVars,
@@ -1280,7 +1306,7 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
               pageInfo: { currentPage: 1, lastPage: 1, hasNextPage: false, total: items.length }
             }))
           : AniListMangaService.searchDirectory(
-              mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'MANGA'),
+              mapDirectoryFiltersToAniListVariables(filtersForQuery, effectiveSearch, 'MANGA', showAdult),
               filtersForQuery.letter
             )
         ).catch(() => ({ items: [], pageInfo: { currentPage: page, lastPage: 1, hasNextPage: false, total: 0 } }))
@@ -1289,7 +1315,11 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
     const [animeRes, mangaRes] = await Promise.all([animePromise, mangaPromise]);
     if (reqId !== searchReqSeq) return;
 
-    renderDualSearchResults(animeRes.items, mangaRes.items, term);
+    renderDualSearchResults(
+      filterSafeMediaList(animeRes.items, showAdult),
+      filterSafeMediaList(mangaRes.items, showAdult),
+      term
+    );
 
     const activePageInfo: SearchPageMeta =
       searchMediaTypeFilter === 'MANGA'

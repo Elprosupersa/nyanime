@@ -1,4 +1,5 @@
 import {
+  AppPreferencesManager,
   MangaFavoritesManager,
   MangaHistoryManager,
   MangaReadStateManager,
@@ -19,11 +20,19 @@ import {
   lookupMangaCatalogStrict,
   scoreMangaTitleMatch
 } from '../utils/mangaLanguage.ts';
+import { filterSafeMediaList } from '../utils/animeSources.ts';
 
 import {
   formatBytesHuman,
   getOfflineMangaLibrary
 } from '../services/offline.ts';
+
+function getMangaDexContentRatingsQuery(): string {
+  const base = 'contentRating%5B%5D=safe&contentRating%5B%5D=suggestive';
+  return AppPreferencesManager.isShowAdultContentEnabled()
+    ? `${base}&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`
+    : base;
+}
 
 export interface MangaUiState {
   mangasCache: any[];
@@ -1404,7 +1413,7 @@ export const MangaDex = {
     const cjkTargets = allTargets.filter(t => /[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
     const latinTargets = allTargets.filter(t => !/[가-힣\u3040-\u30ff\u4e00-\u9faf]/.test(t));
     const queries = Array.from(new Set([title, ...latinTargets, ...cjkTargets])).slice(0, 6);
-    const ratings = '&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic';
+    const ratings = `&${getMangaDexContentRatingsQuery()}`;
 
     for (const q of queries) {
       if (!q || q.length < 2) continue;
@@ -1457,7 +1466,8 @@ export const MangaDex = {
   },
 
   async getCatalog(type = 'ALL', limit = 32): Promise<any[]> {
-    let url = `https://api.mangadex.org/manga?limit=${limit}&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`;
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+    let url = `https://api.mangadex.org/manga?limit=${limit}&order%5BfollowedCount%5D=desc&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&${getMangaDexContentRatingsQuery()}`;
     if (type === 'MANGA') url += '&originalLanguage%5B%5D=ja';
     else if (type === 'MANHWA') url += '&originalLanguage%5B%5D=ko';
     else if (type === 'MANHUA') url += '&originalLanguage%5B%5D=zh';
@@ -1465,11 +1475,12 @@ export const MangaDex = {
     try {
       const data = await nativeFetchJson(url);
       if (!data?.data) return [];
-      return (data.data || []).map((m: any) => {
+      const mapped = (data.data || []).map((m: any) => {
         const coverObj = m.relationships?.find((r: any) => r.type === 'cover_art');
         const coverUrl = coverObj?.attributes?.fileName
           ? `https://uploads.mangadex.org/covers/${m.id}/${coverObj.attributes.fileName}.256.jpg`
           : generarPortadaSVG(this.formatTitle(m), m.attributes?.originalLanguage || 'ja');
+        const contentRating = String(m.attributes?.contentRating || 'safe').toLowerCase();
         return {
           id: m.id,
           dexId: m.id,
@@ -1484,10 +1495,13 @@ export const MangaDex = {
           origLang: m.attributes?.originalLanguage || 'ja',
           flag: m.attributes?.originalLanguage === 'ko' ? '🇰🇷 Manhwa' : (m.attributes?.originalLanguage === 'zh' ? '🇨🇳 Manhua' : '🇯🇵 Manga'),
           genres: (m.attributes?.tags || []).slice(0, 3).map((t: any) => t.attributes?.name?.en || 'Manga'),
+          contentRating,
+          isAdult: contentRating === 'erotica' || contentRating === 'pornographic',
           chaptersCount: 0,
           source: 'MangaDex'
         };
       });
+      return filterSafeMediaList(mapped, showAdult);
     } catch {
       return [];
     }
@@ -1495,16 +1509,18 @@ export const MangaDex = {
 
   async search(query: string, limit = 24): Promise<any[]> {
     if (!query) return [];
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
     try {
       const cleanQ = FallbackMangaProvider.cleanTitle(query);
-      const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&limit=${limit}&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic`;
+      const url = `https://api.mangadex.org/manga?title=${encodeURIComponent(cleanQ)}&order%5BfollowedCount%5D=desc&limit=${limit}&includes%5B%5D=cover_art&excludedTags%5B%5D=b13b2a48-c720-44a9-9c44-3fb7187ac87a&${getMangaDexContentRatingsQuery()}`;
       const data = await nativeFetchJson(url);
       if (!data?.data) return [];
-      return data.data.map((m: any) => {
+      const mapped = data.data.map((m: any) => {
         const coverObj = m.relationships?.find((r: any) => r.type === 'cover_art');
         const coverUrl = coverObj?.attributes?.fileName
           ? `https://uploads.mangadex.org/covers/${m.id}/${coverObj.attributes.fileName}.256.jpg`
           : generarPortadaSVG(this.formatTitle(m), m.attributes?.originalLanguage || 'ja');
+        const contentRating = String(m.attributes?.contentRating || 'safe').toLowerCase();
         return {
           id: m.id,
           dexId: m.id,
@@ -1516,11 +1532,14 @@ export const MangaDex = {
           year: m.attributes?.year || '2024',
           status: m.attributes?.status === 'completed' ? 'Finalizado' : 'En Emisión',
           flag: m.attributes?.originalLanguage === 'ko' ? '🇰🇷 Manhwa' : '🇯🇵 Manga',
-          genres: ['Acción'],
+          genres: (m.attributes?.tags || []).slice(0, 3).map((t: any) => t.attributes?.name?.en || 'Acción'),
+          contentRating,
+          isAdult: contentRating === 'erotica' || contentRating === 'pornographic',
           chaptersCount: 0,
           source: 'MangaDex'
         };
       });
+      return filterSafeMediaList(mapped, showAdult);
     } catch {
       return [];
     }
@@ -1664,7 +1683,7 @@ export const MangaDex = {
     };
 
     try {
-      const dexCommon = 'limit=500&order%5Bchapter%5D=asc&includes%5B%5D=scanlation_group&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic';
+      const dexCommon = `limit=500&order%5Bchapter%5D=asc&includes%5B%5D=scanlation_group&${getMangaDexContentRatingsQuery()}`;
       const esBaseUrl = resolvedId ? `https://api.mangadex.org/manga/${resolvedId}/feed?${dexCommon}&translatedLanguage%5B%5D=es&translatedLanguage%5B%5D=es-la` : null;
       const enBaseUrl = resolvedId ? `https://api.mangadex.org/manga/${resolvedId}/feed?${dexCommon}&translatedLanguage%5B%5D=en` : null;
 
@@ -1952,7 +1971,7 @@ export const MangaDex = {
           else if (targetLang === 'ja') langFilterQuery = '&translatedLanguage%5B%5D=ja&translatedLanguage%5B%5D=ja-ro';
           else if (targetLang === 'ko') langFilterQuery = '&translatedLanguage%5B%5D=ko&translatedLanguage%5B%5D=ko-ro';
 
-          const directUrl = `https://api.mangadex.org/chapter?manga=${targetDexId}&chapter=${chap}${langFilterQuery}&order%5BpublishAt%5D=desc&includes%5B%5D=scanlation_group&contentRating%5B%5D=safe&contentRating%5B%5D=suggestive&contentRating%5B%5D=erotica&contentRating%5B%5D=pornographic&limit=20`;
+          const directUrl = `https://api.mangadex.org/chapter?manga=${targetDexId}&chapter=${chap}${langFilterQuery}&order%5BpublishAt%5D=desc&includes%5B%5D=scanlation_group&${getMangaDexContentRatingsQuery()}&limit=20`;
           const directRes = await nativeFetchJson(directUrl, 3800);
 
           if (directRes && Array.isArray(directRes.data) && directRes.data.length > 0) {
@@ -2128,11 +2147,14 @@ export const AniListMangaService = {
   async search(query: string, limit = 28): Promise<any[]> {
     if (!query || query.trim().length === 0) return [];
     const q = query.trim();
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+    const adultClause = showAdult ? '' : ', isAdult: false';
     const gql = `
       query($search: String) {
         Page(page: 1, perPage: ${limit}) {
-          media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+          media(search: $search, type: MANGA${adultClause}, sort: SEARCH_MATCH) {
             id
+            isAdult
             title { romaji english native }
             synonyms
             coverImage { extraLarge large medium color }
@@ -2176,7 +2198,7 @@ export const AniListMangaService = {
       }
       const raw = json?.data?.Page?.media || [];
 
-      return raw.map((m: any) => {
+      const mapped = raw.map((m: any) => {
         let flag = '🇯🇵 Manga';
         if (m.countryOfOrigin === 'KR') flag = '🇰🇷 Manhwa';
         else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
@@ -2188,6 +2210,7 @@ export const AniListMangaService = {
 
         return MangaSpanishMetadata.enrich({
           id: m.id,
+          isAdult: m.isAdult === true,
           title: cleanTitle,
           altTitles: altList,
           author: staffAuthor || undefined,
@@ -2204,6 +2227,7 @@ export const AniListMangaService = {
           source: 'MangaDex'
         });
       });
+      return filterSafeMediaList(mapped, showAdult);
     } catch {
       return await MangaDex.search(query, limit);
     }
@@ -2292,7 +2316,12 @@ export const AniListMangaService = {
       }
     }
 
-    const cacheKey = `dir_manga_v4_${JSON.stringify(cleanVars)}_${letter}`;
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+    if (!showAdult) {
+      cleanVars.isAdult = false;
+    }
+
+    const cacheKey = `dir_manga_v5_${showAdult ? 'adult' : 'safe'}_${JSON.stringify(cleanVars)}_${letter}`;
     const cachedHit = this.directoryCache.get(cacheKey);
     if (cachedHit && cachedHit.items.length > 0) return cachedHit;
 
@@ -2384,7 +2413,7 @@ export const AniListMangaService = {
         }
       }
 
-      let items = normalizeRaw(raw);
+      let items = filterSafeMediaList(normalizeRaw(raw), showAdult);
       if (letter) {
         const cleanTarget = letter.trim().toUpperCase().slice(0, 1);
         const byLetter = items.filter((it: any) => {
@@ -2401,7 +2430,7 @@ export const AniListMangaService = {
           if (Array.isArray(this.cache[k])) cachedPool.push(...this.cache[k]);
         }
         if (cachedPool.length > 0) {
-          items = cachedPool.slice(0, 18);
+          items = filterSafeMediaList(cachedPool, showAdult).slice(0, 18);
         } else {
           items = await MangaDex.getCatalog('popular', 18).catch(() => []);
         }
@@ -2932,7 +2961,8 @@ export function renderGridLectura(customList: any[] | null = null): void {
     : (nWin._currentMangaBaseList && nWin._currentMangaBaseList.length > 0 ? nWin._currentMangaBaseList : mangaUiState.mangasCache);
   nWin._currentMangaBaseList = baseList || [];
 
-  let filtered = [...(baseList || [])];
+  const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+  let filtered = filterSafeMediaList([...(baseList || [])], showAdult);
 
   if (lecturaUIState.genre && lecturaUIState.genre !== 'ALL') {
     const gTarget = lecturaUIState.genre.toLowerCase();
@@ -3085,5 +3115,14 @@ export function toggleFavoritoMangaCard(mangaId: number | string): void {
     renderGridLectura(mangaUiState.mangasCache);
   } else {
     renderGridLectura(nWin._currentMangaBaseList || mangaUiState.mangasCache);
+  }
+}
+
+export function clearMangaAdultModeCaches(): void {
+  AniListMangaService.cache = {};
+  AniListMangaService.directoryCache.clear();
+  MangaDex.resolvedMetaCache.clear();
+  if (state.tabActual === 'lectura' && state.tipoLecturaActual && state.tipoLecturaActual !== 'OFFLINE' && state.tipoLecturaActual !== 'KEIYOUSHI') {
+    void cargarMangasYNovelas();
   }
 }

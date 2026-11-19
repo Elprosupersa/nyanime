@@ -23,6 +23,7 @@ import {
   deleteDoc,
   collection,
   query,
+  where,
   orderBy,
   limit,
   startAfter,
@@ -1217,6 +1218,7 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
     const autoScrobble = localPrefs.autoScrobble !== false;
     const pushEnabled = Boolean(localPrefs.pushEnabled);
     const weeklySummaryPush = localPrefs.weeklySummaryPush !== false;
+    const showAdultContent = Boolean(localPrefs.showAdultContent);
 
     if (!snap.exists()) {
       await setDoc(ref, {
@@ -1234,6 +1236,7 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
         autoScrobble,
         pushEnabled,
         weeklySummaryPush,
+        showAdultContent,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -1265,7 +1268,8 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
             autoSkipOutro: typeof cloudData.autoSkipOutro === 'boolean' ? cloudData.autoSkipOutro : autoSkipOutro,
             autoScrobble: typeof cloudData.autoScrobble === 'boolean' ? cloudData.autoScrobble : autoScrobble,
             pushEnabled: typeof cloudData.pushEnabled === 'boolean' ? cloudData.pushEnabled : pushEnabled,
-            weeklySummaryPush: typeof cloudData.weeklySummaryPush === 'boolean' ? cloudData.weeklySummaryPush : weeklySummaryPush
+            weeklySummaryPush: typeof cloudData.weeklySummaryPush === 'boolean' ? cloudData.weeklySummaryPush : weeklySummaryPush,
+            showAdultContent: typeof cloudData.showAdultContent === 'boolean' ? cloudData.showAdultContent : showAdultContent
           },
           true
         );
@@ -1275,7 +1279,17 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
         mergedReminders.length > cloudReminders.length ||
         cloudData.readerBg !== readerBg ||
         cloudData.readerWidth !== readerWidth ||
-        cloudData.readerMode !== readerMode;
+        cloudData.readerMode !== readerMode ||
+        cloudData.readerBrightness !== readerBrightness ||
+        cloudData.readerContrast !== readerContrast ||
+        cloudData.readerSepia !== readerSepia ||
+        cloudData.readerContinuous !== readerContinuous ||
+        cloudData.autoSkipIntro !== autoSkipIntro ||
+        cloudData.autoSkipOutro !== autoSkipOutro ||
+        cloudData.autoScrobble !== autoScrobble ||
+        cloudData.pushEnabled !== pushEnabled ||
+        cloudData.weeklySummaryPush !== weeklySummaryPush ||
+        Boolean(cloudData.showAdultContent) !== showAdultContent;
 
       if (needsCloudUpdate) {
         await updateDoc(ref, {
@@ -1292,6 +1306,7 @@ async function syncSettingsBidirectional(uid: string): Promise<void> {
           autoScrobble,
           pushEnabled,
           weeklySummaryPush,
+          showAdultContent,
           updatedAt: serverTimestamp()
         });
       }
@@ -2047,6 +2062,8 @@ export const FirebaseWatchTogetherBridge = {
     const inviteTokenHash = hashRoomSecret(roomId, inviteToken);
 
     try {
+      const isPlaying = input.playbackState === 'playing';
+      const anchorTime = Math.max(0, Number(input.playbackTime || 0));
       const payload: Record<string, unknown> = {
         roomId,
         hostUid: identity.uid,
@@ -2055,8 +2072,10 @@ export const FirebaseWatchTogetherBridge = {
         animeTitle: String(input.animeTitle || 'Anime').slice(0, 240),
         seasonNum: Math.max(1, Math.floor(Number(input.seasonNum || 1))),
         episodeNum: Math.max(1, Math.floor(Number(input.episodeNum || 1))),
-        playbackState: input.playbackState === 'playing' ? 'playing' : 'paused',
-        playbackTime: Math.max(0, Number(input.playbackTime || 0)),
+        playbackState: isPlaying ? 'playing' : 'paused',
+        playbackTime: anchorTime,
+        isPlaying,
+        anchorTime,
         updatedAtMs: now,
         updatedByUid: identity.uid,
         updatedByName: hostName,
@@ -2078,6 +2097,7 @@ export const FirebaseWatchTogetherBridge = {
         displayName: hostName,
         avatar: identity.avatar,
         lastSeenMs: now,
+        accessHash: inviteTokenHash,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -2160,12 +2180,14 @@ export const FirebaseWatchTogetherBridge = {
       }
 
       const displayName = (identity.displayName || 'Invitado').trim().slice(0, 80) || 'Invitado';
+      const verifiedAccessHash = access.matchedHash || data.inviteTokenHash || data.passcodeHash || '';
       await setDoc(doc(db, 'watch_rooms', roomId, 'participants', identity.uid), {
         uid: identity.uid,
         roomId,
         displayName,
         avatar: identity.avatar,
         lastSeenMs: Date.now(),
+        accessHash: verifiedAccessHash,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -2202,9 +2224,13 @@ export const FirebaseWatchTogetherBridge = {
     const path = `watch_rooms/${roomId}`;
     const actorName = (identity.displayName || 'Usuario').trim().slice(0, 80) || 'Usuario';
     try {
+      const isPlaying = patch.playbackState === 'playing';
+      const anchorTime = Math.max(0, Math.min(86400, Number(patch.playbackTime || 0)));
       const fields: Record<string, unknown> = {
-        playbackState: patch.playbackState === 'playing' ? 'playing' : 'paused',
-        playbackTime: Math.max(0, Math.min(86400, Number(patch.playbackTime || 0))),
+        playbackState: isPlaying ? 'playing' : 'paused',
+        playbackTime: anchorTime,
+        isPlaying,
+        anchorTime,
         updatedAtMs: Date.now(),
         updatedByUid: identity.uid,
         updatedByName: actorName,
@@ -2264,6 +2290,7 @@ export const FirebaseWatchTogetherBridge = {
         if (snap?.exists() && snap.data()?.hostUid === identity.uid) {
           await updateDoc(doc(db, 'watch_rooms', roomId), {
             status: 'closed',
+            updatedByUid: identity.uid,
             updatedAt: serverTimestamp()
           }).catch(() => {});
         }
@@ -2288,13 +2315,13 @@ export const FirebaseWatchTogetherBridge = {
 
     // Delete subcollection documents first while parent room still exists for rules `get()` check
     try {
-      const partsSnap = await getDocs(collection(db, 'watch_rooms', roomId, 'participants'));
+      const partsSnap = await getDocs(query(collection(db, 'watch_rooms', roomId, 'participants'), limit(50)));
       await Promise.all(partsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
     } catch {
       // ignore partial cleanup
     }
     try {
-      const msgsSnap = await getDocs(collection(db, 'watch_rooms', roomId, 'messages'));
+      const msgsSnap = await getDocs(query(collection(db, 'watch_rooms', roomId, 'messages'), limit(100)));
       await Promise.all(msgsSnap.docs.map((d) => deleteDoc(d.ref).catch(() => {})));
     } catch {
       // ignore partial cleanup
@@ -2303,38 +2330,68 @@ export const FirebaseWatchTogetherBridge = {
     try {
       await deleteDoc(roomRef);
     } catch {
-      // Fallback: mark closed if delete is rejected
+      // Fallback: mark closed if delete is rejected (e.g. guest-created room)
       await updateDoc(roomRef, {
         status: 'closed',
+        updatedByUid: identity.uid,
         updatedAt: serverTimestamp()
       }).catch(() => {});
     }
   },
 
   subscribeActiveRooms(onRooms: (rooms: WatchRoomState[]) => void): () => void {
-    const q = query(collection(db, 'watch_rooms'), orderBy('updatedAtMs', 'desc'), limit(8));
-    return onSnapshot(
-      q,
-      (snap) => {
-        const now = Date.now();
-        const active: WatchRoomState[] = [];
-        snap.forEach((d) => {
-          const data = d.data() as WatchRoomState;
-          if (
-            data &&
-            data.status === 'active' &&
-            data.roomId &&
-            now - Number(data.updatedAtMs || 0) < 3 * 3600 * 1000
-          ) {
-            active.push(data);
-          }
-        });
-        onRooms(active);
-      },
-      () => {
-        onRooms([]);
+    let snapUnsub: Unsubscribe | null = null;
+    const bindForUser = (uid: string | null) => {
+      if (snapUnsub) {
+        try { snapUnsub(); } catch { /* ignore */ }
+        snapUnsub = null;
       }
-    );
+      if (!uid) {
+        onRooms([]);
+        return;
+      }
+      const q = query(
+        collection(db, 'watch_rooms'),
+        where('hostUid', '==', uid),
+        limit(12)
+      );
+      snapUnsub = onSnapshot(
+        q,
+        (snap) => {
+          const now = Date.now();
+          const active: WatchRoomState[] = [];
+          snap.forEach((d) => {
+            const data = d.data() as WatchRoomState;
+            if (
+              data &&
+              data.status === 'active' &&
+              data.roomId &&
+              now - Number(data.updatedAtMs || 0) < 3 * 3600 * 1000
+            ) {
+              active.push(data);
+            }
+          });
+          active.sort((a, b) => Number(b.updatedAtMs || 0) - Number(a.updatedAtMs || 0));
+          onRooms(active.slice(0, 8));
+        },
+        () => {
+          onRooms([]);
+        }
+      );
+    };
+
+    bindForUser(auth.currentUser?.uid || null);
+    const authUnsub = onAuthStateChanged(auth, (user) => {
+      bindForUser(user?.uid || null);
+    });
+
+    return () => {
+      try { authUnsub(); } catch { /* ignore */ }
+      if (snapUnsub) {
+        try { snapUnsub(); } catch { /* ignore */ }
+        snapUnsub = null;
+      }
+    };
   },
 
   subscribeRoom(
@@ -2366,7 +2423,7 @@ export const FirebaseWatchTogetherBridge = {
     const partPath = `watch_rooms/${roomId}/participants`;
     unsubs.push(
       onSnapshot(
-        collection(db, 'watch_rooms', roomId, 'participants'),
+        query(collection(db, 'watch_rooms', roomId, 'participants'), limit(50)),
         (snap) => {
           const list: WatchRoomParticipantRecord[] = [];
           snap.forEach((d) => {

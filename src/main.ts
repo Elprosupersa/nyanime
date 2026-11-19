@@ -37,6 +37,7 @@ import {
   parseAnimeAv1EpisodeEmbeds,
   parseTioAnimeEpisodeVideos,
   parseTvAnimeEpisodePlayers,
+  parseMonosChinosSearchLinks,
   parseMonosChinosEpisodePlayers,
   parseMp4UploadDirectUrl,
   parseYourUploadDirectUrl,
@@ -52,6 +53,7 @@ import {
   selectBestArchiveOrgDocs,
   extractArchiveOrgSourcesFromMetadata,
   isArchiveOrgSpanishMetadata,
+  isRawOrNonSpanishArchiveText,
   parseHentaiJkSearchSlugs,
   parseHentaiJkEpisodeSources,
   parseJkPlayerDirectM3u8,
@@ -61,7 +63,16 @@ import {
   parseHentaiLaCatalogData,
   parseHentaiLaHubData,
   parseHentaiLaMediaDetail,
-  parseHentaiLaEpisodeSources
+  parseHentaiLaEpisodeSources,
+  parseJkNetEpisodeSources,
+  parseMegaUrlFileIdAndKey,
+  decryptMegaAttributeName,
+  parseMegaApiCheckResult,
+  detectAudioLanguageFromSignals,
+  extractEmbedTitleFromHtml,
+  isFrameBlockedByHeaders,
+  detectDeadEmbedFromHtml,
+  classifySourceBadgeType
 } from './utils/animeSources.ts';
 import {
   HENTAILA_GENRES,
@@ -353,6 +364,7 @@ import {
   renderProfileUI,
   setProfileLibraryFilter,
   toggleAutoScrobblePref,
+  toggleShowAdultContentPref,
   toggleWeeklySummaryPushPref
 } from './ui/profileView.ts';
 
@@ -409,6 +421,7 @@ mWin.NyAnimeVideoSources = {
   parseAnimeAv1EpisodeEmbeds,
   parseTioAnimeEpisodeVideos,
   parseTvAnimeEpisodePlayers,
+  parseMonosChinosSearchLinks,
   parseMonosChinosEpisodePlayers,
   parseMp4UploadDirectUrl,
   parseYourUploadDirectUrl,
@@ -424,6 +437,7 @@ mWin.NyAnimeVideoSources = {
   selectBestArchiveOrgDocs,
   extractArchiveOrgSourcesFromMetadata,
   isArchiveOrgSpanishMetadata,
+  isRawOrNonSpanishArchiveText,
   parseHentaiJkSearchSlugs,
   parseHentaiJkEpisodeSources,
   parseJkPlayerDirectM3u8,
@@ -433,7 +447,16 @@ mWin.NyAnimeVideoSources = {
   parseHentaiLaCatalogData,
   parseHentaiLaHubData,
   parseHentaiLaMediaDetail,
-  parseHentaiLaEpisodeSources
+  parseHentaiLaEpisodeSources,
+  parseJkNetEpisodeSources,
+  parseMegaUrlFileIdAndKey,
+  decryptMegaAttributeName,
+  parseMegaApiCheckResult,
+  detectAudioLanguageFromSignals,
+  extractEmbedTitleFromHtml,
+  isFrameBlockedByHeaders,
+  detectDeadEmbedFromHtml,
+  classifySourceBadgeType
 };
 
 mWin.NyAnimeOffline = {
@@ -667,6 +690,7 @@ Object.assign(mWin, {
   desconectarWebPush,
   enviarPruebaWebPush,
   toggleWeeklySummaryPushPref,
+  toggleShowAdultContentPref,
   enviarResumenSemanalPush,
   renderProfileUI,
   // Anime Detail

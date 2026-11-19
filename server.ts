@@ -5,12 +5,18 @@ import zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import {
+  LruTtlCache,
   MAX_API_PROXY_BYTES,
   MAX_IMG_PROXY_BYTES,
+  buildRedirectHopHeaders,
+  capStreamingRangeHeader,
   createIpRateLimiter,
+  resolveValidatedVideoReferer,
   resolveVideoStreamReferer,
   rewriteHlsManifestUrls,
   sanitizeDownloadFilename,
+  sanitizeForwardHeaderValue,
+  shouldBypassProxyCache,
   validateIncomingRequestOrigin,
   validateProxyTargetUrl
 } from './src/utils/proxySecurity.ts';
@@ -23,14 +29,23 @@ const DIST_DIR = path.resolve(__dirname, 'dist');
 const apiRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
 const imgRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
 const videoRateLimiter = createIpRateLimiter({ windowMs: 60_000, maxRequests: 600 });
-const proxyResponseCache = new Map<string, { buffer: Buffer; contentType: string; expiresAt: number }>();
 const PROXY_CACHE_TTL_MS = 5 * 60 * 1000;
+const PROXY_CACHE_MAX_ENTRIES = 250;
+const PROXY_CACHE_MAX_BYTES = 32 * 1024 * 1024; // 32 MB ceiling
+const proxyResponseCache = new LruTtlCache<{ buffer: Buffer; contentType: string }>({
+  maxEntries: PROXY_CACHE_MAX_ENTRIES,
+  maxTotalBytes: PROXY_CACHE_MAX_BYTES,
+  defaultTtlMs: PROXY_CACHE_TTL_MS,
+  getSize: (entry) => entry.buffer.byteLength
+});
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.mjs': 'application/javascript; charset=utf-8',
+  '.cjs': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.svg': 'image/svg+xml',
@@ -38,11 +53,30 @@ const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
+  '.gif': 'image/gif',
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
-  '.txt': 'text/plain; charset=utf-8'
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8'
 };
+
+const STATIC_ASSET_EXT_RE =
+  /\.(?:js|mjs|cjs|css|map|png|jpe?g|webp|gif|svg|ico|json|webmanifest|woff2?|ttf|eot|txt|xml|mp4|webm|m3u8)$/i;
+
+const NO_STORE_FILES = new Set([
+  'index.html',
+  'sw.js',
+  'sw-push.js',
+  'firebase-messaging-sw.js',
+  'manifest.webmanifest'
+]);
+
+function isStaticAssetPath(pathname: string): boolean {
+  const lower = pathname.toLowerCase();
+  return lower.startsWith('/assets/') || lower.startsWith('/api/') || STATIC_ASSET_EXT_RE.test(lower);
+}
 
 function getClientIp(req: http.IncomingMessage): string {
   const fwd = req.headers['x-forwarded-for'];
@@ -55,33 +89,74 @@ function getClientIp(req: http.IncomingMessage): string {
 function setCommonSecurityHeaders(res: http.ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+}
+
+function bindClientDisconnectAbort(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  abortCtrl: AbortController,
+  onAbort?: () => void
+): () => void {
+  let triggered = false;
+  const triggerAbort = () => {
+    if (triggered || res.writableFinished) return;
+    triggered = true;
+    abortCtrl.abort();
+    onAbort?.();
+  };
+  const onReqClose = () => {
+    // In Node 18+, GET requests emit 'close' on req once the empty body ends (req.complete === true).
+    // Only abort on req 'close' if the request was cut short before completion.
+    if (!req.complete && !res.writableFinished) {
+      triggerAbort();
+    }
+  };
+  const onResClose = () => {
+    if (!res.writableFinished) {
+      triggerAbort();
+    }
+  };
+  req.on('close', onReqClose);
+  req.on('aborted', triggerAbort);
+  res.on('close', onResClose);
+
+  return () => {
+    req.off('close', onReqClose);
+    req.off('aborted', triggerAbort);
+    res.off('close', onResClose);
+  };
 }
 
 async function fetchWithValidatedRedirects(
   initialUrl: URL,
-  init: RequestInit,
-  maxRedirects = 3
-): Promise<Response> {
+  init: RequestInit & { headers?: Record<string, string> },
+  maxRedirects = 3,
+  resolveReferer?: (target: URL) => string,
+  options?: { preserveVideoReferer?: boolean }
+): Promise<{ resp: Response; finalUrl: URL }> {
   let currentUrl = initialUrl;
+  let currentHeaders: Record<string, string> = { ...(init.headers || {}) };
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
     const resp = await fetch(currentUrl.toString(), {
       ...init,
+      headers: currentHeaders,
       redirect: 'manual'
     });
     if (resp.status >= 300 && resp.status < 400) {
       const location = resp.headers.get('location');
-      if (!location) return resp;
+      if (!location) return { resp, finalUrl: currentUrl };
+      await resp.body?.cancel().catch(() => {});
       const nextRaw = new URL(location, currentUrl).toString();
       const check = validateProxyTargetUrl(nextRaw);
       if (!check.valid) {
         throw new Error(`Blocked redirect target (${check.reason})`);
       }
+      currentHeaders = buildRedirectHopHeaders(currentHeaders, currentUrl, check.url, resolveReferer, options);
       currentUrl = check.url;
       continue;
     }
-    return resp;
+    return { resp, finalUrl: currentUrl };
   }
   throw new Error('Too many redirects');
 }
@@ -130,6 +205,7 @@ function applyStrictCorsHeaders(
   }
   if (originCheck.corsOrigin) {
     res.setHeader('Access-Control-Allow-Origin', originCheck.corsOrigin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   return true;
 }
@@ -137,7 +213,14 @@ function applyStrictCorsHeaders(
 async function handleApiProxy(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   if (!applyStrictCorsHeaders(req, res)) return;
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, x-custom-content-type, x-custom-requested-with');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Accept, x-custom-content-type, x-custom-requested-with, x-custom-referer'
+  );
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'X-Upstream-Status, X-Upstream-XFO, X-Upstream-CSP, X-Upstream-Content-Type, X-Upstream-Final-Url'
+  );
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
@@ -168,15 +251,21 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
     const isMangaDex =
       targetUrl.hostname.endsWith('mangadex.org') || targetUrl.hostname.endsWith('mangadex.network');
 
+    const safeAccept = sanitizeForwardHeaderValue(req.headers['accept'], 256);
     const headers: Record<string, string> = {
       'User-Agent': isMangaDex
         ? 'NyAnime/2.3 (https://mangadex.org)'
         : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      Accept: String(req.headers['accept'] || 'application/json, text/plain, */*')
+      Accept: safeAccept || 'application/json, text/plain, */*'
     };
 
     if (!isMangaDex) {
-      if (
+      const rawCustomRef = sanitizeForwardHeaderValue(req.headers['x-custom-referer'], 512);
+      const customRefCheck = rawCustomRef ? validateProxyTargetUrl(rawCustomRef) : null;
+      if (customRefCheck && customRefCheck.valid) {
+        headers['Referer'] = customRefCheck.url.toString();
+        headers['Origin'] = customRefCheck.url.origin;
+      } else if (
         targetUrl.hostname.endsWith('manhwaweb.com') ||
         targetUrl.hostname.endsWith('img1mw.xyz') ||
         targetUrl.hostname.endsWith('img2mw.xyz') ||
@@ -192,15 +281,15 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
         headers['Origin'] = targetOrigin;
       }
     }
-    const customCt = req.headers['x-custom-content-type'];
-    const reqCt = req.headers['content-type'];
-    if (typeof customCt === 'string' && customCt) {
+    const customCt = sanitizeForwardHeaderValue(req.headers['x-custom-content-type'], 160);
+    const reqCt = sanitizeForwardHeaderValue(req.headers['content-type'], 160);
+    if (customCt) {
       headers['Content-Type'] = customCt;
-    } else if (typeof reqCt === 'string' && reqCt) {
+    } else if (reqCt) {
       headers['Content-Type'] = reqCt;
     }
-    const reqWith = req.headers['x-custom-requested-with'];
-    if (typeof reqWith === 'string' && reqWith) {
+    const reqWith = sanitizeForwardHeaderValue(req.headers['x-custom-requested-with'], 128);
+    if (reqWith) {
       headers['X-Requested-With'] = reqWith;
     }
 
@@ -225,54 +314,71 @@ async function handleApiProxy(req: http.IncomingMessage, res: http.ServerRespons
       bodyText = buf.toString('utf8');
     }
 
+    const isProbe = parsed.searchParams.get('probe') === '1';
+    const bypassCache = shouldBypassProxyCache(targetUrl) || parsed.searchParams.get('nocache') === '1';
     const cacheKey = `${req.method || 'GET'}::${targetUrl.toString()}::${bodyText}`;
-    const cachedEntry = proxyResponseCache.get(cacheKey);
-    if (cachedEntry && Date.now() < cachedEntry.expiresAt) {
-      res.setHeader('Content-Type', cachedEntry.contentType);
-      res.setHeader('Cache-Control', 'public, max-age=120');
-      res.statusCode = 200;
-      res.end(cachedEntry.buffer);
-      return;
+    if (!bypassCache && !isProbe) {
+      const cachedEntry = proxyResponseCache.get(cacheKey);
+      if (cachedEntry) {
+        res.setHeader('Content-Type', cachedEntry.contentType);
+        res.setHeader('Cache-Control', 'public, max-age=120');
+        res.statusCode = 200;
+        res.end(cachedEntry.buffer);
+        return;
+      }
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
-    const upstream = await fetchWithValidatedRedirects(targetUrl, {
-      method: req.method || 'GET',
-      headers,
-      body: bodyData as BodyInit | undefined,
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-
-    const payload = await readUpstreamWithLimit(upstream, MAX_API_PROXY_BYTES);
-    const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
-    if (upstream.status === 200 && payload.byteLength > 0 && payload.byteLength < 512_000) {
-      if (proxyResponseCache.size > 400) {
-        const firstKey = proxyResponseCache.keys().next().value;
-        if (firstKey) proxyResponseCache.delete(firstKey);
-      }
-      proxyResponseCache.set(cacheKey, {
-        buffer: payload,
-        contentType,
-        expiresAt: Date.now() + PROXY_CACHE_TTL_MS
-      });
+    const timer = setTimeout(() => controller.abort(), 14_000);
+    const unbindAbort = bindClientDisconnectAbort(req, res, controller, () => clearTimeout(timer));
+    let upstream: Response;
+    let finalUrl: URL;
+    let payload: Buffer;
+    try {
+      const result = await fetchWithValidatedRedirects(targetUrl, {
+        method: req.method || 'GET',
+        headers,
+        body: bodyData as BodyInit | undefined,
+        signal: controller.signal
+      }, 4);
+      upstream = result.resp;
+      finalUrl = result.finalUrl;
+      payload = await readUpstreamWithLimit(upstream, MAX_API_PROXY_BYTES);
+    } finally {
+      clearTimeout(timer);
+      unbindAbort();
     }
 
-    const isProbe = parsed.searchParams.get('probe') === '1';
+    if (res.writableEnded || res.destroyed) return;
+
+    const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8';
+    if (!bypassCache && !isProbe && upstream.status === 200 && payload.byteLength > 0 && payload.byteLength < 512_000) {
+      proxyResponseCache.set(cacheKey, { buffer: payload, contentType }, PROXY_CACHE_TTL_MS);
+    }
+
     res.setHeader('X-Upstream-Status', String(upstream.status));
+    if (isProbe) {
+      const xfo = sanitizeForwardHeaderValue(upstream.headers.get('x-frame-options'), 256);
+      const csp = sanitizeForwardHeaderValue(upstream.headers.get('content-security-policy'), 512);
+      if (xfo) res.setHeader('X-Upstream-XFO', xfo);
+      if (csp) res.setHeader('X-Upstream-CSP', csp);
+      res.setHeader('X-Upstream-Content-Type', sanitizeForwardHeaderValue(contentType, 160));
+      res.setHeader('X-Upstream-Final-Url', sanitizeForwardHeaderValue(finalUrl.toString(), 512));
+    }
     if (isProbe && upstream.status >= 400) {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
       res.statusCode = 200;
-      res.end('');
+      res.end(payload.byteLength > 0 ? payload.subarray(0, 32_768) : '');
       return;
     }
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=120');
+    res.setHeader('Cache-Control', bypassCache || isProbe ? 'no-store' : 'public, max-age=120');
     res.statusCode = upstream.status;
     res.end(payload);
   } catch (err) {
+    if (res.writableEnded || res.destroyed) return;
     const isProbe = Boolean(req.url && req.url.includes('probe=1'));
     res.setHeader('X-Upstream-Status', '502');
     res.statusCode = isProbe ? 200 : 502;
@@ -342,36 +448,52 @@ async function handleImgProxy(req: http.IncomingMessage, res: http.ServerRespons
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
-    const upstream = await fetchWithValidatedRedirects(targetUrl, {
-      method: 'GET',
-      headers,
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-
-    if (!upstream.ok) {
-      res.statusCode = upstream.status;
-      res.end();
-      return;
+    const timer = setTimeout(() => controller.abort(), 14_000);
+    const unbindAbort = bindClientDisconnectAbort(req, res, controller, () => clearTimeout(timer));
+    let upstream: Response;
+    let payload: Buffer;
+    try {
+      const result = await fetchWithValidatedRedirects(targetUrl, {
+        method: 'GET',
+        headers,
+        signal: controller.signal
+      });
+      upstream = result.resp;
+      if (!upstream.ok) {
+        await upstream.body?.cancel().catch(() => {});
+        if (!res.writableEnded && !res.destroyed) {
+          res.statusCode = upstream.status;
+          res.end();
+        }
+        return;
+      }
+      payload = await readUpstreamWithLimit(upstream, MAX_IMG_PROXY_BYTES);
+    } finally {
+      clearTimeout(timer);
+      unbindAbort();
     }
 
-    const payload = await readUpstreamWithLimit(upstream, MAX_IMG_PROXY_BYTES);
+    if (res.writableEnded || res.destroyed) return;
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
     res.statusCode = 200;
     res.end(payload);
   } catch {
-    res.statusCode = 502;
-    res.end();
+    if (!res.writableEnded && !res.destroyed && !res.headersSent) {
+      res.statusCode = 502;
+      res.end();
+    }
   }
 }
 
 async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   if (!applyStrictCorsHeaders(req, res)) return;
   res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Accept');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'Content-Length, Content-Range, Accept-Ranges, Content-Type, X-Upstream-Status, X-Video-Probe-Ok'
+  );
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.end();
@@ -386,51 +508,100 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
   }
 
   const abortCtrl = new AbortController();
-  const connectTimer = setTimeout(() => abortCtrl.abort(), 6_500);
-  res.on('close', () => {
+  const connectTimer = setTimeout(() => abortCtrl.abort(), 15_000);
+  let activeNodeStream: Readable | null = null;
+  let activeUpstreamBody: ReadableStream<Uint8Array> | null = null;
+  const unbindAbort = bindClientDisconnectAbort(req, res, abortCtrl, () => {
     clearTimeout(connectTimer);
-    abortCtrl.abort();
+    if (activeNodeStream && !activeNodeStream.destroyed) {
+      activeNodeStream.destroy();
+    } else if (activeUpstreamBody) {
+      activeUpstreamBody.cancel().catch(() => {});
+    }
   });
 
+  let isProbe = false;
   try {
     const parsed = new URL(req.url || '/', 'http://localhost:3000');
+    isProbe = parsed.searchParams.get('probe') === '1';
     const rawTarget = parsed.searchParams.get('url') || '';
+    const rawRefererParam = parsed.searchParams.get('referer');
     const validation = validateProxyTargetUrl(rawTarget);
     if (!validation.valid) {
       clearTimeout(connectTimer);
+      unbindAbort();
+      if (isProbe) {
+        res.setHeader('X-Upstream-Status', String(validation.status));
+        res.setHeader('X-Video-Probe-Ok', '0');
+        res.statusCode = 200;
+        res.end();
+        return;
+      }
       res.statusCode = validation.status;
       res.end(validation.reason);
       return;
     }
 
     const targetUrl = validation.url;
-    const referer = resolveVideoStreamReferer(targetUrl);
+    const refererResolver = (u: URL) => resolveValidatedVideoReferer(u, rawRefererParam);
+    const referer = refererResolver(targetUrl);
     const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       Accept: '*/*',
       Referer: referer,
-      Origin: referer.replace(/\/$/, '')
+      Origin: (() => {
+        try {
+          return new URL(referer).origin;
+        } catch {
+          return referer.replace(/\/$/, '');
+        }
+      })()
     };
-    if (typeof req.headers['range'] === 'string' && req.headers['range']) {
-      headers['Range'] = req.headers['range'];
+    const isDownload = parsed.searchParams.get('download') === '1';
+    const cappedRange = capStreamingRangeHeader(
+      typeof req.headers['range'] === 'string' ? req.headers['range'] : undefined,
+      isDownload
+    );
+    if (cappedRange) {
+      headers['Range'] = cappedRange;
     }
 
-    const upstream = await fetchWithValidatedRedirects(targetUrl, {
-      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
-      headers,
-      signal: abortCtrl.signal
-    });
+    const { resp: upstream, finalUrl } = await fetchWithValidatedRedirects(
+      targetUrl,
+      {
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+        headers,
+        signal: abortCtrl.signal
+      },
+      5,
+      refererResolver,
+      { preserveVideoReferer: true }
+    );
     clearTimeout(connectTimer);
 
+    res.setHeader('X-Upstream-Status', String(upstream.status));
     if (!upstream.ok && upstream.status !== 206) {
-      res.statusCode = upstream.status;
-      res.end();
+      await upstream.body?.cancel().catch(() => {});
+      unbindAbort();
+      if (!res.writableEnded && !res.destroyed) {
+        if (isProbe) {
+          const payload = JSON.stringify({ ok: false, status: upstream.status });
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('X-Video-Probe-Ok', '0');
+          res.statusCode = 200;
+          res.end(payload);
+          return;
+        }
+        res.statusCode = upstream.status;
+        res.end();
+      }
       return;
     }
 
     const rawCt = (upstream.headers.get('content-type') || '').toLowerCase();
-    const lowerPath = targetUrl.pathname.toLowerCase();
-    const lowerHost = targetUrl.hostname.toLowerCase();
+    const lowerPath = finalUrl.pathname.toLowerCase();
+    const lowerHost = finalUrl.hostname.toLowerCase();
     const isHlsManifest =
       rawCt.includes('mpegurl') ||
       rawCt.includes('x-mpegurl') ||
@@ -439,7 +610,20 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
 
     if (isHlsManifest && req.method !== 'HEAD') {
       const manifestBuf = await readUpstreamWithLimit(upstream, MAX_API_PROXY_BYTES);
-      const rewritten = rewriteHlsManifestUrls(manifestBuf.toString('utf8'), targetUrl.toString());
+      unbindAbort();
+      if (res.writableEnded || res.destroyed) return;
+      const manifestText = manifestBuf.toString('utf8');
+      if (isProbe) {
+        const validM3u = manifestText.includes('#EXTM3U');
+        const payload = JSON.stringify({ ok: validM3u, status: upstream.status, type: 'hls' });
+        res.setHeader('X-Video-Probe-Ok', validM3u ? '1' : '0');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.statusCode = 200;
+        res.end(payload);
+        return;
+      }
+      const rewritten = rewriteHlsManifestUrls(manifestText, finalUrl.toString(), rawRefererParam);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
       res.statusCode = 200;
@@ -449,13 +633,27 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
 
     const isDisguisedVideoSegment =
       ((lowerHost === 'dotanborito.net' || lowerHost.endsWith('.dotanborito.net')) && lowerPath.includes('/segs/')) ||
+      ((lowerHost === 'zilla-networks.com' || lowerHost.endsWith('.zilla-networks.com')) && lowerPath.includes('/segs/')) ||
       lowerHost === 'playmudos.com' ||
       lowerHost.endsWith('.playmudos.com');
 
     if (!isDisguisedVideoSegment && (rawCt.includes('text/html') || rawCt.includes('application/xhtml'))) {
-      res.statusCode = 502;
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.end('Upstream returned HTML error page instead of video stream');
+      await upstream.body?.cancel().catch(() => {});
+      unbindAbort();
+      if (!res.writableEnded && !res.destroyed) {
+        if (isProbe) {
+          const payload = JSON.stringify({ ok: false, status: upstream.status, reason: 'html' });
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('X-Video-Probe-Ok', '0');
+          res.statusCode = 200;
+          res.end(payload);
+          return;
+        }
+        res.statusCode = 502;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('Upstream returned HTML error page instead of video stream');
+      }
       return;
     }
 
@@ -466,10 +664,24 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
         : lowerPath.endsWith('.ts')
           ? 'video/mp2t'
           : 'video/mp4';
+
+    if (isProbe) {
+      await upstream.body?.cancel().catch(() => {});
+      unbindAbort();
+      const payload = JSON.stringify({ ok: true, status: upstream.status, contentType: mime });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Video-Probe-Ok', '1');
+      res.statusCode = 200;
+      res.end(payload);
+      return;
+    }
+
     res.setHeader('Content-Type', mime);
     res.setHeader('Accept-Ranges', upstream.headers.get('accept-ranges') || 'bytes');
     res.setHeader('Cache-Control', 'no-store');
-    if (parsed.searchParams.get('download') === '1') {
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (isDownload) {
       const safeFile = sanitizeDownloadFilename(parsed.searchParams.get('filename') || '', 'nyanime_episodio.mp4');
       res.setHeader('Content-Disposition', `attachment; filename="${safeFile}"`);
     }
@@ -480,18 +692,42 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
 
     res.statusCode = upstream.status === 206 ? 206 : 200;
     if (req.method === 'HEAD' || !upstream.body) {
+      unbindAbort();
       res.end();
       return;
     }
 
+    if (abortCtrl.signal.aborted || res.destroyed) {
+      await upstream.body.cancel().catch(() => {});
+      unbindAbort();
+      return;
+    }
+
+    res.flushHeaders();
+    activeUpstreamBody = upstream.body;
     const nodeStream = Readable.fromWeb(upstream.body as import('node:stream/web').ReadableStream<Uint8Array>);
+    activeNodeStream = nodeStream;
+    nodeStream.on('end', unbindAbort);
+    nodeStream.on('close', unbindAbort);
     nodeStream.on('error', () => {
+      unbindAbort();
       if (!res.writableEnded) res.end();
     });
     nodeStream.pipe(res);
   } catch {
     clearTimeout(connectTimer);
-    if (!res.headersSent) {
+    unbindAbort();
+    if (!res.headersSent && !res.writableEnded && !res.destroyed) {
+      if (isProbe) {
+        const payload = JSON.stringify({ ok: false, status: 502 });
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('X-Upstream-Status', '502');
+        res.setHeader('X-Video-Probe-Ok', '0');
+        res.statusCode = 200;
+        res.end(payload);
+        return;
+      }
       res.statusCode = 502;
       res.end();
     }
@@ -499,34 +735,63 @@ async function handleVideoProxy(req: http.IncomingMessage, res: http.ServerRespo
 }
 
 function serveStaticFile(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): void {
-  const safePath = path.normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, '');
-  let filePath = path.join(DIST_DIR, safePath === '/' ? 'index.html' : safePath);
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    res.statusCode = 400;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end('Bad Request');
+    return;
+  }
 
-  if (!filePath.startsWith(DIST_DIR)) {
+  const normalizedRel = path.posix.normalize(decodedPath).replace(/^\/+/, '');
+  const safePath = normalizedRel === '' || normalizedRel === '.' ? 'index.html' : normalizedRel;
+  let filePath = path.resolve(DIST_DIR, safePath);
+
+  if (filePath !== DIST_DIR && !filePath.startsWith(DIST_DIR + path.sep)) {
     res.statusCode = 403;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
     res.end('Forbidden');
     return;
   }
 
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    // SPA fallback for client routes
+  const existsAsFile = fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory();
+  if (!existsAsFile) {
+    // STRICT RULE: Never serve index.html when a static asset (/assets/*, .css, .js, .svg, .json, etc.) is missing
+    if (isStaticAssetPath(decodedPath)) {
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.end('Not Found');
+      return;
+    }
+
+    // SPA fallback strictly for client navigation routes
     filePath = path.join(DIST_DIR, 'index.html');
     if (!fs.existsSync(filePath)) {
       res.statusCode = 404;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
       res.end('dist/index.html not built. Run npm run build first.');
       return;
     }
   }
 
   const ext = path.extname(filePath).toLowerCase();
+  const baseName = path.basename(filePath).toLowerCase();
   const mime = MIME_TYPES[ext] || 'application/octet-stream';
   const raw = fs.readFileSync(filePath);
 
   res.setHeader('Content-Type', mime);
   if (filePath.includes(`${path.sep}assets${path.sep}`)) {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  } else if (ext === '.html' || path.basename(filePath) === 'sw.js') {
-    res.setHeader('Cache-Control', 'no-cache');
+  } else if (ext === '.html' || NO_STORE_FILES.has(baseName)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   } else {
     res.setHeader('Cache-Control', 'public, max-age=3600');
   }
@@ -534,16 +799,19 @@ function serveStaticFile(req: http.IncomingMessage, res: http.ServerResponse, pa
   const acceptEnc = String(req.headers['accept-encoding'] || '');
   const compressible =
     mime.startsWith('text/') || mime.includes('javascript') || mime.includes('json') || mime.includes('svg');
-  if (compressible && acceptEnc.includes('gzip') && raw.byteLength > 1024) {
+  if (compressible && /\bgzip\b/i.test(acceptEnc) && raw.byteLength > 1024) {
+    const gzipped = zlib.gzipSync(raw);
     res.setHeader('Content-Encoding', 'gzip');
     res.setHeader('Vary', 'Accept-Encoding');
+    res.setHeader('Content-Length', String(gzipped.byteLength));
     res.statusCode = 200;
-    res.end(zlib.gzipSync(raw));
+    res.end(req.method === 'HEAD' ? undefined : gzipped);
     return;
   }
 
+  res.setHeader('Content-Length', String(raw.byteLength));
   res.statusCode = 200;
-  res.end(raw);
+  res.end(req.method === 'HEAD' ? undefined : raw);
 }
 
 export function createAppServer(): http.Server {

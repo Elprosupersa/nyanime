@@ -41,6 +41,9 @@ import { buildWeeklyDigestSummary } from '../utils/pushNotifications.ts';
 import { extractInviteKeyFromLocation, extractRoomCodeFromLocation } from '../utils/watchTogether.ts';
 import { formatRelativeTime } from '../utils/sanitize.ts';
 import * as OfflineService from '../services/offline.ts';
+import { refreshCatalogForAdultContentPref } from './homeView.ts';
+import { clearMangaAdultModeCaches } from './mangaCatalogView.ts';
+import { videoSourceManager } from './playerView.ts';
 
 type ProfileSectionTab = 'biblioteca' | 'actividad' | 'cuenta' | 'herramientas';
 type ProfileLibraryFilter = 'all' | AnimeListStatus | 'manga' | `custom:${string}`;
@@ -296,6 +299,37 @@ export async function enviarPruebaWebPush(): Promise<void> {
 export function toggleWeeklySummaryPushPref(enabled: boolean): void {
   AppPreferencesManager.setWeeklySummaryPush(Boolean(enabled));
   showToast(enabled ? 'Resumen semanal Push activado ✓' : 'Resumen semanal Push desactivado');
+}
+
+export function toggleShowAdultContentPref(enabled: boolean): void {
+  const next = Boolean(enabled);
+  AppPreferencesManager.setShowAdultContent(next);
+  videoSourceManager.clearRawCacheForAdultPref();
+  refreshCatalogForAdultContentPref();
+  clearMangaAdultModeCaches();
+  renderContentSafetyCard();
+  showToast(
+    next
+      ? '🔞 Contenido +18 habilitado en catálogo, búsqueda y fuentes'
+      : '🛡️ Modo Seguro activado · Contenido y fuentes +18 ocultos'
+  );
+}
+
+export function renderContentSafetyCard(): void {
+  const container = document.getElementById('content-safety-body');
+  if (!container) return;
+  const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+  container.innerHTML = `
+    <div class="push-status-card">
+      <div class="push-status-badge ${showAdult ? '' : 'active'}" id="content-safety-badge">
+        ${showAdult ? '🔞 Contenido +18 habilitado' : '🛡️ Modo Seguro Activo (contenido +18 excluido)'}
+      </div>
+      <label class="reader-toggle-row" style="margin:8px 0 0;">
+        <input type="checkbox" id="toggle-show-adult-content" ${showAdult ? 'checked' : ''} onchange="toggleShowAdultContentPref(this.checked)">
+        <span>Mostrar contenido y fuentes +18 (HentaiLA, HentaiJK, MangaDex +18)</span>
+      </label>
+    </div>
+  `;
 }
 
 export async function enviarResumenSemanalPush(): Promise<void> {
@@ -967,6 +1001,7 @@ export function renderProfileUI(): void {
   renderProfileLibraryPanel();
   renderOAuthScrobbleCard();
   renderWebPushStatusCard();
+  renderContentSafetyCard();
   (nWin as any).renderProfileOwnedWatchRooms?.();
   if (activeProfileTab === 'actividad') {
     renderProfileActivityPanel();

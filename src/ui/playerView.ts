@@ -9,6 +9,7 @@ import {
   fetchWithTimeout,
   nativeFetchHtml,
   nWin,
+  onProxyUpstreamEvent,
   showToast,
   state,
   uiHooks
@@ -29,12 +30,15 @@ import {
 import {
   type WatchRoomState,
   buildWatchRoomInviteUrl,
+  computeRoomDriftSeconds,
   computeTargetSyncedTime,
   extractInviteKeyFromSearch,
+  isRoomPlaying,
   normalizeRoomCode,
   normalizeRoomSecret,
   parseRoomJoinInput,
   parseTimecodeInput,
+  resolveRoomAnchorTimestampMs,
   shouldApplyRemotePlaybackUpdate,
   shouldSeekForDrift,
   verifyRoomAccess
@@ -48,18 +52,35 @@ import {
   renderDetalleEpisodios
 } from './animeDetailView.ts';
 import {
+  ProviderCircuitBreaker,
+  type RankDeduplicateOptions,
+  classifySourceBadgeType,
+  detectAudioLanguageFromSignals,
+  detectDeadEmbedFromHtml,
   extractArchiveOrgSourcesFromMetadata,
+  extractEmbedTitleFromHtml,
+  filterSafeAnimeSources,
+  isAdultProviderId,
   isArchiveOrgSpanishMetadata,
+  isNonEmbeddableHost,
   normalizeKnownEmbedUrl,
   parseHentaiJkEpisodeSources,
   parseHentaiJkSearchSlugs,
   parseHentaiLaCatalogData,
   parseHentaiLaEpisodeSources,
+  parseJkNetEpisodeSources,
   parseJkPlayerDirectM3u8,
+  parseMegaApiCheckResult,
+  parseMegaUrlFileIdAndKey,
+  parseMonosChinosEpisodePlayers,
+  parseMonosChinosSearchLinks,
   pickBestSlugMatch,
   resolveDotanboritoDirectM3u8,
-  selectBestArchiveOrgDocs
+  sanitizeArchiveOrgQuery,
+  selectBestArchiveOrgDocs,
+  withProviderTimeout
 } from '../utils/animeSources.ts';
+import { isDomainAllowlisted } from '../utils/proxySecurity.ts';
 
 export interface NormalizedSourceInput {
   providerId: string;
@@ -70,6 +91,8 @@ export interface NormalizedSourceInput {
   quality?: string;
   type?: string;
   direct?: boolean;
+  externalOnly?: boolean;
+  verified?: boolean;
   score?: number;
   status?: string;
 }
@@ -83,6 +106,8 @@ export class NormalizedSource {
   quality: string;
   type: string;
   direct: boolean;
+  externalOnly: boolean;
+  verified: boolean;
   score: number;
   status: string;
 
@@ -95,6 +120,8 @@ export class NormalizedSource {
     quality = '1080p',
     type = 'embed',
     direct = false,
+    externalOnly = false,
+    verified = false,
     score = 100,
     status = 'AVAILABLE'
   }: NormalizedSourceInput) {
@@ -106,6 +133,8 @@ export class NormalizedSource {
     this.quality = quality;
     this.type = type;
     this.direct = direct;
+    this.externalOnly = Boolean(externalOnly) || isNonEmbeddableHost(url, this.serverName);
+    this.verified = Boolean(verified);
     this.score = score;
     this.status = status;
   }
@@ -118,6 +147,8 @@ export interface EpisodeResolveContext {
   slug: string;
   season: number;
   episode: number;
+  episodes?: number | null;
+  seasonYear?: number | null;
   seasonId: number | string;
   isMovie: boolean;
   format?: string;
@@ -186,7 +217,7 @@ class AnimeAV1SourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -197,15 +228,16 @@ class AnimeAV1SourceProvider {
         const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
         const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
-          const catHtml = await nativeFetchHtml(`https://animeav1.com/catalogo?search=${encodeURIComponent(q)}`, {}, 4500);
+          const catHtml = await nativeFetchHtml(`https://animeav1.com/catalogo?search=${encodeURIComponent(q)}`, {}, 7000);
           if (catHtml && nWin.NyAnimeVideoSources?.parseAnimeAv1CatalogLinks) {
             const foundSlugs = nWin.NyAnimeVideoSources.parseAnimeAv1CatalogLinks(catHtml);
             if (foundSlugs.length > 0) {
-              matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
+              matchedSlug = pickBestSlugMatch(
                 foundSlugs,
                 targets,
                 sNum,
-                format || ''
+                format || '',
+                { episodes, seasonYear }
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -224,7 +256,7 @@ class AnimeAV1SourceProvider {
       ).filter(Boolean);
 
       for (const slug of candidatesToTry) {
-        const epHtml = await nativeFetchHtml(`https://animeav1.com/media/${slug}/${ep}`, {}, 4200);
+        const epHtml = await nativeFetchHtml(`https://animeav1.com/media/${slug}/${ep}`, {}, 7000);
         if (!epHtml || !nWin.NyAnimeVideoSources?.parseAnimeAv1EpisodeEmbeds) continue;
         const parsed = nWin.NyAnimeVideoSources.parseAnimeAv1EpisodeEmbeds(epHtml);
         if (parsed.length > 0) {
@@ -246,7 +278,7 @@ class TioAnimeSourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -257,15 +289,16 @@ class TioAnimeSourceProvider {
         const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
         const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
-          const dirHtml = await nativeFetchHtml(`https://tioanime.com/directorio?q=${encodeURIComponent(q)}`, {}, 4500);
+          const dirHtml = await nativeFetchHtml(`https://tioanime.com/directorio?q=${encodeURIComponent(q)}`, {}, 7000);
           if (dirHtml && nWin.NyAnimeVideoSources?.parseTioAnimeDirectoryLinks) {
             const foundSlugs = nWin.NyAnimeVideoSources.parseTioAnimeDirectoryLinks(dirHtml);
             if (foundSlugs.length > 0) {
-              matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
+              matchedSlug = pickBestSlugMatch(
                 foundSlugs,
                 targets,
                 sNum,
-                format || ''
+                format || '',
+                { episodes, seasonYear }
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -284,9 +317,11 @@ class TioAnimeSourceProvider {
       ).filter(Boolean);
 
       for (const slug of candidatesToTry) {
-        const epHtml = await nativeFetchHtml(`https://tioanime.com/ver/${slug}-${ep}`, {}, 4200);
+        const epHtml = await nativeFetchHtml(`https://tioanime.com/ver/${slug}-${ep}`, {}, 7000);
         if (!epHtml || !nWin.NyAnimeVideoSources?.parseTioAnimeEpisodeVideos) continue;
-        const parsed = nWin.NyAnimeVideoSources.parseTioAnimeEpisodeVideos(epHtml, 'SUB');
+        const slugLang = detectAudioLanguageFromSignals({ slug, fallback: 'SUB' });
+        const defaultLang: 'SUB' | 'LATINO' = slugLang === 'LATINO' ? 'LATINO' : 'SUB';
+        const parsed = nWin.NyAnimeVideoSources.parseTioAnimeEpisodeVideos(epHtml, defaultLang, slug);
         if (parsed.length > 0) {
           this.slugCache.set(slugKey, slug);
           return parsed.map((s: NormalizedSourceInput) => new NormalizedSource(s));
@@ -306,7 +341,7 @@ class TVAnimeSourceProvider {
   slugCache = new Map<string, string>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -317,15 +352,16 @@ class TVAnimeSourceProvider {
         const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
         const targets = buildTargetTitlesForCtx(ctx);
         for (const q of queries) {
-          const dirHtml = await nativeFetchHtml(`https://tvanime.tv/directorio?q=${encodeURIComponent(q)}`, {}, 4500);
+          const dirHtml = await nativeFetchHtml(`https://tvanime.tv/directorio?q=${encodeURIComponent(q)}`, {}, 7000);
           if (dirHtml && nWin.NyAnimeVideoSources?.parseTvAnimeDirectoryLinks) {
             const foundSlugs = nWin.NyAnimeVideoSources.parseTvAnimeDirectoryLinks(dirHtml);
             if (foundSlugs.length > 0) {
-              matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
+              matchedSlug = pickBestSlugMatch(
                 foundSlugs,
                 targets,
                 sNum,
-                format || ''
+                format || '',
+                { episodes, seasonYear }
               );
               if (matchedSlug) {
                 this.slugCache.set(slugKey, matchedSlug);
@@ -344,7 +380,7 @@ class TVAnimeSourceProvider {
       ).filter(Boolean);
 
       for (const slug of candidatesToTry) {
-        const epHtml = await nativeFetchHtml(`https://tvanime.tv/anime/${slug}/episodio/episodio-${ep}`, {}, 4200);
+        const epHtml = await nativeFetchHtml(`https://tvanime.tv/anime/${slug}/episodio/episodio-${ep}`, {}, 7000);
         if (!epHtml || !nWin.NyAnimeVideoSources?.parseTvAnimeEpisodePlayers) continue;
         const parsed = nWin.NyAnimeVideoSources.parseTvAnimeEpisodePlayers(epHtml);
         if (parsed.length > 0) {
@@ -364,7 +400,8 @@ async function fetchPortalOptSources(
   postAjaxUrl: string,
   providerId: string,
   providerLabel: string,
-  timeoutMs = 3200
+  timeoutMs = 5500,
+  defaultLanguage: 'SUB' | 'LATINO' = 'SUB'
 ): Promise<NormalizedSource[]> {
   try {
     const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(episodeUrl)}&probe=1`, {}, timeoutMs).catch(() => null);
@@ -372,6 +409,13 @@ async function fetchPortalOptSources(
     if (!res || !res.ok || upStatus >= 400) return [];
     const epHtml = await res.text();
     if (!epHtml || epHtml.includes('Just a moment') || epHtml.includes('cf-chl')) return [];
+
+    const detectedPageLang = detectAudioLanguageFromSignals({
+      url: episodeUrl,
+      title: extractEmbedTitleFromHtml(epHtml),
+      fallback: defaultLanguage
+    });
+    const resolvedLang: 'SUB' | 'LATINO' = detectedPageLang === 'LATINO' ? 'LATINO' : defaultLanguage;
 
     const data = nWin.NyAnimeVideoSources?.parseAnimePortalEpisodeData
       ? nWin.NyAnimeVideoSources.parseAnimePortalEpisodeData(epHtml)
@@ -385,7 +429,8 @@ async function fetchPortalOptSources(
           method: 'POST',
           headers: {
             'x-custom-content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-            'x-custom-requested-with': 'XMLHttpRequest'
+            'x-custom-requested-with': 'XMLHttpRequest',
+            'x-custom-referer': episodeUrl
           },
           body: `acc=opt&i=${encodeURIComponent(data.encryptId)}`
         },
@@ -395,13 +440,13 @@ async function fetchPortalOptSources(
       if (optRes && optRes.ok && optUpStatus < 400) {
         const optHtml = await optRes.text();
         if (nWin.NyAnimeVideoSources?.parseHexOptServerList) {
-          sources = nWin.NyAnimeVideoSources.parseHexOptServerList(optHtml, providerId, providerLabel, 'SUB');
+          sources = nWin.NyAnimeVideoSources.parseHexOptServerList(optHtml, providerId, providerLabel, resolvedLang);
         }
       }
     }
 
     if (data.downloadUrls && data.downloadUrls.length > 0 && nWin.NyAnimeVideoSources?.parsePortalDownloadUrls) {
-      const dlSources = nWin.NyAnimeVideoSources.parsePortalDownloadUrls(data.downloadUrls, providerId, providerLabel, 'SUB');
+      const dlSources = nWin.NyAnimeVideoSources.parsePortalDownloadUrls(data.downloadUrls, providerId, providerLabel, resolvedLang);
       sources = sources.concat(dlSources);
     }
     return sources.map((s) => new NormalizedSource(s));
@@ -416,66 +461,140 @@ class JKAnimeSourceProvider {
   languages = ['SUB', 'LATINO'];
   oneSlugCache = new Map<string, string>();
   cfBlockedUntil = 0;
+  oneBlockedUntil = 0;
+  oneFailureCount = 0;
+
+  async fetchJkOnePage(targetUrl: string, timeoutMs = 7000): Promise<string | null> {
+    if (Date.now() < this.oneBlockedUntil) return null;
+    try {
+      const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, timeoutMs);
+      const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 502);
+      if (upStatus === 403 || upStatus === 429) {
+        this.oneBlockedUntil = Date.now() + 2 * 60 * 1000;
+        return null;
+      }
+      if (upStatus === 502 || upStatus === 503 || upStatus === 504) {
+        this.oneFailureCount += 1;
+        if (this.oneFailureCount >= 2) {
+          this.oneBlockedUntil = Date.now() + 90 * 1000;
+          this.oneFailureCount = 0;
+        }
+        return null;
+      }
+      if (!res.ok || upStatus >= 400) return null;
+      const html = await res.text();
+      if (!html || html.includes('Just a moment') || html.includes('cf-chl')) {
+        this.oneBlockedUntil = Date.now() + 2 * 60 * 1000;
+        return null;
+      }
+      this.oneFailureCount = 0;
+      return html;
+    } catch {
+      this.oneFailureCount += 1;
+      if (this.oneFailureCount >= 2) {
+        this.oneBlockedUntil = Date.now() + 90 * 1000;
+        this.oneFailureCount = 0;
+      }
+      return null;
+    }
+  }
 
   async resolveViaJkOne(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    if (Date.now() < this.oneBlockedUntil) return [];
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 4);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 3);
     const targets = buildTargetTitlesForCtx(ctx);
 
     try {
-      let matchedSlug = this.oneSlugCache.get(slugKey) || null;
-      if (!matchedSlug) {
-        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
-
-        for (const q of queries) {
-          const sHtml = await nativeFetchHtml(`https://jkanime.one/anime-online?buscar=${encodeURIComponent(q)}`, {}, 3000);
-          if (sHtml && nWin.NyAnimeVideoSources?.parseAnimePortalSearchSlugs) {
-            const found = nWin.NyAnimeVideoSources.parseAnimePortalSearchSlugs(sHtml);
-            if (found.length > 0) {
-              matchedSlug = nWin.NyAnimeVideoSources.pickBestSlugMatch(
-                found,
-                targets,
-                sNum,
-                format || ''
-              );
-              if (matchedSlug) {
-                const out = await fetchPortalOptSources(
-                  `https://jkanime.one/ver/${matchedSlug}/${ep}`,
-                  'https://jkanime.one/jk',
-                  this.id,
-                  'JKAnime',
-                  3000
-                );
-                if (out.length > 0) {
-                  this.oneSlugCache.set(slugKey, matchedSlug);
-                  return out;
-                }
-              }
-            }
-          }
-        }
-      } else {
+      const cachedSlug = this.oneSlugCache.get(slugKey) || null;
+      if (cachedSlug) {
+        const slugLang = detectAudioLanguageFromSignals({ slug: cachedSlug, fallback: 'SUB' });
         const out = await fetchPortalOptSources(
-          `https://jkanime.one/ver/${matchedSlug}/${ep}`,
+          `https://jkanime.one/ver/${cachedSlug}/${ep}`,
           'https://jkanime.one/jk',
           this.id,
           'JKAnime',
-          3000
+          7500,
+          slugLang === 'LATINO' ? 'LATINO' : 'SUB'
         );
         if (out.length > 0) return out;
       }
 
-      for (const slug of candidates) {
-        if (!slug || slug === matchedSlug) continue;
+      // Run direct top candidate and parallel catalog search queries simultaneously so jkanime.one resolves in ~3-6s instead of ~14s
+      const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms).slice(0, 2);
+      const firstCandidate = candidates[0] || '';
+      const directTryPromise = firstCandidate
+        ? fetchPortalOptSources(
+            `https://jkanime.one/ver/${firstCandidate}/${ep}`,
+            'https://jkanime.one/jk',
+            this.id,
+            'JKAnime',
+            7000,
+            detectAudioLanguageFromSignals({ slug: firstCandidate, fallback: 'SUB' }) === 'LATINO' ? 'LATINO' : 'SUB'
+          ).catch(() => [] as NormalizedSource[])
+        : Promise.resolve([] as NormalizedSource[]);
+
+      const searchPagesPromise = Promise.all(
+        queries.map((q) =>
+          this.fetchJkOnePage(`https://jkanime.one/anime-online?buscar=${encodeURIComponent(q)}`, 6500).catch(() => null)
+        )
+      );
+
+      const directOut = await directTryPromise;
+      if (directOut.length > 0 && firstCandidate) {
+        this.oneSlugCache.set(slugKey, firstCandidate);
+        return directOut;
+      }
+
+      const searchPages = await searchPagesPromise;
+      const foundSet = new Set<string>();
+      for (const sHtml of searchPages) {
+        if (sHtml && nWin.NyAnimeVideoSources?.parseAnimePortalSearchSlugs) {
+          for (const slug of nWin.NyAnimeVideoSources.parseAnimePortalSearchSlugs(sHtml)) {
+            foundSet.add(slug);
+          }
+        }
+      }
+
+      if (foundSet.size > 0) {
+        const matchedSlug = pickBestSlugMatch(
+          Array.from(foundSet),
+          targets,
+          sNum,
+          format || '',
+          { episodes, seasonYear }
+        );
+        if (matchedSlug && matchedSlug !== firstCandidate) {
+          const slugLang = detectAudioLanguageFromSignals({ slug: matchedSlug, fallback: 'SUB' });
+          const out = await fetchPortalOptSources(
+            `https://jkanime.one/ver/${matchedSlug}/${ep}`,
+            'https://jkanime.one/jk',
+            this.id,
+            'JKAnime',
+            7500,
+            slugLang === 'LATINO' ? 'LATINO' : 'SUB'
+          );
+          if (out.length > 0) {
+            this.oneSlugCache.set(slugKey, matchedSlug);
+            return out;
+          }
+        }
+      }
+
+      for (const slug of candidates.slice(1)) {
+        if (Date.now() < this.oneBlockedUntil) return [];
+        if (!slug) continue;
+        const slugLang = detectAudioLanguageFromSignals({ slug, fallback: 'SUB' });
         const out = await fetchPortalOptSources(
           `https://jkanime.one/ver/${slug}/${ep}`,
           'https://jkanime.one/jk',
           this.id,
           'JKAnime',
-          2800
+          6500,
+          slugLang === 'LATINO' ? 'LATINO' : 'SUB'
         );
         if (out.length > 0) {
           this.oneSlugCache.set(slugKey, slug);
@@ -493,13 +612,12 @@ class JKAnimeSourceProvider {
     const { romaji, english, seasonTitle, season, episode, synonyms } = ctx;
     const candidates = generateSlugCandidates(romaji, english, seasonTitle, season, synonyms).slice(0, 3);
     const ep = episode || 1;
-    const isBlocked = nWin.NyAnimeVideoSources?.isBlockedOrUnsafeStreamHost;
 
     try {
       for (const slug of candidates) {
         if (Date.now() < this.cfBlockedUntil) return [];
         const targetUrl = `https://jkanime.net/${slug}/${ep}/`;
-        const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, 2200).catch(() => null);
+        const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, 2600).catch(() => null);
         if (!res) continue;
         const upStatus = Number(res.headers.get('x-upstream-status') || res.status);
         if (upStatus === 403 || upStatus === 429) {
@@ -513,42 +631,10 @@ class JKAnimeSourceProvider {
           return [];
         }
 
-        const list: NormalizedSource[] = [];
-        const desuMatch = html.match(/video\[0\]\s*=\s*.*?src=["']([^"']+)["']/i);
-        const desuvMatch = html.match(/video\[1\]\s*=\s*.*?src=["']([^"']+)["']/i);
-        const desukaMatch = html.match(/video\[2\]\s*=\s*.*?src=["']([^"']+)["']/i);
-
-        if (desuMatch?.[1] && (!isBlocked || !isBlocked(desuMatch[1], 'Desu'))) {
-          list.push(new NormalizedSource({ providerId: this.id, providerName: 'JKAnime (Desu)', serverName: 'Desu', url: desuMatch[1], language: 'SUB', quality: '1080p', score: 128 }));
+        const parsed = parseJkNetEpisodeSources(html, 'SUB');
+        if (parsed.length > 0) {
+          return parsed.map((s) => new NormalizedSource(s));
         }
-        if (desuvMatch?.[1] && (!isBlocked || !isBlocked(desuvMatch[1], 'Desuv'))) {
-          list.push(new NormalizedSource({ providerId: this.id, providerName: 'JKAnime (Desuv)', serverName: 'Desuv', url: desuvMatch[1], language: 'SUB', quality: '1080p', score: 126 }));
-        }
-        if (desukaMatch?.[1] && (!isBlocked || !isBlocked(desukaMatch[1], 'Desuka'))) {
-          list.push(new NormalizedSource({ providerId: this.id, providerName: 'JKAnime (Desuka)', serverName: 'Desuka', url: desukaMatch[1], language: 'SUB', quality: '1080p', score: 125 }));
-        }
-
-        const match = html.match(/var servers = (\[.*?\]);/);
-        if (match) {
-          const servers = JSON.parse(match[1]);
-          for (const s of servers) {
-            if (!s.remote || s.server === 'Mediafire') continue;
-            let decoded = '';
-            try { decoded = atob(s.remote).trim(); } catch { decoded = String(s.remote || '').trim(); }
-            if (!decoded) continue;
-            if (isBlocked && isBlocked(decoded, s.server)) continue;
-            list.push(new NormalizedSource({
-              providerId: this.id,
-              providerName: `JKAnime (${s.server})`,
-              serverName: s.server,
-              url: decoded,
-              language: 'SUB',
-              quality: '1080p',
-              score: 102
-            }));
-          }
-        }
-        if (list.length > 0) return list;
       }
     } catch {
       // ignore
@@ -570,9 +656,28 @@ class HenaoJaraSourceProvider {
   name = 'HenaoJara HD';
   languages = ['SUB', 'LATINO'];
   slugCache = new Map<string, string>();
+  blockedUntil = 0;
+
+  async fetchSearchPage(targetUrl: string, timeoutMs = 4200): Promise<string | null> {
+    if (Date.now() < this.blockedUntil) return null;
+    try {
+      const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, timeoutMs);
+      const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 502);
+      if (upStatus === 403 || upStatus === 429 || upStatus === 502 || upStatus === 503 || upStatus === 504) {
+        this.blockedUntil = Date.now() + 3 * 60 * 1000;
+        return null;
+      }
+      if (!res.ok || upStatus >= 400) return null;
+      return await res.text();
+    } catch {
+      this.blockedUntil = Date.now() + 3 * 60 * 1000;
+      return null;
+    }
+  }
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format } = ctx;
+    if (Date.now() < this.blockedUntil) return [];
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
     const ep = episode || 1;
     const sNum = season || 1;
     const slugKey = String(seasonId || seasonTitle || romaji || english);
@@ -584,15 +689,17 @@ class HenaoJaraSourceProvider {
       if (!matchedSlug) {
         const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms);
         for (const q of queries) {
-          const sHtml = await nativeFetchHtml(`https://ww1.henaojara.net/animes?buscar=${encodeURIComponent(q)}`, {}, 3000);
+          if (Date.now() < this.blockedUntil) return [];
+          const sHtml = await this.fetchSearchPage(`https://ww1.henaojara.net/animes?buscar=${encodeURIComponent(q)}`, 4200);
           if (sHtml && nWin.NyAnimeVideoSources?.parseAnimePortalSearchSlugs) {
             const found = nWin.NyAnimeVideoSources.parseAnimePortalSearchSlugs(sHtml);
             if (found.length > 0) {
-              const candidate = nWin.NyAnimeVideoSources.pickBestSlugMatch(
+              const candidate = pickBestSlugMatch(
                 found,
                 targets,
                 sNum,
-                format || ''
+                format || '',
+                { episodes, seasonYear }
               );
               if (candidate) {
                 const out = await fetchPortalOptSources(
@@ -600,7 +707,7 @@ class HenaoJaraSourceProvider {
                   'https://ww1.henaojara.net/hj',
                   this.id,
                   'HenaoJara',
-                  3000
+                  5500
                 );
                 if (out.length > 0) {
                   this.slugCache.set(slugKey, candidate);
@@ -616,7 +723,7 @@ class HenaoJaraSourceProvider {
           'https://ww1.henaojara.net/hj',
           this.id,
           'HenaoJara',
-          3000
+          5500
         );
         if (out.length > 0) return out;
       }
@@ -628,11 +735,121 @@ class HenaoJaraSourceProvider {
           'https://ww1.henaojara.net/hj',
           this.id,
           'HenaoJara',
-          2800
+          5000
         );
         if (out.length > 0) {
           this.slugCache.set(slugKey, slug);
           return out;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+}
+
+class MonosChinosSourceProvider {
+  id = 'monoschinos';
+  name = 'MonosChinos HD';
+  languages = ['SUB', 'LATINO'];
+  slugCache = new Map<string, Array<{ baseSlug: string; language: 'SUB' | 'LATINO' }>>();
+  blockedUntil = 0;
+  failureCount = 0;
+
+  async fetchPage(targetUrl: string, timeoutMs = 5500): Promise<string | null> {
+    if (Date.now() < this.blockedUntil) return null;
+    try {
+      const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1`, {}, timeoutMs);
+      const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 502);
+      if (upStatus === 403 || upStatus === 429) {
+        this.blockedUntil = Date.now() + 2 * 60 * 1000;
+        return null;
+      }
+      if (upStatus === 502 || upStatus === 503 || upStatus === 504) {
+        this.failureCount += 1;
+        if (this.failureCount >= 2) {
+          this.blockedUntil = Date.now() + 90 * 1000;
+          this.failureCount = 0;
+        }
+        return null;
+      }
+      if (!res.ok || upStatus >= 400) return null;
+      const html = await res.text();
+      if (!html || html.includes('Just a moment') || html.includes('cf-chl')) {
+        this.blockedUntil = Date.now() + 2 * 60 * 1000;
+        return null;
+      }
+      this.failureCount = 0;
+      return html;
+    } catch {
+      this.failureCount += 1;
+      if (this.failureCount >= 2) {
+        this.blockedUntil = Date.now() + 90 * 1000;
+        this.failureCount = 0;
+      }
+      return null;
+    }
+  }
+
+  async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
+    if (Date.now() < this.blockedUntil) return [];
+    const { romaji, english, seasonTitle, season, episode, seasonId, synonyms, format, episodes, seasonYear } = ctx;
+    const ep = Math.max(1, Number(episode || 1));
+    const sNum = Math.max(1, Number(season || 1));
+    const slugKey = String(seasonId || seasonTitle || romaji || english);
+    const targets = buildTargetTitlesForCtx(ctx);
+
+    try {
+      let matchedEntries = this.slugCache.get(slugKey) || [];
+      if (matchedEntries.length === 0) {
+        const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms).slice(0, 2);
+        for (const q of queries) {
+          if (Date.now() < this.blockedUntil) return [];
+          const searchHtml = await this.fetchPage(`https://monoschinos.st/buscar?q=${encodeURIComponent(q)}`, 5500);
+          if (!searchHtml) continue;
+          const entries = parseMonosChinosSearchLinks(searchHtml);
+          if (entries.length === 0) continue;
+          const uniqueBases = Array.from(new Set(entries.map((e) => e.baseSlug)));
+          const bestBase = pickBestSlugMatch(uniqueBases, targets, sNum, format || '', { episodes, seasonYear });
+          if (bestBase) {
+            matchedEntries = entries
+              .filter((e) => e.baseSlug === bestBase)
+              .map((e) => ({ baseSlug: e.baseSlug, language: e.language }));
+            if (matchedEntries.length > 0) {
+              this.slugCache.set(slugKey, matchedEntries);
+              break;
+            }
+          }
+        }
+      }
+
+      const out: NormalizedSource[] = [];
+      if (matchedEntries.length > 0) {
+        const resolvedBatches = await Promise.all(
+          matchedEntries.slice(0, 2).map(async (entry) => {
+            const epSlug = entry.language === 'LATINO' ? `${entry.baseSlug}-latino` : entry.baseSlug;
+            const epHtml = await this.fetchPage(`https://monoschinos.st/ver/${epSlug}-episodio-${ep}`, 5500);
+            if (!epHtml) return [];
+            const parsed = parseMonosChinosEpisodePlayers(epHtml, entry.language, epSlug);
+            return parsed.map((s) => new NormalizedSource(s));
+          })
+        );
+        for (const batch of resolvedBatches) {
+          out.push(...batch);
+        }
+        if (out.length > 0) return out;
+      }
+
+      const fallbackCandidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 2);
+      for (const slug of fallbackCandidates) {
+        if (Date.now() < this.blockedUntil) return [];
+        const epHtml = await this.fetchPage(`https://monoschinos.st/ver/${slug}-episodio-${ep}`, 5000);
+        if (!epHtml) continue;
+        const parsed = parseMonosChinosEpisodePlayers(epHtml, 'SUB', slug);
+        if (parsed.length > 0) {
+          this.slugCache.set(slugKey, [{ baseSlug: slug, language: 'SUB' }]);
+          return parsed.map((s) => new NormalizedSource(s));
         }
       }
     } catch {
@@ -827,29 +1044,30 @@ class InternetArchiveAnimeProvider {
   docCache = new Map<string, string[]>();
 
   async resolve(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
-    const { romaji, english, seasonTitle, synonyms, episode, isMovie, seasonId } = ctx;
+    const { romaji, english, seasonTitle, synonyms, episode, season, isMovie, seasonId } = ctx;
     const ep = Math.max(1, Number(episode || 1));
+    const sNum = Math.max(1, Number(season || 1));
     const targets = buildTargetTitlesForCtx(ctx);
     if (targets.length === 0) return [];
 
     const queries = buildSearchQueriesForCtx(romaji, english, seasonTitle, synonyms).slice(0, 3);
-    const cacheKey = `${seasonId || romaji || english}::ep${ep}`;
+    const cacheKey = `${seasonId || romaji || english}::s${sNum}::ep${ep}`;
 
     try {
       let bestDocIds = this.docCache.get(cacheKey) || [];
       if (bestDocIds.length === 0) {
         const allDocs: Array<{ identifier?: string; title?: string | string[]; downloads?: number }> = [];
         for (const q of queries) {
-          const cleanQ = q.replace(/[()"']/g, ' ').replace(/\s+/g, ' ').trim();
+          const cleanQ = sanitizeArchiveOrgQuery(q);
           if (!cleanQ) continue;
-          const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(`title:(${cleanQ}) AND mediatype:(movies)`)}&fl[]=identifier,title,downloads&sort[]=downloads+desc&rows=15&output=json`;
-          const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(searchUrl)}`, {}, 3800).catch(() => null);
+          const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(`title:("${cleanQ}") AND mediatype:(movies)`)}&fl[]=identifier,title,downloads&sort[]=downloads+desc&rows=15&output=json`;
+          const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(searchUrl)}`, {}, 7000).catch(() => null);
           if (!res || !res.ok) continue;
           const json = await res.json().catch(() => null);
           const docs = json?.response?.docs;
           if (Array.isArray(docs) && docs.length > 0) {
             allDocs.push(...docs);
-            const matched = selectBestArchiveOrgDocs(allDocs, targets, ep, isMovie);
+            const matched = selectBestArchiveOrgDocs(allDocs, targets, ep, isMovie, sNum);
             if (matched.length > 0) {
               bestDocIds = matched;
               break;
@@ -864,40 +1082,29 @@ class InternetArchiveAnimeProvider {
       if (bestDocIds.length === 0) return [];
 
       const out: NormalizedSource[] = [];
-      const fallbackOut: NormalizedSource[] = [];
       for (const docId of bestDocIds.slice(0, 3)) {
         const metaUrl = `https://archive.org/metadata/${encodeURIComponent(docId)}`;
-        const metaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(metaUrl)}`, {}, 3800).catch(() => null);
+        const metaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(metaUrl)}`, {}, 7000).catch(() => null);
         if (!metaRes || !metaRes.ok) continue;
         const metaJson = await metaRes.json().catch(() => null);
         if (!metaJson) continue;
-        const isSpanish = isArchiveOrgSpanishMetadata(docId, metaJson);
+        // Strict catalog-wide rule: never leak RAW / English / non-Spanish Archive.org items into Sub Español
+        if (!isArchiveOrgSpanishMetadata(docId, metaJson)) continue;
         const extracted = extractArchiveOrgSourcesFromMetadata(
           docId,
           metaJson,
           ep,
-          isSpanish ? 'Archive Español HD' : 'Archive Stream HD'
+          'Archive Español HD',
+          isMovie
         );
         if (extracted.length > 0) {
-          if (isSpanish) {
-            for (const item of extracted) {
-              out.push(new NormalizedSource(item));
-            }
-            break;
-          } else if (fallbackOut.length === 0) {
-            for (const item of extracted) {
-              fallbackOut.push(
-                new NormalizedSource({
-                  ...item,
-                  language: 'MULTI',
-                  score: Math.max(60, Number(item.score || 100) - 55)
-                })
-              );
-            }
+          for (const item of extracted) {
+            out.push(new NormalizedSource(item));
           }
+          break;
         }
       }
-      return out.length > 0 ? out : fallbackOut;
+      return out;
     } catch {
       return [];
     }
@@ -932,6 +1139,7 @@ export function ensureGuaranteedEpisodeSources(
         url: `https://vidsrc.cc/v2/embed/anime/ani${aniOrMal}/${ep}/sub`,
         language: 'MULTI',
         quality: '1080p',
+        externalOnly: true,
         score: 52
       })
     );
@@ -974,58 +1182,144 @@ interface ExtractedStream {
   type: 'mp4' | 'hls';
   streamUrl: string;
   rawDirectUrl: string;
+  referer?: string;
+  detectedTitle?: string;
+  detectedLanguage?: 'SUB' | 'LATINO';
+}
+
+interface CachedExtractedStream {
+  stream: ExtractedStream;
+  expiresAt: number;
+}
+
+const STREAM_EXTRACT_TTL_MS = 90 * 1000;
+const PROBE_CACHE_TTL_MS = 3 * 60 * 1000;
+
+async function fetchFreshEmbedForExtraction(
+  targetUrl: string,
+  timeoutMs = 10000,
+  customReferer?: string
+): Promise<{ ok: boolean; status: number; html: string; xfo: string; csp: string }> {
+  try {
+    const headers: Record<string, string> = {};
+    if (customReferer) headers['x-custom-referer'] = customReferer;
+    const res = await fetchWithTimeout(
+      `/api/proxy?url=${encodeURIComponent(targetUrl)}&probe=1&nocache=1`,
+      { headers },
+      timeoutMs
+    );
+    const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 500);
+    const xfo = res.headers.get('x-upstream-xfo') || '';
+    const csp = res.headers.get('x-upstream-csp') || '';
+    const html = await res.text().catch(() => '');
+    return {
+      ok: res.ok && upStatus >= 200 && upStatus < 400,
+      status: upStatus,
+      html,
+      xfo,
+      csp
+    };
+  } catch {
+    return { ok: false, status: 502, html: '', xfo: '', csp: '' };
+  }
 }
 
 export const StreamExtractor = {
-  cache: new Map<string, ExtractedStream>(),
-  wrapProxy(rawMp4Url: string): string {
-    if (!rawMp4Url) return '';
-    if (rawMp4Url.startsWith('/api/video-proxy?')) return rawMp4Url;
-    return `/api/video-proxy?url=${encodeURIComponent(rawMp4Url)}`;
+  cache: new Map<string, CachedExtractedStream>(),
+  wrapProxy(rawUrl: string, explicitReferer?: string): string {
+    if (!rawUrl) return '';
+    if (rawUrl.startsWith('/api/video-proxy?')) return rawUrl;
+    const refPart = explicitReferer ? `&referer=${encodeURIComponent(explicitReferer)}` : '';
+    return `/api/video-proxy?url=${encodeURIComponent(rawUrl)}${refPart}`;
   },
-  async extract(url: string): Promise<ExtractedStream | null> {
+  getCached(url: string): ExtractedStream | null {
+    const entry = this.cache.get(url);
+    if (!entry) return null;
+    if (Date.now() >= entry.expiresAt) {
+      this.cache.delete(url);
+      return null;
+    }
+    return entry.stream;
+  },
+  setCached(url: string, stream: ExtractedStream, ttlMs = STREAM_EXTRACT_TTL_MS): void {
+    this.cache.set(url, { stream, expiresAt: Date.now() + ttlMs });
+  },
+  invalidate(url: string): void {
+    this.cache.delete(url);
+  },
+  async extract(url: string, options: { forceRefresh?: boolean; timeoutMs?: number } = {}): Promise<ExtractedStream | null> {
     if (!url) return null;
-    if (this.cache.has(url)) return this.cache.get(url) || null;
+    const forceRefresh = Boolean(options.forceRefresh);
+    const timeoutMs = options.timeoutMs ?? 12000;
+    if (!forceRefresh) {
+      const cached = this.getCached(url);
+      if (cached) return cached;
+    } else {
+      this.cache.delete(url);
+    }
 
     if (url.includes('dotanborito.net')) {
       const m3u8Url = resolveDotanboritoDirectM3u8(url);
       if (m3u8Url) {
+        const ref = 'https://cdn.dotanborito.net/';
         const out: ExtractedStream = {
           type: 'hls',
-          streamUrl: this.wrapProxy(m3u8Url),
-          rawDirectUrl: m3u8Url
+          streamUrl: this.wrapProxy(m3u8Url, ref),
+          rawDirectUrl: m3u8Url,
+          referer: ref
         };
-        this.cache.set(url, out);
+        this.setCached(url, out, 5 * 60 * 1000);
         return out;
       }
     }
 
     if (/\.(mp4|webm)(\?|$)/i.test(url)) {
       const out: ExtractedStream = { type: 'mp4', streamUrl: this.wrapProxy(url), rawDirectUrl: url };
-      this.cache.set(url, out);
+      this.setCached(url, out, 5 * 60 * 1000);
       return out;
     }
 
     if (/\.m3u8(\?|$)/i.test(url)) {
-      const needsProxy = url.includes('dotanborito.net') || url.includes('playmudos.com');
+      let needsProxy = url.includes('dotanborito.net') || url.includes('playmudos.com');
+      try {
+        const parsedHost = new URL(url).hostname;
+        if (isDomainAllowlisted(parsedHost)) needsProxy = true;
+      } catch {
+        // ignore
+      }
+      const ref = url.includes('playmudos.com') ? 'https://jkanime.net/' : undefined;
       const out: ExtractedStream = {
         type: 'hls',
-        streamUrl: needsProxy ? this.wrapProxy(url) : url,
-        rawDirectUrl: url
+        streamUrl: needsProxy ? this.wrapProxy(url, ref) : url,
+        rawDirectUrl: url,
+        referer: ref
       };
-      this.cache.set(url, out);
+      this.setCached(url, out);
       return out;
     }
 
     if (url.includes('mp4upload.com')) {
       try {
-        const html = await nativeFetchHtml(url, {}, 9000);
-        const directUrl = html && nWin.NyAnimeVideoSources?.parseMp4UploadDirectUrl
-          ? nWin.NyAnimeVideoSources.parseMp4UploadDirectUrl(html)
+        const fetched = await fetchFreshEmbedForExtraction(url, timeoutMs, 'https://www.mp4upload.com/');
+        if (!fetched.ok || !fetched.html) return null;
+        const directUrl = nWin.NyAnimeVideoSources?.parseMp4UploadDirectUrl
+          ? nWin.NyAnimeVideoSources.parseMp4UploadDirectUrl(fetched.html)
           : null;
         if (directUrl) {
-          const out: ExtractedStream = { type: 'mp4', streamUrl: this.wrapProxy(directUrl), rawDirectUrl: directUrl };
-          this.cache.set(url, out);
+          const detectedTitle = extractEmbedTitleFromHtml(fetched.html, url);
+          const langCheck = detectedTitle
+            ? detectAudioLanguageFromSignals({ title: detectedTitle, fallback: 'MULTI' })
+            : 'MULTI';
+          const ref = 'https://www.mp4upload.com/';
+          const out: ExtractedStream = {
+            type: 'mp4',
+            streamUrl: this.wrapProxy(directUrl, ref),
+            rawDirectUrl: directUrl,
+            referer: ref,
+            detectedTitle,
+            detectedLanguage: langCheck === 'SUB' || langCheck === 'LATINO' ? langCheck : undefined
+          };
+          this.setCached(url, out);
           return out;
         }
       } catch {
@@ -1036,13 +1330,26 @@ export const StreamExtractor = {
 
     if (url.includes('yourupload.com')) {
       try {
-        const html = await nativeFetchHtml(url, {}, 9000);
-        const directUrl = html && nWin.NyAnimeVideoSources?.parseYourUploadDirectUrl
-          ? nWin.NyAnimeVideoSources.parseYourUploadDirectUrl(html)
+        const fetched = await fetchFreshEmbedForExtraction(url, timeoutMs, 'https://www.yourupload.com/');
+        if (!fetched.ok || !fetched.html) return null;
+        const directUrl = nWin.NyAnimeVideoSources?.parseYourUploadDirectUrl
+          ? nWin.NyAnimeVideoSources.parseYourUploadDirectUrl(fetched.html)
           : null;
         if (directUrl) {
-          const out: ExtractedStream = { type: 'mp4', streamUrl: this.wrapProxy(directUrl), rawDirectUrl: directUrl };
-          this.cache.set(url, out);
+          const detectedTitle = extractEmbedTitleFromHtml(fetched.html, url);
+          const langCheck = detectedTitle
+            ? detectAudioLanguageFromSignals({ title: detectedTitle, fallback: 'MULTI' })
+            : 'MULTI';
+          const ref = 'https://www.yourupload.com/';
+          const out: ExtractedStream = {
+            type: 'mp4',
+            streamUrl: this.wrapProxy(directUrl, ref),
+            rawDirectUrl: directUrl,
+            referer: ref,
+            detectedTitle,
+            detectedLanguage: langCheck === 'SUB' || langCheck === 'LATINO' ? langCheck : undefined
+          };
+          this.setCached(url, out);
           return out;
         }
       } catch {
@@ -1051,42 +1358,73 @@ export const StreamExtractor = {
       return null;
     }
 
-    if (url.includes('/jkplayer/um')) {
+    if (url.includes('/jkplayer/um') || url.includes('/jkplayer/c')) {
       try {
-        const html = await nativeFetchHtml(url, {}, 6500);
-        const m3u8Url = html ? parseJkPlayerDirectM3u8(html) : null;
+        const isHentaiJk = url.includes('hentaijk.com');
+        const ref = isHentaiJk ? 'https://hentaijk.com/' : 'https://jkanime.net/';
+        const fetched = await fetchFreshEmbedForExtraction(url, timeoutMs, ref);
+        const m3u8Url = fetched.ok && fetched.html ? parseJkPlayerDirectM3u8(fetched.html) : null;
         if (m3u8Url) {
           const out: ExtractedStream = {
             type: 'hls',
-            streamUrl: m3u8Url.includes('playmudos.com') ? this.wrapProxy(m3u8Url) : m3u8Url,
-            rawDirectUrl: m3u8Url
+            streamUrl: this.wrapProxy(m3u8Url, ref),
+            rawDirectUrl: m3u8Url,
+            referer: ref
           };
-          this.cache.set(url, out);
+          this.setCached(url, out);
           return out;
         }
       } catch {
         // ignore
       }
+      return null;
     }
 
     if (
       url.includes('flaswish.com') ||
       url.includes('streamwish.') ||
       url.includes('sfastwish.com') ||
+      url.includes('dhcplay.com') ||
       url.includes('streamhgapi.com') ||
       url.includes('ghbrisk.com') ||
       url.includes('ryderjet.com') ||
-      url.includes('vidhidevip.com')
+      url.includes('vidhide') ||
+      url.includes('filelions') ||
+      url.includes('movearnpre.com')
     ) {
       try {
-        const normWish = url.replace('sfastwish.com', 'flaswish.com');
-        const html = await nativeFetchHtml(normWish, {}, 6500);
-        const m3u8Url = html && nWin.NyAnimeVideoSources?.parseStreamWishDirectUrl
-          ? nWin.NyAnimeVideoSources.parseStreamWishDirectUrl(html)
-          : null;
+        const normWish = normalizeKnownEmbedUrl(url);
+        let embedOriginRef = 'https://streamwish.to/';
+        try {
+          embedOriginRef = new URL(normWish).origin + '/';
+        } catch {
+          // keep default
+        }
+        const fetched = await fetchFreshEmbedForExtraction(normWish, timeoutMs, embedOriginRef);
+        const m3u8Url =
+          fetched.ok && fetched.html && nWin.NyAnimeVideoSources?.parseStreamWishDirectUrl
+            ? nWin.NyAnimeVideoSources.parseStreamWishDirectUrl(fetched.html)
+            : null;
         if (m3u8Url) {
-          const out: ExtractedStream = { type: 'hls', streamUrl: m3u8Url, rawDirectUrl: m3u8Url };
-          this.cache.set(url, out);
+          let proxyAllowed = false;
+          try {
+            proxyAllowed = isDomainAllowlisted(new URL(m3u8Url).hostname);
+          } catch {
+            proxyAllowed = false;
+          }
+          const detectedTitle = extractEmbedTitleFromHtml(fetched.html, normWish);
+          const langCheck = detectedTitle
+            ? detectAudioLanguageFromSignals({ title: detectedTitle, fallback: 'MULTI' })
+            : 'MULTI';
+          const out: ExtractedStream = {
+            type: 'hls',
+            streamUrl: proxyAllowed ? this.wrapProxy(m3u8Url, embedOriginRef) : m3u8Url,
+            rawDirectUrl: m3u8Url,
+            referer: embedOriginRef,
+            detectedTitle,
+            detectedLanguage: langCheck === 'SUB' || langCheck === 'LATINO' ? langCheck : undefined
+          };
+          this.setCached(url, out);
           return out;
         }
       } catch {
@@ -1098,10 +1436,248 @@ export const StreamExtractor = {
   }
 };
 
+interface CachedProbeOutcome {
+  alive: boolean;
+  frameBlocked?: boolean;
+  verifiedDirect?: boolean;
+  streamType?: 'mp4' | 'hls';
+  detectedLanguage?: 'SUB' | 'LATINO';
+  expiresAt: number;
+}
+
+const sourceProbeCache = new Map<string, CachedProbeOutcome>();
+
+async function verifyDirectStreamReachable(stream: ExtractedStream, timeoutMs = 4500): Promise<boolean> {
+  if (!stream?.streamUrl) return false;
+  try {
+    const isProxied = stream.streamUrl.startsWith('/api/video-proxy?');
+    if (!isProxied) {
+      // Unproxied cross-origin HLS (rare rotating CDN not in allowlist): verify manifest fetch or allow fallback
+      const r = await fetchWithTimeout(stream.streamUrl, {}, Math.min(timeoutMs, 3500)).catch(() => null);
+      if (!r || !r.ok) return false;
+      const txt = await r.text().catch(() => '');
+      return txt.includes('#EXTM3U');
+    }
+    const probeUrl = `${stream.streamUrl}&probe=1`;
+    const headers: Record<string, string> =
+      stream.type === 'mp4' ? { Range: 'bytes=0-65535' } : {};
+    const res = await fetchWithTimeout(probeUrl, { headers }, timeoutMs);
+    if (!res.ok) return false;
+    const probeOk = res.headers.get('x-video-probe-ok');
+    if (probeOk === '1') return true;
+    if (probeOk === '0') return false;
+    const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 500);
+    return upStatus === 200 || upStatus === 206;
+  } catch {
+    return false;
+  }
+}
+
+async function probeSingleSource(src: NormalizedSource): Promise<CachedProbeOutcome> {
+  const cleanUrl = normalizeKnownEmbedUrl(src.url);
+  const now = Date.now();
+  const cached = sourceProbeCache.get(cleanUrl);
+  if (cached && now < cached.expiresAt) {
+    return cached;
+  }
+
+  const saveAndReturn = (outcome: Omit<CachedProbeOutcome, 'expiresAt'>): CachedProbeOutcome => {
+    const full: CachedProbeOutcome = { ...outcome, expiresAt: Date.now() + PROBE_CACHE_TTL_MS };
+    sourceProbeCache.set(cleanUrl, full);
+    return full;
+  };
+
+  if (src.externalOnly || isNonEmbeddableHost(cleanUrl, src.serverName)) {
+    return saveAndReturn({ alive: true, frameBlocked: true });
+  }
+
+  const lower = cleanUrl.toLowerCase();
+
+  // Real Mega API check via g.api.mega.co.nz/cs: discards deleted (-9), blocked (-16), etc. and decrypts filename to detect _LAT_ vs SUB
+  if (/mega(?:\.co)?\.nz\/(?:embed|file)\//i.test(lower)) {
+    const parts = parseMegaUrlFileIdAndKey(cleanUrl);
+    if (!parts?.fileId) {
+      return saveAndReturn({ alive: false });
+    }
+    try {
+      const megaRes = await fetchWithTimeout(
+        `/api/proxy?url=${encodeURIComponent('https://g.api.mega.co.nz/cs')}&probe=1&nocache=1`,
+        {
+          method: 'POST',
+          headers: { 'x-custom-content-type': 'application/json' },
+          body: JSON.stringify([{ a: 'g', p: parts.fileId }])
+        },
+        4500
+      );
+      const upStatus = Number(megaRes.headers.get('x-upstream-status') || megaRes.status || 502);
+      if (megaRes.ok && upStatus >= 200 && upStatus < 400) {
+        const json = await megaRes.json().catch(() => null);
+        if (json !== null) {
+          const check = await parseMegaApiCheckResult(json, parts.key);
+          if (!check.alive) {
+            return saveAndReturn({ alive: false });
+          }
+          return saveAndReturn({
+            alive: true,
+            frameBlocked: false,
+            detectedLanguage: check.detectedLanguage
+          });
+        }
+      }
+    } catch {
+      // Fall through if transient network timeout occurs
+    }
+    return saveAndReturn({ alive: true, frameBlocked: false });
+  }
+
+  // Direct/extractable native hosts (MP4Upload, YourUpload, Archive Direct, JKAnime Desu, Dotanborito, direct .mp4/.m3u8)
+  const isStrictDirectHost =
+    src.direct ||
+    /\.(mp4|webm|m3u8)(\?|$)/i.test(lower) ||
+    lower.includes('mp4upload.com') ||
+    lower.includes('yourupload.com') ||
+    lower.includes('dotanborito.net') ||
+    lower.includes('/jkplayer/um') ||
+    lower.includes('/jkplayer/c');
+
+  if (isStrictDirectHost) {
+    const extracted = await StreamExtractor.extract(cleanUrl, { timeoutMs: 5500 });
+    if (!extracted) {
+      return saveAndReturn({ alive: false });
+    }
+    const reachable = await verifyDirectStreamReachable(extracted, 5000);
+    if (!reachable) {
+      StreamExtractor.invalidate(cleanUrl);
+      return saveAndReturn({ alive: false, detectedLanguage: extracted.detectedLanguage });
+    }
+    return saveAndReturn({
+      alive: true,
+      frameBlocked: false,
+      verifiedDirect: true,
+      streamType: extracted.type,
+      detectedLanguage: extracted.detectedLanguage
+    });
+  }
+
+  // Extractable HLS cyberlockers (StreamWish / Flaswish / Vidhide / Ryderjet / Filelions)
+  const isExtractableCyberlocker =
+    lower.includes('flaswish.com') ||
+    lower.includes('streamwish.') ||
+    lower.includes('sfastwish.com') ||
+    lower.includes('dhcplay.com') ||
+    lower.includes('ghbrisk.com') ||
+    lower.includes('ryderjet.com') ||
+    lower.includes('streamhgapi.com') ||
+    lower.includes('vidhide') ||
+    lower.includes('filelions') ||
+    lower.includes('movearnpre.com');
+
+  if (isExtractableCyberlocker) {
+    const extracted = await StreamExtractor.extract(cleanUrl, { timeoutMs: 4500 });
+    if (extracted) {
+      const reachable = await verifyDirectStreamReachable(extracted, 4000);
+      if (reachable) {
+        return saveAndReturn({
+          alive: true,
+          frameBlocked: false,
+          verifiedDirect: true,
+          streamType: extracted.type,
+          detectedLanguage: extracted.detectedLanguage
+        });
+      }
+      StreamExtractor.invalidate(cleanUrl);
+    }
+    // Fall through to embed HTML probe to check for 404/DMCA/XFO
+  }
+
+  // Byse hosts: fast JSON API /api/videos/<code> verifies existence AND returns language title!
+  const byseMatch = cleanUrl.match(/^https?:\/\/(?:www\.)?(byse[a-z0-9]*\.com)\/(?:e|d)\/([a-zA-Z0-9_-]+)/i);
+  if (byseMatch?.[1] && byseMatch?.[2]) {
+    const apiUrl = `https://${byseMatch[1].toLowerCase()}/api/videos/${byseMatch[2]}`;
+    const fetched = await fetchFreshEmbedForExtraction(apiUrl, 4500);
+    if (fetched.status === 404 || fetched.status === 410) {
+      return saveAndReturn({ alive: false });
+    }
+    const health = detectDeadEmbedFromHtml(fetched.html, fetched.status, apiUrl, {
+      xFrameOptions: fetched.xfo,
+      csp: fetched.csp
+    });
+    return saveAndReturn({
+      alive: health.alive,
+      frameBlocked: health.frameBlocked,
+      detectedLanguage: health.detectedLanguage
+    });
+  }
+
+  // Probe allowlisted embed hosts (Okru, Filemoon, MixDrop, Uqload, LuluStream, Doodstream, Zilla, Archive Embed, StreamWish fallback)
+  let canProbeViaProxy = false;
+  try {
+    canProbeViaProxy = isDomainAllowlisted(new URL(cleanUrl).hostname);
+  } catch {
+    canProbeViaProxy = false;
+  }
+
+  if (!canProbeViaProxy) {
+    return saveAndReturn({ alive: true, frameBlocked: false });
+  }
+
+  const fetched = await fetchFreshEmbedForExtraction(cleanUrl, 4500);
+  // Treat network/proxy timeout (502 with empty HTML) as inconclusive for embeds unless it's a known dead status
+  if (fetched.status === 502 && !fetched.html) {
+    return saveAndReturn({ alive: true, frameBlocked: false });
+  }
+  const health = detectDeadEmbedFromHtml(fetched.html, fetched.status, cleanUrl, {
+    xFrameOptions: fetched.xfo,
+    csp: fetched.csp
+  });
+  return saveAndReturn({
+    alive: health.alive,
+    frameBlocked: health.frameBlocked,
+    detectedLanguage: health.detectedLanguage
+  });
+}
+
+async function runBoundedPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      results[idx] = await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+const PROVIDER_HOST_TO_ID: ReadonlyArray<[RegExp, string]> = [
+  [/hentaila\.com/i, 'hentaila'],
+  [/hentaijk\.com/i, 'hentaijk'],
+  [/jkanime\./i, 'jkanime'],
+  [/monoschinos(?:\.st|2\.(?:com|net))/i, 'monoschinos'],
+  [/animeav1\.com/i, 'animeav1'],
+  [/tvanime\.tv/i, 'tvanime'],
+  [/henaojara\.net/i, 'henaojara'],
+  [/tioanime\.com/i, 'tioanime'],
+  [/archive\.org/i, 'archive_org']
+];
+
+function inferProviderIdFromUrl(url: string): string | null {
+  for (const [rx, id] of PROVIDER_HOST_TO_ID) {
+    if (rx.test(url)) return id;
+  }
+  return null;
+}
+
 export class SmartVideoSourceManager {
   providers = [
     new HentaiLASourceProvider(),
     new JKAnimeSourceProvider(),
+    new MonosChinosSourceProvider(),
     new AnimeAV1SourceProvider(),
     new TVAnimeSourceProvider(),
     new HenaoJaraSourceProvider(),
@@ -1109,15 +1685,37 @@ export class SmartVideoSourceManager {
     new HentaiJKSourceProvider(),
     new InternetArchiveAnimeProvider()
   ];
+  circuitBreaker = new ProviderCircuitBreaker({
+    failureThreshold: 3,
+    cooldownMs: 60 * 1000
+  });
+  providerTimeoutMs = 15000;
   failedSourcesInSession = new Set<string>();
   rawEpisodeCache = new Map<string, NormalizedSource[]>();
+  verifiedEpisodeCache = new Map<string, { sources: NormalizedSource[]; expiresAt: number }>();
   inflightMap = new Map<string, Promise<NormalizedSource[]>>();
+  verifyInflightMap = new Map<string, Promise<NormalizedSource[]>>();
+
+  constructor() {
+    onProxyUpstreamEvent((url, status, timedOut) => {
+      const providerId = inferProviderIdFromUrl(url);
+      if (!providerId) return;
+      this.circuitBreaker.recordHttpStatus(providerId, status, timedOut);
+    });
+  }
 
   getCacheKey(ctx: EpisodeResolveContext): string {
-    return `${ctx.seasonId || ctx.slug || 'anime'}::s${ctx.season || 1}::e${ctx.episode || 1}`;
+    const mode = AppPreferencesManager.isShowAdultContentEnabled() ? 'adult' : 'safe';
+    return `${mode}::${ctx.seasonId || ctx.slug || 'anime'}::s${ctx.season || 1}::e${ctx.episode || 1}`;
+  }
+
+  clearRawCacheForAdultPref(): void {
+    this.rawEpisodeCache.clear();
+    this.verifiedEpisodeCache.clear();
   }
 
   async fetchRawSources(ctx: EpisodeResolveContext): Promise<NormalizedSource[]> {
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
     const key = this.getCacheKey(ctx);
     const cached = this.rawEpisodeCache.get(key);
     if (cached) return cached;
@@ -1125,19 +1723,39 @@ export class SmartVideoSourceManager {
     const inflight = this.inflightMap.get(key);
     if (inflight) return inflight;
 
+    const activeProviders = this.providers.filter((p) => {
+      if (!showAdult && isAdultProviderId(p.id)) {
+        return false;
+      }
+      if (!this.circuitBreaker.canAttempt(p.id)) {
+        return false;
+      }
+      return true;
+    });
+
     const job = (async () => {
       const results = await Promise.all(
-        this.providers.map((p) =>
-          Promise.race([
-            p.resolve(ctx).catch(() => []),
-            new Promise<NormalizedSource[]>((resolve) => setTimeout(() => resolve([]), 6500))
-          ])
-        )
+        activeProviders.map(async (p) => {
+          const outcome = await withProviderTimeout(
+            () => p.resolve(ctx),
+            this.providerTimeoutMs,
+            p.id
+          );
+          if (outcome.ok === false) {
+            this.circuitBreaker.recordFailure(p.id, outcome.reason);
+            return [] as NormalizedSource[];
+          }
+          if (Array.isArray(outcome.value) && outcome.value.length > 0) {
+            this.circuitBreaker.recordSuccess(p.id);
+          }
+          return Array.isArray(outcome.value) ? outcome.value : [];
+        })
       );
-      const flat = ensureGuaranteedEpisodeSources(
-        ctx,
-        results.flat().filter((s) => s && s.url)
+      const safeRaw = filterSafeAnimeSources(
+        results.flat().filter((s) => s && s.url),
+        showAdult
       );
+      const flat = ensureGuaranteedEpisodeSources(ctx, safeRaw);
       if (flat.length > 0) {
         this.rawEpisodeCache.set(key, flat);
       }
@@ -1152,20 +1770,142 @@ export class SmartVideoSourceManager {
     }
   }
 
-  rankRawSources(rawList: NormalizedSource[], targetLanguage = 'SUB'): NormalizedSource[] {
+  async probeAndVerifySources(
+    ctx: EpisodeResolveContext,
+    rawSources: NormalizedSource[],
+    preferredLanguage = 'SUB'
+  ): Promise<NormalizedSource[]> {
+    const key = this.getCacheKey(ctx);
+    const cached = this.verifiedEpisodeCache.get(key);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.sources;
+    }
+
+    const inflight = this.verifyInflightMap.get(key);
+    if (inflight) return inflight;
+
+    const job = (async () => {
+      if (!Array.isArray(rawSources) || rawSources.length === 0) return [];
+
+      // Pre-deduplicate identical raw URLs before probing while keeping all languages and distinct same-host mirrors,
+      // prioritizing the user's active audio mode so active-language MP4Upload/YourUpload/Mega links probe first!
+      const preDeduped = this.rankRawSources(rawSources, preferredLanguage, {
+        deduplicateByProviderHost: false,
+        strictLanguageFilter: false
+      });
+
+      // Separate MP4Upload candidates so they probe sequentially (avoids MP4Upload per-IP concurrent connection drops!)
+      const mp4UploadSources: NormalizedSource[] = [];
+      const otherSources: NormalizedSource[] = [];
+      for (const s of preDeduped) {
+        if (s.url.toLowerCase().includes('mp4upload.com')) {
+          mp4UploadSources.push(s);
+        } else {
+          otherSources.push(s);
+        }
+      }
+
+      const outcomeByUrl = new Map<string, CachedProbeOutcome>();
+      const safeProbeWithCap = async (s: NormalizedSource): Promise<CachedProbeOutcome> => {
+        try {
+          return await Promise.race([
+            probeSingleSource(s),
+            new Promise<CachedProbeOutcome>((resolve) =>
+              setTimeout(() => resolve({ alive: true, frameBlocked: false, expiresAt: Date.now() + 20_000 }), 6500)
+            )
+          ]);
+        } catch {
+          return { alive: true, frameBlocked: false, expiresAt: Date.now() + 20_000 };
+        }
+      };
+
+      const allProbesPromise = Promise.all([
+        (async () => {
+          for (const s of mp4UploadSources) {
+            outcomeByUrl.set(s.url, await safeProbeWithCap(s));
+          }
+        })(),
+        runBoundedPool(otherSources, 5, async (s) => {
+          outcomeByUrl.set(s.url, await safeProbeWithCap(s));
+        })
+      ]);
+
+      await Promise.race([
+        allProbesPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 9000))
+      ]);
+
+      const verifiedList: NormalizedSource[] = [];
+      for (const src of preDeduped) {
+        const probe = outcomeByUrl.get(src.url);
+        if (!probe) {
+          verifiedList.push(src);
+          continue;
+        }
+        if (!probe.alive) {
+          // Confirmed dead (404/410/DMCA/deleted/broken stream): hide from active list!
+          this.failedSourcesInSession.add(src.url);
+          continue;
+        }
+        const nextLang = probe.detectedLanguage || src.language;
+        const nextExternalOnly = Boolean(src.externalOnly) || Boolean(probe.frameBlocked);
+        const nextDirect = Boolean(probe.verifiedDirect) || src.direct;
+        const nextType = probe.streamType || src.type;
+        verifiedList.push(
+          new NormalizedSource({
+            ...src,
+            language: nextLang,
+            externalOnly: nextExternalOnly,
+            direct: nextDirect,
+            type: nextType,
+            verified: Boolean(probe.verifiedDirect || !probe.frameBlocked),
+            status: 'AVAILABLE'
+          })
+        );
+      }
+
+      const finalSources =
+        verifiedList.length > 0
+          ? verifiedList
+          : preDeduped.filter((s) => !this.failedSourcesInSession.has(s.url));
+
+      this.verifiedEpisodeCache.set(key, {
+        sources: finalSources,
+        expiresAt: Date.now() + PROBE_CACHE_TTL_MS
+      });
+      return finalSources;
+    })();
+
+    this.verifyInflightMap.set(key, job);
+    try {
+      return await job;
+    } finally {
+      this.verifyInflightMap.delete(key);
+    }
+  }
+
+  rankRawSources(
+    rawList: NormalizedSource[],
+    targetLanguage = 'SUB',
+    options?: RankDeduplicateOptions
+  ): NormalizedSource[] {
+    const showAdult = AppPreferencesManager.isShowAdultContentEnabled();
+    const safeList = filterSafeAnimeSources(rawList || [], showAdult);
     if (nWin.NyAnimeVideoSources?.rankAndDeduplicateSources) {
       return nWin.NyAnimeVideoSources.rankAndDeduplicateSources(
-        rawList,
+        safeList,
         targetLanguage,
-        this.failedSourcesInSession
+        this.failedSourcesInSession,
+        options
       );
     }
-    return [...(rawList || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
+    return [...safeList].sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
   async resolveAndRankSources(ctx: EpisodeResolveContext, targetLanguage = 'SUB'): Promise<NormalizedSource[]> {
     const rawList = await this.fetchRawSources(ctx);
-    return this.rankRawSources(rawList, targetLanguage);
+    const verifiedList = await this.probeAndVerifySources(ctx, rawList, targetLanguage);
+    return this.rankRawSources(verifiedList, targetLanguage);
   }
 
   markSourceFailed(url: string): void {
@@ -1195,9 +1935,12 @@ let activeRoomParticipants: Array<{ uid: string; displayName?: string }> = [];
 let activeRoomMessages: Array<{ id?: string; uid: string; displayName?: string; text: string; createdAt?: number }> = [];
 let roomUnsubscribe: (() => void) | null = null;
 let isApplyingRemoteSync = false;
+let isSwitchingLocalServer = false;
+let _localServerSwitchTimer: ReturnType<typeof setTimeout> | null = null;
 let isWatchTogetherBusy = false;
 let lastAppliedRoomUpdatedAtMs = 0;
 let _watchTogetherClockTimer: ReturnType<typeof setInterval> | null = null;
+let _wtDriftCheckTick = 0;
 
 function resetAniSkipState(): void {
   activeAniSkipIntervals = [];
@@ -1745,11 +2488,20 @@ function getEffectiveRoomTimeSeconds(): number {
   return 0;
 }
 
+function beginLocalServerSwitchGuard(): void {
+  isSwitchingLocalServer = true;
+  if (_localServerSwitchTimer) clearTimeout(_localServerSwitchTimer);
+  _localServerSwitchTimer = setTimeout(() => {
+    isSwitchingLocalServer = false;
+    _localServerSwitchTimer = null;
+  }, 1500);
+}
+
 async function broadcastWatchTogetherState(
   forcePlaybackState?: 'playing' | 'paused',
   overrideTimeSec?: number
 ): Promise<void> {
-  if (!activeRoomId || isApplyingRemoteSync) return;
+  if (!activeRoomId || isApplyingRemoteSync || isSwitchingLocalServer) return;
   const bridge = getWatchTogetherBridge();
   if (!bridge?.updatePlayback) return;
 
@@ -1789,20 +2541,21 @@ function applyRoomSyncToNativeVideo(room: WatchRoomState, forceSeek = false): bo
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
   if (!vidEl || vidEl.readyState < 1) return false;
   const targetTime = computeTargetSyncedTime(room, Date.now(), vidEl.duration);
+  const playing = isRoomPlaying(room);
   isApplyingRemoteSync = true;
   try {
     if (forceSeek || shouldSeekForDrift(vidEl.currentTime || 0, targetTime, 1.8)) {
       vidEl.currentTime = targetTime;
       activeVideoLastTickPos = targetTime;
     }
-    if (room.playbackState === 'playing' && vidEl.paused) {
+    if (playing && vidEl.paused) {
       vidEl.play().catch(() => {
         // Fallback to muted autoplay if browser blocked unmuted remote play
         vidEl.muted = true;
         void vidEl.play().catch(() => {});
         showToast('🔊 Reproducción sincronizada (activa el sonido en el reproductor)');
       });
-    } else if (room.playbackState === 'paused' && !vidEl.paused) {
+    } else if (!playing && !vidEl.paused) {
       vidEl.pause();
     }
   } finally {
@@ -2025,11 +2778,14 @@ export function renderWatchTogetherPanel(): void {
         <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(-15)">⏪ -15s</button>
         <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(15)">⏩ +15s</button>
         <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(85)">⚡ +85s</button>
-        <button type="button" class="wt-ctrl-btn" title="Sincronizar mi reproductor con el tiempo de la sala" onclick="forzarSincronizacionWatchTogether()">🔄 Sincronizar</button>
+        <button type="button" id="wt-btn-resync" class="wt-ctrl-btn" title="Resincronizar mi reproductor con el tiempo ancla de la sala" onclick="forzarSincronizacionWatchTogether()">🔄 Resincronizar</button>
         <div class="wt-manual-time-group">
           <input type="text" id="wt-manual-time-input" class="wt-time-input" placeholder="MM:SS" maxlength="8" aria-label="Saltar a minuto exacto" onkeydown="if(event.key==='Enter'){ event.preventDefault(); aplicarTiempoManualWatchTogether(); }">
           <button type="button" class="wt-ctrl-btn" onclick="aplicarTiempoManualWatchTogether()">Ir</button>
         </div>
+      </div>
+      <div style="font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.35;">
+        💡 Puedes cambiar tu propio servidor de video arriba sin afectar a los demás; tu tiempo se mantendrá sincronizado.
       </div>
       <div class="wt-participants-row" id="wt-participants-row"></div>
       <div class="wt-chat-messages" id="wt-chat-messages"></div>
@@ -2120,27 +2876,39 @@ export async function aplicarTiempoManualWatchTogether(): Promise<void> {
 
 export async function forzarSincronizacionWatchTogether(): Promise<void> {
   if (!activeRoomId || !activeRoomData) return;
+  const targetSec = computeTargetSyncedTime(activeRoomData, Date.now());
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
   if (vidEl && applyRoomSyncToNativeVideo(activeRoomData, true)) {
-    showToast(`🔄 Sincronizado con la sala (${formatPlaybackTime(computeTargetSyncedTime(activeRoomData))})`);
+    showToast(`🔄 Resincronizado con la sala (${formatPlaybackTime(targetSec)})`);
   } else {
-    await broadcastWatchTogetherState(activeRoomData.playbackState, getEffectiveRoomTimeSeconds());
-    showToast(`🔄 Tiempo de sala: ${formatPlaybackTime(computeTargetSyncedTime(activeRoomData))}`);
+    showToast(`🔄 Tiempo ancla de la sala: ${formatPlaybackTime(targetSec)} (usa un servidor directo 🟢 para resincronización automática)`);
   }
 }
 
 function startWatchTogetherClockTicker(): void {
   if (_watchTogetherClockTimer) clearInterval(_watchTogetherClockTimer);
+  _wtDriftCheckTick = 0;
   _watchTogetherClockTimer = setInterval(() => {
     if (!activeRoomId || !activeRoomData) return;
+    const playing = isRoomPlaying(activeRoomData);
+    const liveTimeSec = computeTargetSyncedTime(activeRoomData, Date.now());
     const syncMetaEl = document.getElementById('wt-sync-meta');
     if (syncMetaEl) {
-      const isPlaying = activeRoomData.playbackState === 'playing';
-      const liveTimeSec = computeTargetSyncedTime(activeRoomData, Date.now());
       const actorSuffix = activeRoomData.updatedByName
         ? ` · por ${activeRoomData.updatedByName}`
         : '';
-      syncMetaEl.textContent = `${isPlaying ? '▶ En vivo' : '⏸ En pausa'} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
+      syncMetaEl.textContent = `${playing ? '▶ En vivo' : '⏸ En pausa'} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
+    }
+    // Client-side anchor drift check every 3s (ZERO Firestore writes) with 1.8s tolerance
+    _wtDriftCheckTick = (_wtDriftCheckTick + 1) % 3;
+    if (_wtDriftCheckTick === 0 && playing && !isApplyingRemoteSync && !isSwitchingLocalServer) {
+      const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
+      if (vidEl && vidEl.readyState >= 2 && !vidEl.seeking && !vidEl.paused) {
+        const drift = computeRoomDriftSeconds(vidEl.currentTime || 0, activeRoomData, Date.now(), vidEl.duration);
+        if (drift > 1.8) {
+          applyRoomSyncToNativeVideo(activeRoomData, false);
+        }
+      }
     }
   }, 1000);
 }
@@ -2150,6 +2918,7 @@ function stopWatchTogetherClockTicker(): void {
     clearInterval(_watchTogetherClockTimer);
     _watchTogetherClockTimer = null;
   }
+  _wtDriftCheckTick = 0;
 }
 
 function attachWatchTogetherSubscription(roomId: string): void {
@@ -2200,7 +2969,7 @@ function attachWatchTogetherSubscription(roomId: string): void {
         Number(state.epActual || 0) !== Number(room.episodeNum);
 
       if (!isPlayerVisible || animeMismatch || seasonMismatch || epMismatch) {
-        lastAppliedRoomUpdatedAtMs = Number(room.updatedAtMs || Date.now());
+        lastAppliedRoomUpdatedAtMs = resolveRoomAnchorTimestampMs(room, Date.now());
         void sincronizarNavegacionConSala(room);
         return;
       }
@@ -2208,7 +2977,7 @@ function attachWatchTogetherSubscription(roomId: string): void {
       if (shouldApplyRemotePlaybackUpdate(room, myUid, lastAppliedRoomUpdatedAtMs)) {
         const applied = applyRoomSyncToNativeVideo(room, false);
         if (applied) {
-          lastAppliedRoomUpdatedAtMs = Number(room.updatedAtMs || Date.now());
+          lastAppliedRoomUpdatedAtMs = resolveRoomAnchorTimestampMs(room, Date.now());
         }
       }
     },
@@ -3059,6 +3828,24 @@ export function navegarEpisodioPlayer(offset: number): void {
   }
 }
 
+function teardownActiveMediaElement(container: HTMLElement | null): void {
+  if (nWin._nyActiveHls) {
+    try { nWin._nyActiveHls.destroy(); } catch { /* ignore */ }
+    nWin._nyActiveHls = null;
+  }
+  const existingVid = (container?.querySelector('#video-player-native') || document.getElementById('video-player-native')) as HTMLVideoElement | null;
+  if (existingVid) {
+    try {
+      existingVid.onerror = null;
+      existingVid.pause();
+      existingVid.removeAttribute('src');
+      existingVid.load();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 export function cerrarReproductor(): void {
   flushPlayerProgress();
   resetWatchTimeTrackers();
@@ -3073,19 +3860,40 @@ export function cerrarReproductor(): void {
     clearTimeout(_playerWatchdogTimer);
     _playerWatchdogTimer = null;
   }
-  if (nWin._nyActiveHls) {
-    try { nWin._nyActiveHls.destroy(); } catch { /* ignore */ }
-    nWin._nyActiveHls = null;
-  }
-  document.getElementById('pantalla-reproductor')?.classList.add('hide');
   const vidCont = document.getElementById('contenedor-video');
+  teardownActiveMediaElement(vidCont);
+  document.getElementById('pantalla-reproductor')?.classList.add('hide');
   if (vidCont) vidCont.innerHTML = '';
   const detalle = document.getElementById('pantalla-detalle');
   if (detalle && state.anime) detalle.classList.remove('hide');
 }
 
+function findFirstPlayableSourceIndex(list: NormalizedSource[], startAfterIdx = -1): number {
+  if (!Array.isArray(list) || list.length === 0) return 0;
+  const len = list.length;
+  // Pass 1: available and embeddable/playable (never auto-select externalOnly hosts like TransferIt)
+  for (let offset = 1; offset <= len; offset += 1) {
+    const i = (startAfterIdx + offset + len) % len;
+    const src = list[i];
+    if (!src) continue;
+    const isExt = Boolean(src.externalOnly) || isNonEmbeddableHost(src.url, src.serverName);
+    const isFailed = videoSourceManager.failedSourcesInSession.has(src.url) || src.status === 'FAILED';
+    if (!isExt && !isFailed) return i;
+  }
+  // Pass 2: any embeddable/playable source even if previously failed
+  for (let offset = 1; offset <= len; offset += 1) {
+    const i = (startAfterIdx + offset + len) % len;
+    const src = list[i];
+    if (!src) continue;
+    const isExt = Boolean(src.externalOnly) || isNonEmbeddableHost(src.url, src.serverName);
+    if (!isExt) return i;
+  }
+  return 0;
+}
+
 export function seleccionarAudio(modo: string): void {
   if (state.modoAudio === modo) return;
+  if (activeRoomId) beginLocalServerSwitchGuard();
   flushPlayerProgress();
   state.modoAudio = modo;
   state.fuenteActualIdx = 0;
@@ -3093,6 +3901,7 @@ export function seleccionarAudio(modo: string): void {
 
   if (Array.isArray(state.rawFuentesEpisodio) && state.rawFuentesEpisodio.length > 0) {
     state.fuentesRankeadas = videoSourceManager.rankRawSources(state.rawFuentesEpisodio, state.modoAudio);
+    state.fuenteActualIdx = findFirstPlayableSourceIndex(state.fuentesRankeadas);
     renderPlayerServersBar();
     void ejecutarFuenteActiva();
   } else {
@@ -3136,33 +3945,33 @@ export function renderPlayerServersBar(): void {
   bar.innerHTML = list
     .map((src, i) => {
       const isActive = i === activeIdx;
+      const isExternalOnly = Boolean(src.externalOnly) || isNonEmbeddableHost(src.url, src.serverName);
       const isFailed = videoSourceManager.failedSourcesInSession.has(src.url) || src.status === 'FAILED';
       const langClass = src.language === 'LATINO' ? 'lat' : (src.language === 'SUB' ? 'sub' : '');
       const langLabel = src.language === 'LATINO' ? 'LAT' : (src.language === 'MULTI' ? 'MULTI' : 'SUB');
-      const uLower = String(src.url || '').toLowerCase();
-      const sLower = String(src.serverName || src.providerName || '').toLowerCase();
-      const isNativeClean =
-        src.direct ||
-        uLower.includes('dotanborito.net') ||
-        uLower.includes('mp4upload.com') ||
-        uLower.includes('yourupload.com') ||
-        uLower.includes('flaswish.com') ||
-        uLower.includes('streamwish.') ||
-        uLower.includes('sfastwish.com') ||
-        uLower.includes('ghbrisk.com') ||
-        uLower.includes('ryderjet.com') ||
-        uLower.includes('streamhgapi.com') ||
-        /\.(mp4|webm|m3u8)(\?|$)/i.test(uLower) ||
-        sLower.includes('desu') ||
-        sLower.includes('vip');
-      const cleanBadge = isNativeClean && !isFailed
-        ? '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 Sin Anuncios</span>'
-        : '';
+      const badgeType = classifySourceBadgeType(src);
+      let cleanBadge = '';
+      if (badgeType === 'external') {
+        cleanBadge =
+          '<span style="font-size:9.5px; font-weight:700; color:#fbbf24; background:rgba(245,158,11,0.14); border:1px solid rgba(251,191,36,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">↗ Externo</span>';
+      } else if (!isFailed && badgeType === 'native-hls') {
+        cleanBadge =
+          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 HLS 1080p · Sin Anuncios</span>';
+      } else if (!isFailed && badgeType === 'native-direct') {
+        cleanBadge =
+          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 Directo · Sin Anuncios</span>';
+      } else if (!isFailed && badgeType === 'hls-cyberlocker' && (src.direct || src.type === 'hls')) {
+        cleanBadge =
+          '<span style="font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.14); border:1px solid rgba(56,189,248,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">HLS</span>';
+      }
+      const chipTitle = isExternalOnly
+        ? `${src.providerName} (${langLabel}) · Abrir en ventana externa (no embebible)`
+        : `${src.providerName} (${langLabel})${badgeType === 'native-hls' || badgeType === 'native-direct' ? ' · Reproductor nativo sin anuncios' : ''}`;
       return `
         <button type="button"
                 class="server-chip ${isActive ? 'active' : ''} ${isFailed ? 'failed' : ''}"
                 onclick="seleccionarServidorManual(${i})"
-                title="${escHtml(src.providerName)} (${langLabel})${isNativeClean ? ' · Reproductor nativo sin anuncios' : ''}">
+                title="${escHtml(chipTitle)}">
           <span class="server-lang-tag ${langClass}">${langLabel}</span>
           <span>${escHtml(src.providerName)}</span>
           ${cleanBadge}
@@ -3175,6 +3984,7 @@ export function renderPlayerServersBar(): void {
 
 export function seleccionarServidorManual(idx: number): void {
   if (!state.fuentesRankeadas || !state.fuentesRankeadas[idx]) return;
+  if (activeRoomId) beginLocalServerSwitchGuard();
   flushPlayerProgress();
   state.fuenteActualIdx = idx;
   void ejecutarFuenteActiva();
@@ -3247,6 +4057,8 @@ export async function resolverContextoEpisodio(epNum: number): Promise<EpisodeRe
   const tmdbId = mapping?.mappings?.themoviedb_id || mapping?.mappings?.thetvdb_id;
   const malId = mapping?.mappings?.mal_id || state.anime?.idMal || undefined;
   const format = String(currentSeason.format || state.anime?.format || 'TV');
+  const episodes = Number(currentSeason.totalEpisodes || state.anime?.episodes || 0) || null;
+  const seasonYear = Number(currentSeason.year || currentSeason.seasonYear || state.anime?.seasonYear || 0) || null;
   const isMovie = currentSeason.totalEpisodes === 1 || format === 'MOVIE';
   const epInfo = mapping?.episodes?.[epNum] || {};
   const season = Number(currentSeason.seasonNumber || epInfo.seasonNumber || 1);
@@ -3271,6 +4083,8 @@ export async function resolverContextoEpisodio(epNum: number): Promise<EpisodeRe
     slug,
     season,
     episode,
+    episodes,
+    seasonYear,
     seasonId: animeId,
     isMovie,
     format,
@@ -3309,11 +4123,16 @@ export async function resolverYReproducirFuente(): Promise<void> {
     const rawSources = await videoSourceManager.fetchRawSources(context);
     if (state.epActual !== epActual) return;
 
-    state.rawFuentesEpisodio = rawSources;
-    updateAudioServerCountsUI(rawSources);
+    statusLabel.textContent = 'Verificando salud de servidores y clasificando audio...';
+    const verifiedSources = await videoSourceManager.probeAndVerifySources(context, rawSources, state.modoAudio);
+    if (state.epActual !== epActual) return;
 
-    const rankedSources = videoSourceManager.rankRawSources(rawSources, state.modoAudio);
+    state.rawFuentesEpisodio = verifiedSources;
+    updateAudioServerCountsUI(verifiedSources);
+
+    const rankedSources = videoSourceManager.rankRawSources(verifiedSources, state.modoAudio);
     state.fuentesRankeadas = rankedSources;
+    state.fuenteActualIdx = findFirstPlayableSourceIndex(rankedSources);
     renderPlayerServersBar();
 
     if (!rankedSources || rankedSources.length === 0) {
@@ -3404,17 +4223,33 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     }
   }
 
+  teardownActiveMediaElement(container);
+
+  if (fuente.externalOnly || isNonEmbeddableHost(fuente.url, fuente.serverName)) {
+    statusDot.className = 'status-dot warning';
+    statusLabel.textContent = `${langBadge} · ${fuente.providerName} · Enlace Externo (${idx + 1}/${state.fuentesRankeadas.length})`;
+    const hasPlayableAlternative = state.fuentesRankeadas.some(
+      (f, i) => i !== idx && !f.externalOnly && !isNonEmbeddableHost(f.url, f.serverName)
+    );
+    container.innerHTML = `
+      <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:24px; text-align:center; background:#0b0d14; color:#e2e8f0;">
+        <div style="font-size:15px; font-weight:700; color:#f8fafc;">${escHtml(fuente.providerName)} bloquea reproducción embebida</div>
+        <div style="font-size:12.5px; color:#94a3b8; max-width:420px;">Este servidor solo permite abrirse directamente en una pestaña externa. Usa el botón de abajo o cambia a un servidor embebido/directo.</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+          ${safeUrl && safeUrl !== '#' ? `<a href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="chip active" style="background:var(--primary); color:#fff; text-decoration:none;">↗ Abrir en nueva pestaña</a>` : ''}
+          ${hasPlayableAlternative ? `<button type="button" class="chip" onclick="probarFuenteAlternativa()">⏭ Usar servidor directo</button>` : ''}
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   container.innerHTML = `
     <div style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#0b0d14; color:#fff;">
       <div class="spinner-border" style="width:36px; height:36px; border:3px solid rgba(255,255,255,0.1); border-top-color:#e11d48; border-radius:50%; animation:spin 0.8s linear infinite; margin-bottom:12px;"></div>
       <span style="font-size:13px; font-weight:600; color:#a0aec0;">Conectando con ${escHtml(fuente.providerName)}...</span>
     </div>
   `;
-
-  if (nWin._nyActiveHls) {
-    try { nWin._nyActiveHls.destroy(); } catch { /* ignore */ }
-    nWin._nyActiveHls = null;
-  }
 
   const activeEpSnapshot = state.epActual;
   const activeIdxSnapshot = idx;
@@ -3427,13 +4262,25 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     isDirectMp4Host ||
     fuente.url.includes('dotanborito.net') ||
     fuente.url.includes('/jkplayer/um') ||
+    fuente.url.includes('/jkplayer/c') ||
     fuente.url.includes('flaswish.com') ||
     fuente.url.includes('streamwish.') ||
     fuente.url.includes('sfastwish.com') ||
+    fuente.url.includes('dhcplay.com') ||
     fuente.url.includes('ghbrisk.com') ||
     fuente.url.includes('ryderjet.com') ||
     fuente.url.includes('streamhgapi.com') ||
-    fuente.url.includes('vidhidevip.com');
+    fuente.url.includes('vidhide') ||
+    fuente.url.includes('filelions') ||
+    fuente.url.includes('movearnpre.com');
+
+  const countRemainingPlayable = () =>
+    state.fuentesRankeadas.filter(
+      (f) =>
+        !f.externalOnly &&
+        !isNonEmbeddableHost(f.url, f.serverName) &&
+        !videoSourceManager.failedSourcesInSession.has(f.url)
+    ).length;
 
   if (canTryNativeExtract) {
     try {
@@ -3457,10 +4304,59 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
         if (vidEl) {
           attachNativeVideoLifecycle(vidEl, activeEpSnapshot);
+          let streamReady = false;
+          const markStreamReady = () => {
+            streamReady = true;
+            if (_playerWatchdogTimer) {
+              clearTimeout(_playerWatchdogTimer);
+              _playerWatchdogTimer = null;
+            }
+          };
+          vidEl.addEventListener('loadeddata', markStreamReady, { once: true });
+          vidEl.addEventListener('canplay', markStreamReady, { once: true });
+          vidEl.addEventListener('playing', markStreamReady, { once: true });
+          _playerWatchdogTimer = setTimeout(() => {
+            if (!streamReady && state.epActual === activeEpSnapshot && (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot) {
+              videoSourceManager.markSourceFailed(fuente.url);
+              if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
+                probarFuenteAlternativa();
+              } else {
+                mostrarAvisoCambioServidorVideo('El servidor tardó demasiado en cargar.');
+              }
+            }
+          }, 15000);
+          let retriedFreshToken = false;
           vidEl.onerror = () => {
+            if (
+              !retriedFreshToken &&
+              (fuente.url.includes('mp4upload.com') || fuente.url.includes('yourupload.com'))
+            ) {
+              retriedFreshToken = true;
+              void StreamExtractor.extract(fuente.url, { forceRefresh: true }).then((fresh) => {
+                if (
+                  fresh?.type === 'mp4' &&
+                  fresh.streamUrl &&
+                  state.epActual === activeEpSnapshot &&
+                  (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot
+                ) {
+                  vidEl.src = fresh.streamUrl;
+                  vidEl.load();
+                  void vidEl.play().catch(() => {});
+                  return;
+                }
+                markStreamReady();
+                videoSourceManager.markSourceFailed(fuente.url);
+                if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
+                  probarFuenteAlternativa();
+                } else {
+                  mostrarAvisoCambioServidorVideo('El video directo falló en origen.');
+                }
+              });
+              return;
+            }
+            markStreamReady();
             videoSourceManager.markSourceFailed(fuente.url);
-            const availCount = state.fuentesRankeadas.filter((f) => !videoSourceManager.failedSourcesInSession.has(f.url)).length;
-            if (availCount > 0 && state.fuentesRankeadas.length > 1) {
+            if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
               probarFuenteAlternativa();
             } else {
               mostrarAvisoCambioServidorVideo('El video directo falló en origen.');
@@ -3484,17 +4380,46 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
         if (vidEl) {
           attachNativeVideoLifecycle(vidEl, activeEpSnapshot);
+          let hlsReady = false;
+          const markHlsReady = () => {
+            hlsReady = true;
+            if (_playerWatchdogTimer) {
+              clearTimeout(_playerWatchdogTimer);
+              _playerWatchdogTimer = null;
+            }
+          };
+          vidEl.addEventListener('loadeddata', markHlsReady, { once: true });
+          vidEl.addEventListener('canplay', markHlsReady, { once: true });
+          vidEl.addEventListener('playing', markHlsReady, { once: true });
+          _playerWatchdogTimer = setTimeout(() => {
+            if (!hlsReady && state.epActual === activeEpSnapshot && (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot) {
+              videoSourceManager.markSourceFailed(fuente.url);
+              if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
+                probarFuenteAlternativa();
+              } else {
+                mostrarAvisoCambioServidorVideo('El flujo HLS no respondió a tiempo.');
+              }
+            }
+          }, 15000);
           if (nWin.Hls?.isSupported?.()) {
-            const hls = new nWin.Hls({ enableWorker: true });
+            const hls = new nWin.Hls({
+              enableWorker: true,
+              xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+                if (url.startsWith('/') || url.startsWith(window.location.origin)) {
+                  xhr.withCredentials = true;
+                }
+              }
+            });
             nWin._nyActiveHls = hls;
             hls.loadSource(directStream.streamUrl);
             hls.attachMedia(vidEl);
             hls.on(nWin.Hls.Events.ERROR, (_ev: any, data: any) => {
               if (data?.fatal) {
+                markHlsReady();
                 try { hls.destroy(); } catch { /* ignore */ }
                 nWin._nyActiveHls = null;
                 videoSourceManager.markSourceFailed(fuente.url);
-                if (state.fuentesRankeadas.length > 1) probarFuenteAlternativa();
+                if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) probarFuenteAlternativa();
               }
             });
           } else if (vidEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -3510,7 +4435,11 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     if (fuente.url.includes('mp4upload.com') || fuente.url.includes('yourupload.com')) {
       videoSourceManager.markSourceFailed(fuente.url);
       const nextAvailableIdx = state.fuentesRankeadas.findIndex(
-        (f, i) => i !== idx && !videoSourceManager.failedSourcesInSession.has(f.url)
+        (f, i) =>
+          i !== idx &&
+          !f.externalOnly &&
+          !isNonEmbeddableHost(f.url, f.serverName) &&
+          !videoSourceManager.failedSourcesInSession.has(f.url)
       );
       if (nextAvailableIdx >= 0) {
         state.fuenteActualIdx = nextAvailableIdx;
@@ -3531,10 +4460,15 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   const finalEmbedSafe = nWin.safeExternalUrl ? nWin.safeExternalUrl(embedUrl) : embedUrl;
   const isMegaEmbed =
     /mega(?:\.co)?\.nz/i.test(finalEmbedSafe) || /mega/i.test(String(fuente.serverName || ''));
-  // Strictly sandbox Mega embeds WITHOUT allow-popups or allow-top-navigation so clicking play inside Mega NEVER opens external mega.nz/file/... download windows
-  const iframeSandboxAttr = isMegaEmbed
-    ? 'sandbox="allow-scripts allow-same-origin allow-forms"'
-    : '';
+  const isFilemoonEmbed =
+    /filemoon\./i.test(finalEmbedSafe) || /^filemoon$/i.test(String(fuente.serverName || ''));
+  const isZillaEmbed = /zilla-networks\.com/i.test(finalEmbedSafe);
+  // Strictly sandbox Mega and Filemoon embeds WITHOUT allow-popups or allow-top-navigation so popups/external redirects are blocked
+  const iframeSandboxAttr =
+    isMegaEmbed || isFilemoonEmbed
+      ? 'sandbox="allow-scripts allow-same-origin allow-forms"'
+      : '';
+  const iframeReferrerPolicy = isZillaEmbed ? 'no-referrer' : 'strict-origin-when-cross-origin';
   const megaSwitchBanner =
     isMegaEmbed && state.fuentesRankeadas.length > 1
       ? `<div class="video-stall-banner" style="top:10px; bottom:auto;">
@@ -3550,7 +4484,7 @@ export async function ejecutarFuenteActiva(): Promise<void> {
       ${iframeSandboxAttr}
       allow="autoplay; encrypted-media; fullscreen; picture-in-picture" 
       allowfullscreen 
-      referrerpolicy="strict-origin-when-cross-origin"
+      referrerpolicy="${iframeReferrerPolicy}"
       frameborder="0"
       style="position:absolute; top:0; left:0; width:100%; height:100%; border:none;">
     </iframe>
@@ -3578,7 +4512,7 @@ export async function ejecutarFuenteActiva(): Promise<void> {
       if (!settled) {
         mostrarAvisoCambioServidorVideo('Este servidor tarda en responder.');
       }
-    }, 7000);
+    }, 12000);
   }
   if (!_playerVisibilityBound) {
     _playerVisibilityBound = true;
@@ -3598,13 +4532,19 @@ export function probarFuenteAlternativa(): void {
     return;
   }
 
+  if (activeRoomId) beginLocalServerSwitchGuard();
   flushPlayerProgress();
-  const fuenteActual = state.fuentesRankeadas[state.fuenteActualIdx % state.fuentesRankeadas.length];
-  if (fuenteActual) {
+  const currentIdx = state.fuenteActualIdx % state.fuentesRankeadas.length;
+  const fuenteActual = state.fuentesRankeadas[currentIdx];
+  if (fuenteActual && !fuenteActual.externalOnly) {
     videoSourceManager.markSourceFailed(fuenteActual.url);
   }
 
-  state.fuenteActualIdx = (state.fuenteActualIdx + 1) % state.fuentesRankeadas.length;
+  const nextPlayableIdx = findFirstPlayableSourceIndex(state.fuentesRankeadas, currentIdx);
+  state.fuenteActualIdx =
+    nextPlayableIdx !== currentIdx
+      ? nextPlayableIdx
+      : (currentIdx + 1) % state.fuentesRankeadas.length;
   showToast(`Cambiando a ${state.fuentesRankeadas[state.fuenteActualIdx].providerName}...`);
   void ejecutarFuenteActiva();
 }
@@ -3888,6 +4828,7 @@ export async function reproducirVideoOfflineCacheado(manifest: any): Promise<voi
 
   const container = document.getElementById('contenedor-video');
   if (container) {
+    teardownActiveMediaElement(container);
     container.innerHTML = `
       <video 
         id="video-player-native" 

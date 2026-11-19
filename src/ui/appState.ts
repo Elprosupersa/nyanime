@@ -411,8 +411,14 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const isRelativeSameOrigin = typeof url === 'string' && url.startsWith('/');
+  const mergedOptions: RequestInit = {
+    ...options,
+    credentials: options.credentials ?? (isRelativeSameOrigin ? 'same-origin' : undefined),
+    signal: controller.signal
+  };
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, mergedOptions);
   } finally {
     clearTimeout(timer);
   }
@@ -441,6 +447,26 @@ export async function nativeFetchJson(url: string, timeoutMs = 5000): Promise<an
   return null;
 }
 
+export type ProxyUpstreamEventListener = (url: string, status: number, timedOut: boolean) => void;
+const proxyUpstreamListeners = new Set<ProxyUpstreamEventListener>();
+
+export function onProxyUpstreamEvent(listener: ProxyUpstreamEventListener): () => void {
+  proxyUpstreamListeners.add(listener);
+  return () => {
+    proxyUpstreamListeners.delete(listener);
+  };
+}
+
+function emitProxyUpstreamEvent(url: string, status: number, timedOut: boolean): void {
+  proxyUpstreamListeners.forEach((fn) => {
+    try {
+      fn(url, status, timedOut);
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
 export async function nativeFetchText(
   url: string,
   customHeaders: Record<string, string> = {},
@@ -455,13 +481,15 @@ export async function nativeFetchText(
     const fetchOpt: RequestInit = { method, headers: proxyHeaders };
     if (method === 'POST' && postData) fetchOpt.body = postData;
     const res = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(url)}&probe=1`, fetchOpt, timeoutMs);
-    const upStatus = Number(res.headers.get('x-upstream-status') || '200');
+    const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 200);
+    emitProxyUpstreamEvent(url, upStatus, false);
     if (res.ok && upStatus < 400) {
       const txt = await res.text();
       if (txt) return txt;
     }
-  } catch {
-    // fallback direct
+  } catch (err: any) {
+    const timedOut = err?.name === 'AbortError';
+    emitProxyUpstreamEvent(url, 0, timedOut);
   }
   return null;
 }
@@ -474,13 +502,15 @@ export async function nativeFetchHtml(
   try {
     const localProxy = `/api/proxy?url=${encodeURIComponent(url)}&probe=1`;
     const res = await fetchWithTimeout(localProxy, { headers }, timeoutMs);
-    const upStatus = Number(res.headers.get('x-upstream-status') || '200');
+    const upStatus = Number(res.headers.get('x-upstream-status') || res.status || 200);
+    emitProxyUpstreamEvent(url, upStatus, false);
     if (res.ok && upStatus < 400) {
       const html = await res.text();
       return html && html.trim() ? html : null;
     }
-  } catch {
-    // ignore
+  } catch (err: any) {
+    const timedOut = err?.name === 'AbortError';
+    emitProxyUpstreamEvent(url, 0, timedOut);
   }
   return null;
 }
@@ -747,13 +777,15 @@ export interface AppPreferences {
   autoSkipOutro: boolean;
   autoScrobble: boolean;
   weeklySummaryPush: boolean;
+  showAdultContent: boolean;
 }
 
 const DEFAULT_APP_PREFS: AppPreferences = {
   autoSkipIntro: false,
   autoSkipOutro: false,
   autoScrobble: true,
-  weeklySummaryPush: true
+  weeklySummaryPush: true,
+  showAdultContent: false
 };
 
 export const AppPreferencesManager = {
@@ -766,13 +798,17 @@ export const AppPreferencesManager = {
           autoSkipIntro: Boolean(raw.autoSkipIntro),
           autoSkipOutro: Boolean(raw.autoSkipOutro),
           autoScrobble: raw.autoScrobble !== false,
-          weeklySummaryPush: raw.weeklySummaryPush !== false
+          weeklySummaryPush: raw.weeklySummaryPush !== false,
+          showAdultContent: raw.showAdultContent === true
         };
       }
     } catch {
       // ignore
     }
     return { ...DEFAULT_APP_PREFS };
+  },
+  isShowAdultContentEnabled(): boolean {
+    return this.get().showAdultContent === true;
   },
   save(patch: Partial<AppPreferences>, skipSync = false): AppPreferences {
     const next = { ...this.get(), ...(patch || {}) };
@@ -793,6 +829,9 @@ export const AppPreferencesManager = {
   },
   setWeeklySummaryPush(enabled: boolean): void {
     this.save({ weeklySummaryPush: Boolean(enabled) });
+  },
+  setShowAdultContent(enabled: boolean): void {
+    this.save({ showAdultContent: Boolean(enabled) });
   }
 };
 

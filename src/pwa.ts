@@ -76,6 +76,10 @@ async function cleanupMismatchedRegistrations(swUrl: string): Promise<void> {
   }
 }
 
+if (import.meta.env.DEV) {
+  void cleanupMismatchedRegistrations('/dev-sw.js');
+}
+
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
@@ -236,11 +240,11 @@ async function getPushEndpoint(): Promise<string | null> {
   if (!isPushSupported()) return null;
   try {
     const reg = await getActiveSwRegistration();
-    if (!reg) return getCachedFcmToken();
+    if (!reg) return null;
     const sub = await reg.pushManager.getSubscription();
-    return sub?.endpoint || getCachedFcmToken() || null;
+    return sub?.endpoint || null;
   } catch {
-    return getCachedFcmToken();
+    return null;
   }
 }
 
@@ -255,8 +259,8 @@ async function getPushStatus(): Promise<{
   const sub = reg ? await reg.pushManager.getSubscription().catch(() => null) : null;
   const endpoint = sub?.endpoint || null;
   const enabledFlag = localStorage.getItem('nyanime_push_enabled') === '1';
-  const active = Boolean(fcmToken || endpoint || (enabledFlag && typeof Notification !== 'undefined' && Notification.permission === 'granted'));
-  const provider = fcmToken ? 'fcm' : endpoint ? 'webpush' : null;
+  const active = Boolean(endpoint || fcmToken || (enabledFlag && typeof Notification !== 'undefined' && Notification.permission === 'granted'));
+  const provider = endpoint ? 'webpush' : fcmToken ? 'fcm' : null;
   return { active, provider, endpoint, fcmToken };
 }
 
@@ -271,23 +275,11 @@ async function subscribeWebPush(
     return { ok: false, reason: 'Permiso de notificaciones denegado en el navegador.' };
   }
 
-  let fcmToken: string | undefined;
   let webPushEndpoint: string | undefined;
   let webPushSubJson: PushSubscriptionJSON | undefined;
+  let fcmToken: string | undefined;
 
-  // 1. Register & request Firebase Cloud Messaging (FCM) token
-  if (pwaWin.FirebaseMessaging?.requestToken) {
-    try {
-      const fcmRes = await pwaWin.FirebaseMessaging.requestToken();
-      if (fcmRes?.ok && fcmRes.token) {
-        fcmToken = fcmRes.token;
-      }
-    } catch {
-      // Fallback gracefully to standard Web Push VAPID below
-    }
-  }
-
-  // 2. Also subscribe via VAPID PushManager so backend & offline SW stay active even without Firebase Console VAPID cert
+  // 1. Primary reliable channel: standard Web Push VAPID via PushManager
   const reg = await getActiveSwRegistration();
   if (reg) {
     try {
@@ -308,12 +300,24 @@ async function subscribeWebPush(
         }
       }
     } catch {
-      // Non-fatal if FCM succeeded
+      // Continue to optional FCM token attempt below
     }
   }
 
-  if (!fcmToken && !webPushSubJson) {
-    return { ok: false, reason: 'No se pudo obtener suscripción FCM ni clave Push en este navegador.' };
+  // 2. Optional secondary registration: Firebase Cloud Messaging token (requires FCM HTTP v1 service account for server-side dispatch)
+  if (pwaWin.FirebaseMessaging?.requestToken) {
+    try {
+      const fcmRes = await pwaWin.FirebaseMessaging.requestToken();
+      if (fcmRes?.ok && fcmRes.token) {
+        fcmToken = fcmRes.token;
+      }
+    } catch {
+      // Non-fatal; Web Push VAPID is primary
+    }
+  }
+
+  if (!webPushSubJson && !fcmToken) {
+    return { ok: false, reason: 'No se pudo obtener suscripción Web Push VAPID en este navegador.' };
   }
 
   try {
@@ -322,24 +326,23 @@ async function subscribeWebPush(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         uid,
-        ...(fcmToken ? { fcmToken } : {}),
-        ...(webPushSubJson ? { subscription: webPushSubJson } : {})
+        ...(webPushSubJson ? { subscription: webPushSubJson } : {}),
+        ...(fcmToken ? { fcmToken } : {})
       })
     });
-    if (!saveResp.ok && !fcmToken) {
+    if (!saveResp.ok) {
       return { ok: false, reason: 'Error registrando la suscripción Push en el servidor.' };
     }
   } catch {
-    if (!fcmToken) {
-      return { ok: false, reason: 'Error de red registrando la suscripción Push.' };
-    }
+    return { ok: false, reason: 'Error de red registrando la suscripción Push.' };
   }
 
+  const primaryProvider: 'webpush' | 'fcm' = webPushSubJson ? 'webpush' : 'fcm';
   if (webPushEndpoint && pwaWin.FirebaseMessaging?.syncSubscriptionToCloud) {
     await pwaWin.FirebaseMessaging.syncSubscriptionToCloud({
       endpoint: webPushEndpoint,
       ...(fcmToken ? { fcmToken } : {}),
-      provider: fcmToken ? 'fcm' : 'webpush'
+      provider: primaryProvider
     }).catch(() => {});
   }
 
@@ -348,7 +351,7 @@ async function subscribeWebPush(
     ok: true,
     endpoint: webPushEndpoint,
     fcmToken,
-    provider: fcmToken ? 'fcm' : 'webpush'
+    provider: primaryProvider
   };
 }
 
@@ -381,15 +384,36 @@ async function unsubscribeWebPush(): Promise<boolean> {
   }
 }
 
+async function handlePushDispatchResponse(resp: Response): Promise<boolean> {
+  const data = (await resp.json().catch(() => null)) as
+    | { sent?: number; purged?: number; warnings?: string[]; error?: string }
+    | null;
+  if (data && Number(data.purged || 0) > 0) {
+    localStorage.removeItem('nyanime_push_enabled');
+    pwaWin.showToast?.('Tu suscripción Push expiró y fue limpiada. Reactívala en Perfil.');
+  }
+  if (!resp.ok) {
+    if (data?.warnings?.[0]) {
+      console.warn('[NyAnime Push]', data.warnings[0]);
+    }
+    return false;
+  }
+  return Boolean(data && Number(data.sent || 0) > 0);
+}
+
 async function sendTestPush(): Promise<boolean> {
   try {
     const endpoint = await getPushEndpoint();
+    const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint })
+      body: JSON.stringify({
+        ...(endpoint ? { endpoint } : {}),
+        ...(fcmToken ? { fcmToken } : {})
+      })
     });
-    return resp.ok;
+    return await handlePushDispatchResponse(resp);
   } catch {
     return false;
   }
@@ -401,12 +425,17 @@ async function dispatchAiringPush(
   if (!items || items.length === 0) return false;
   try {
     const endpoint = await getPushEndpoint();
+    const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/check-airing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, items })
+      body: JSON.stringify({
+        ...(endpoint ? { endpoint } : {}),
+        ...(fcmToken ? { fcmToken } : {}),
+        items
+      })
     });
-    return resp.ok;
+    return await handlePushDispatchResponse(resp);
   } catch {
     return false;
   }
@@ -415,12 +444,17 @@ async function dispatchAiringPush(
 async function sendWeeklyDigestPush(headline: string): Promise<boolean> {
   try {
     const endpoint = await getPushEndpoint();
+    const fcmToken = getCachedFcmToken();
     const resp = await fetch('/api/push/send-weekly-summary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ endpoint, headline })
+      body: JSON.stringify({
+        ...(endpoint ? { endpoint } : {}),
+        ...(fcmToken ? { fcmToken } : {}),
+        headline
+      })
     });
-    return resp.ok;
+    return await handlePushDispatchResponse(resp);
   } catch {
     return false;
   }

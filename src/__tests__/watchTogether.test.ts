@@ -57,7 +57,11 @@ describe('watchTogether utilities', () => {
       inviteTokenHash: hashRoomSecret('NY-SECURE1', 'SecretInviteTok1')
     };
 
-    expect(verifyRoomAccess({ room, currentUid: 'host_uid' })).toEqual({ allowed: true, via: 'host' });
+    expect(verifyRoomAccess({ room, currentUid: 'host_uid' })).toEqual({
+      allowed: true,
+      via: 'host',
+      matchedHash: room.inviteTokenHash
+    });
     expect(verifyRoomAccess({ room, currentUid: 'guest_2' })).toEqual({
       allowed: false,
       reason: 'auth_required'
@@ -72,13 +76,15 @@ describe('watchTogether utilities', () => {
       verifyRoomAccess({ room, currentUid: 'guest_2', providedPasscode: 'k7p9m2' })
     ).toEqual({
       allowed: true,
-      via: 'passcode'
+      via: 'passcode',
+      matchedHash: room.passcodeHash
     });
     expect(
       verifyRoomAccess({ room, currentUid: 'guest_2', providedInviteKey: 'SecretInviteTok1' })
     ).toEqual({
       allowed: true,
-      via: 'invite'
+      via: 'invite',
+      matchedHash: room.inviteTokenHash
     });
   });
 

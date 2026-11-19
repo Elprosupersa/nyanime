@@ -143,6 +143,11 @@ export function getSupportedYears(maxYear = new Date().getFullYear()): string[] 
   return years;
 }
 
+export function getVisibleDirectoryGenres(showAdultContent = false): GenreOption[] {
+  if (showAdultContent) return [...JKANIME_GENRES];
+  return JKANIME_GENRES.filter((g) => !g.isAdult);
+}
+
 export function createDefaultDirectoryFilters(): SearchDirectoryFilters {
   return {
     page: 1,
@@ -294,7 +299,8 @@ export interface AniListDirectoryVariables {
 export function mapDirectoryFiltersToAniListVariables(
   filters: Partial<SearchDirectoryFilters>,
   searchTerm = '',
-  mediaType: 'ANIME' | 'MANGA' = 'ANIME'
+  mediaType: 'ANIME' | 'MANGA' = 'ANIME',
+  showAdultContent = false
 ): AniListDirectoryVariables {
   const cleanSearch = String(searchTerm || '').trim();
   const cleanLetter = String(filters.letter || '').trim().toUpperCase().slice(0, 1);
@@ -315,10 +321,12 @@ export function mapDirectoryFiltersToAniListVariables(
 
   if (filters.genre) {
     const gEntry = JKANIME_GENRES.find((g) => g.id === filters.genre);
-    if (gEntry?.aniGenre) genres.push(gEntry.aniGenre);
-    if (gEntry?.aniTag) tags.push(gEntry.aniTag);
-    if (gEntry?.isAdult) {
-      vars.isAdult = true;
+    if (gEntry && (!gEntry.isAdult || showAdultContent)) {
+      if (gEntry.aniGenre) genres.push(gEntry.aniGenre);
+      if (gEntry.aniTag) tags.push(gEntry.aniTag);
+      if (gEntry.isAdult && showAdultContent) {
+        vars.isAdult = true;
+      }
     }
   }
 

@@ -215,11 +215,65 @@ function applyApiCors(req: http.IncomingMessage, res: http.ServerResponse): bool
   return true;
 }
 
-async function dispatchWebPush(
+export interface PushDispatchResult {
+  sent: number;
+  failed: number;
+  purged: number;
+  purgedIds: string[];
+  channel: 'webpush' | 'none';
+  fcmLegacyDeprecated: boolean;
+  warnings: string[];
+}
+
+export interface PushDispatchDeps {
+  subsMap?: Map<string, StoredPushSub>;
+  sendWebPush?: (
+    subscription: webpushTypes.PushSubscription,
+    payload: string,
+    options: { TTL: number }
+  ) => Promise<unknown>;
+  persist?: () => void;
+  fcmServerKey?: string;
+}
+
+const FCM_LEGACY_DEPRECATION_NOTE =
+  'FIREBASE_FCM_SERVER_KEY usa la API legacy de FCM (fcm.googleapis.com/fcm/send), descontinuada por Google. Se prioriza Web Push VAPID como canal confiable; para envío nativo por FCM se requiere migrar a FCM HTTP v1 con una cuenta de servicio de Google (OAuth2).';
+
+let loggedLegacyFcmNotice = false;
+
+function resolvePushTargets(
+  subsMap: Map<string, StoredPushSub>,
+  endpoint: string,
+  fcmToken: string
+): StoredPushSub[] {
+  if (!endpoint && !fcmToken) {
+    return Array.from(subsMap.values());
+  }
+  const seen = new Map<string, StoredPushSub>();
+  if (endpoint) {
+    const byEndpoint = subsMap.get(hashEndpoint(endpoint));
+    if (byEndpoint) seen.set(byEndpoint.id, byEndpoint);
+  }
+  if (fcmToken) {
+    const byFcmId = subsMap.get(`fcm_${hashEndpoint(fcmToken)}`);
+    if (byFcmId) seen.set(byFcmId.id, byFcmId);
+    for (const sub of subsMap.values()) {
+      if (sub.fcmToken === fcmToken) {
+        seen.set(sub.id, sub);
+      }
+    }
+  }
+  return Array.from(seen.values());
+}
+
+export async function dispatchWebPush(
   targetSubs: StoredPushSub[],
-  payloadObj: { title: string; body: string; tag?: string; url?: string; icon?: string }
-): Promise<{ sent: number; failed: number; fcmSent?: number }> {
-  getVapidKeys();
+  payloadObj: { title: string; body: string; tag?: string; url?: string; icon?: string },
+  deps: PushDispatchDeps = {}
+): Promise<PushDispatchResult> {
+  if (!deps.sendWebPush) {
+    getVapidKeys();
+  }
   const payloadStr = JSON.stringify({
     title: payloadObj.title,
     body: payloadObj.body,
@@ -228,73 +282,80 @@ async function dispatchWebPush(
     icon: payloadObj.icon || '/pwa-192x192.png'
   });
 
-  const fcmServerKey = String(process.env.FIREBASE_FCM_SERVER_KEY || '').trim();
-  const subsMap = loadPushSubs();
+  const fcmServerKey = String(deps.fcmServerKey ?? process.env.FIREBASE_FCM_SERVER_KEY ?? '').trim();
+  const fcmLegacyDeprecated = Boolean(fcmServerKey);
+  const subsMap = deps.subsMap ?? loadPushSubs();
+  const sendNotification =
+    deps.sendWebPush ??
+    ((sub: webpushTypes.PushSubscription, data: string, opts: { TTL: number }) =>
+      webpush.sendNotification(sub, data, opts));
+  const persistFn = deps.persist ?? persistPushSubs;
+
+  const warnings: string[] = [];
+  if (fcmLegacyDeprecated) {
+    warnings.push(FCM_LEGACY_DEPRECATION_NOTE);
+    if (!loggedLegacyFcmNotice) {
+      loggedLegacyFcmNotice = true;
+      console.warn(`[NyAnime Push] ${FCM_LEGACY_DEPRECATION_NOTE}`);
+    }
+  }
+
   let sent = 0;
-  let fcmSent = 0;
   let failed = 0;
+  const purgedIds: string[] = [];
 
   await Promise.all(
     targetSubs.map(async (entry) => {
-      let delivered = false;
+      // 1. Primary reliable channel: Web Push VAPID
       if (entry.subscription?.endpoint) {
         try {
-          await webpush.sendNotification(entry.subscription, payloadStr, { TTL: 3600 });
+          await sendNotification(entry.subscription, payloadStr, { TTL: 3600 });
           sent += 1;
-          delivered = true;
+          return;
         } catch (err: any) {
           const statusCode = Number(err?.statusCode || 0);
           if (statusCode === 404 || statusCode === 410) {
-            subsMap.delete(entry.id);
-          }
-        }
-      }
-
-      if (entry.fcmToken && fcmServerKey) {
-        try {
-          const fcmResp = await fetch('https://fcm.googleapis.com/fcm/send', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `key=${fcmServerKey}`
-            },
-            body: JSON.stringify({
-              to: entry.fcmToken,
-              notification: {
-                title: payloadObj.title,
-                body: payloadObj.body,
-                icon: payloadObj.icon || '/pwa-192x192.png'
-              },
-              data: {
-                title: payloadObj.title,
-                body: payloadObj.body,
-                tag: payloadObj.tag || 'nyanime-push',
-                url: payloadObj.url || '/'
-              }
-            })
-          });
-          if (fcmResp.ok) {
-            fcmSent += 1;
-            if (!delivered) {
-              sent += 1;
-              delivered = true;
+            if (subsMap.delete(entry.id)) {
+              purgedIds.push(entry.id);
             }
+            console.warn(
+              `[NyAnime Push] Suscripción Web Push expirada (${statusCode}) eliminada automáticamente: ${entry.id}`
+            );
+            failed += 1;
+            return;
           }
-        } catch {
-          // Non-fatal fallback
+          const reason = err instanceof Error ? err.message : String(err || 'unknown error');
+          console.error(`[NyAnime Push] Error enviando Web Push (${statusCode || 'network'}) a ${entry.id}: ${reason}`);
+          warnings.push(`Error Web Push (${statusCode || 'red'}): ${reason}`);
+          failed += 1;
+          return;
         }
       }
 
-      if (!delivered && !entry.fcmToken) {
-        failed += 1;
-      }
+      // 2. Entry has only a legacy fcmToken without a Web Push VAPID subscription.
+      // Never fail silently or call the shut-down legacy fcm.googleapis.com/fcm/send endpoint.
+      failed += 1;
+      const msg = fcmLegacyDeprecated
+        ? `Suscripción ${entry.id} solo tiene token FCM y FIREBASE_FCM_SERVER_KEY apunta a la API legacy descontinuada. Re-suscribe con Web Push VAPID o configura cuenta de servicio FCM HTTP v1.`
+        : `Suscripción ${entry.id} solo tiene token FCM sin suscripción Web Push VAPID ni cuenta de servicio FCM HTTP v1 configurada.`;
+      console.warn(`[NyAnime Push] ${msg}`);
+      warnings.push(msg);
     })
   );
 
-  if (failed > 0) {
-    persistPushSubs();
+  if (purgedIds.length > 0) {
+    persistFn();
   }
-  return { sent, failed, fcmSent };
+
+  return {
+    sent,
+    failed,
+    purged: purgedIds.length,
+    purgedIds,
+    channel: sent > 0 ? 'webpush' : 'none',
+    fcmLegacyDeprecated,
+    warnings
+  };
 }
 
 export async function handleFeatureApiRoutes(
@@ -660,17 +721,24 @@ export async function handleFeatureApiRoutes(
       const id = hasValidWebPush ? hashEndpoint(sub!.endpoint) : `fcm_${hashEndpoint(fcmToken)}`;
       const existing = subsMap.get(id);
       const now = Date.now();
+      const primaryProvider: 'webpush' | 'fcm' = hasValidWebPush ? 'webpush' : 'fcm';
       subsMap.set(id, {
         id,
         uid: String(body.uid || 'local').slice(0, 128),
-        provider: fcmToken ? 'fcm' : 'webpush',
+        provider: primaryProvider,
         ...(fcmToken ? { fcmToken } : {}),
         ...(hasValidWebPush ? { subscription: sub } : {}),
         createdAt: existing?.createdAt || now,
         updatedAt: now
       });
       persistPushSubs();
-      sendJson(res, 200, { ok: true, id, count: subsMap.size, provider: fcmToken ? 'fcm' : 'webpush' });
+      sendJson(res, 200, {
+        ok: true,
+        id,
+        count: subsMap.size,
+        provider: primaryProvider,
+        fcmHttpV1RequiredForFcmOnly: !hasValidWebPush
+      });
       return true;
     }
 
@@ -706,10 +774,9 @@ export async function handleFeatureApiRoutes(
     if (pathname === '/api/push/test' && req.method === 'POST') {
       const body = await readJsonBody(req);
       const endpoint = String(body.endpoint || '').trim();
+      const fcmToken = String(body.fcmToken || '').trim();
       const subsMap = loadPushSubs();
-      const targets = endpoint
-        ? [subsMap.get(hashEndpoint(endpoint))].filter((x): x is StoredPushSub => Boolean(x))
-        : Array.from(subsMap.values());
+      const targets = resolvePushTargets(subsMap, endpoint, fcmToken);
 
       if (targets.length === 0) {
         sendJson(res, 404, { error: 'No hay suscripciones Push activas en el servidor.' });
@@ -721,7 +788,7 @@ export async function handleFeatureApiRoutes(
         tag: 'nyanime-test-push',
         url: '/?tab=schedule'
       });
-      sendJson(res, 200, result);
+      sendJson(res, result.sent > 0 ? 200 : 502, result);
       return true;
     }
 
@@ -729,13 +796,12 @@ export async function handleFeatureApiRoutes(
       const body = await readJsonBody(req);
       const items = Array.isArray(body.items) ? body.items : [];
       const endpoint = String(body.endpoint || '').trim();
+      const fcmToken = String(body.fcmToken || '').trim();
       const subsMap = loadPushSubs();
-      const targets = endpoint
-        ? [subsMap.get(hashEndpoint(endpoint))].filter((x): x is StoredPushSub => Boolean(x))
-        : Array.from(subsMap.values());
+      const targets = resolvePushTargets(subsMap, endpoint, fcmToken);
 
       if (targets.length === 0 || items.length === 0) {
-        sendJson(res, 200, { sent: 0, failed: 0 });
+        sendJson(res, 200, { sent: 0, failed: 0, purged: 0, purgedIds: [], channel: 'none', fcmLegacyDeprecated: false, warnings: [] });
         return true;
       }
 
@@ -761,10 +827,9 @@ export async function handleFeatureApiRoutes(
       const body = await readJsonBody(req);
       const headline = String(body.headline || 'Tu resumen semanal de anime y manga ya está disponible en NyAnime.');
       const endpoint = String(body.endpoint || '').trim();
+      const fcmToken = String(body.fcmToken || '').trim();
       const subsMap = loadPushSubs();
-      const targets = endpoint
-        ? [subsMap.get(hashEndpoint(endpoint))].filter((x): x is StoredPushSub => Boolean(x))
-        : Array.from(subsMap.values());
+      const targets = resolvePushTargets(subsMap, endpoint, fcmToken);
 
       if (targets.length === 0) {
         sendJson(res, 404, { error: 'Activa primero las notificaciones Push para enviar el resumen.' });
@@ -777,7 +842,7 @@ export async function handleFeatureApiRoutes(
         tag: 'nyanime-weekly-digest',
         url: '/?tab=profile'
       });
-      sendJson(res, 200, result);
+      sendJson(res, result.sent > 0 ? 200 : 502, result);
       return true;
     }
 

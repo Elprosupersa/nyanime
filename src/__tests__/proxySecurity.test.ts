@@ -217,6 +217,57 @@ describe('proxySecurity - Anti-SSRF & Allowlist', () => {
         }
       }
     });
+
+    it('serves built dist/index.html, CSS/JS with exact MIME & Cache-Control, and returns 404 for missing static assets', async () => {
+      const rootRes = await fetch(`${baseUrl}/`);
+      expect(rootRes.status).toBe(200);
+      expect(rootRes.headers.get('content-type')).toContain('text/html');
+      expect(rootRes.headers.get('cache-control')).toBe('no-cache, no-store, must-revalidate');
+      const html = await rootRes.text();
+      expect(html).not.toContain('/src/main.ts');
+
+      const cssMatch = html.match(/href="(\/assets\/index-[^"]+\.css)"/);
+      const jsMatch = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
+      expect(cssMatch?.[1]).toBeTruthy();
+      expect(jsMatch?.[1]).toBeTruthy();
+      expect(html).not.toMatch(/<link[^>]+rel="stylesheet"[^>]+crossorigin[^>]+href="\/assets\//i);
+      expect(html).not.toMatch(/<script[^>]+type="module"[^>]+crossorigin[^>]+src="\/assets\//i);
+
+      const cssRes = await fetch(`${baseUrl}${cssMatch![1]}`);
+      expect(cssRes.status).toBe(200);
+      expect(cssRes.headers.get('content-type')).toBe('text/css; charset=utf-8');
+      expect(cssRes.headers.get('cache-control')).toContain('immutable');
+      const cssBody = await cssRes.text();
+      expect(cssBody.length).toBeGreaterThan(5000);
+      expect(cssBody.trim().startsWith('<!DOCTYPE')).toBe(false);
+
+      const jsRes = await fetch(`${baseUrl}${jsMatch![1]}`);
+      expect(jsRes.status).toBe(200);
+      expect(jsRes.headers.get('content-type')).toBe('application/javascript; charset=utf-8');
+      expect(jsRes.headers.get('cache-control')).toContain('immutable');
+      const jsBody = await jsRes.text();
+      expect(jsBody.length).toBeGreaterThan(10000);
+      expect(jsBody.trim().startsWith('<!DOCTYPE')).toBe(false);
+
+      // Strict SPA rule: missing static assets MUST return 404, never index.html
+      for (const missingPath of ['/assets/no-existe.css', '/assets/no-existe.js', '/missing-icon.svg', '/missing.json', '/missing.webmanifest']) {
+        const missRes = await fetch(`${baseUrl}${missingPath}`);
+        expect(missRes.status, missingPath).toBe(404);
+        expect(missRes.headers.get('content-type')).not.toContain('text/html');
+      }
+
+      // Non-asset SPA client route still falls back to dist/index.html
+      const spaRes = await fetch(`${baseUrl}/anime/21355`);
+      expect(spaRes.status).toBe(200);
+      expect(spaRes.headers.get('content-type')).toContain('text/html');
+
+      // SW & manifest must never be cached aggressively
+      for (const noStorePath of ['/sw.js', '/sw-push.js', '/firebase-messaging-sw.js', '/manifest.webmanifest']) {
+        const nsRes = await fetch(`${baseUrl}${noStorePath}`);
+        expect(nsRes.status, noStorePath).toBe(200);
+        expect(nsRes.headers.get('cache-control'), noStorePath).toBe('no-cache, no-store, must-revalidate');
+      }
+    });
   });
 });
 

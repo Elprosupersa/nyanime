@@ -1,3 +1,9 @@
+export interface FirestoreTimestampLike {
+  toMillis?: () => number;
+  seconds?: number;
+  nanoseconds?: number;
+}
+
 export interface WatchRoomState {
   roomId: string;
   hostUid: string;
@@ -9,6 +15,10 @@ export interface WatchRoomState {
   episodeNum: number;
   playbackState: 'playing' | 'paused';
   playbackTime: number;
+  /** Anchor-based sync fields (preferred over per-second writes) */
+  isPlaying?: boolean;
+  anchorTime?: number;
+  updatedAt?: FirestoreTimestampLike | number | null;
   updatedAtMs: number;
   updatedByUid?: string;
   updatedByName?: string;
@@ -263,10 +273,19 @@ export function verifyRoomAccess(input: {
   providedInviteKey?: string;
   rememberedPasscode?: string;
   rememberedInviteToken?: string;
-}): { allowed: boolean; via?: 'host' | 'invite' | 'passcode' | 'open'; reason?: 'auth_required' | 'wrong_credentials' } {
+}): {
+  allowed: boolean;
+  via?: 'host' | 'invite' | 'passcode' | 'open';
+  matchedHash?: string;
+  reason?: 'auth_required' | 'wrong_credentials';
+} {
   const { room, currentUid } = input;
   if (room.hostUid && currentUid && room.hostUid === currentUid) {
-    return { allowed: true, via: 'host' };
+    return {
+      allowed: true,
+      via: 'host',
+      matchedHash: room.inviteTokenHash || room.passcodeHash || undefined
+    };
   }
 
   const requiresSecret = Boolean(room.hasPasscode || room.passcodeHash || room.inviteTokenHash);
@@ -280,7 +299,7 @@ export function verifyRoomAccess(input: {
   if (room.inviteTokenHash) {
     for (const token of inviteCandidates) {
       if (hashRoomSecret(room.roomId, token) === room.inviteTokenHash) {
-        return { allowed: true, via: 'invite' };
+        return { allowed: true, via: 'invite', matchedHash: room.inviteTokenHash };
       }
     }
   }
@@ -294,7 +313,7 @@ export function verifyRoomAccess(input: {
         hashRoomSecret(room.roomId, pass) === room.passcodeHash ||
         hashRoomSecret(room.roomId, pass.toUpperCase()) === room.passcodeHash
       ) {
-        return { allowed: true, via: 'passcode' };
+        return { allowed: true, via: 'passcode', matchedHash: room.passcodeHash };
       }
     }
   }
@@ -352,21 +371,75 @@ export function getOrCreateWatchClientIdentity(
   };
 }
 
-export function computeTargetSyncedTime(
-  room: Pick<WatchRoomState, 'playbackState' | 'playbackTime' | 'updatedAtMs'>,
-  nowMs = Date.now(),
-  durationSec?: number | null
+export function resolveRoomAnchorTimestampMs(
+  room: Pick<WatchRoomState, 'updatedAt' | 'updatedAtMs'>,
+  fallbackNowMs = Date.now()
 ): number {
-  const base = Math.max(0, Number(room.playbackTime || 0));
-  if (room.playbackState !== 'playing') {
-    return base;
+  const raw = room.updatedAt;
+  if (raw && typeof raw === 'object') {
+    if (typeof raw.toMillis === 'function') {
+      const ms = Number(raw.toMillis());
+      if (Number.isFinite(ms) && ms > 0) return ms;
+    }
+    if (typeof raw.seconds === 'number' && Number.isFinite(raw.seconds) && raw.seconds > 0) {
+      const nanos = typeof raw.nanoseconds === 'number' && Number.isFinite(raw.nanoseconds) ? raw.nanoseconds : 0;
+      return raw.seconds * 1000 + Math.floor(nanos / 1_000_000);
+    }
+  } else if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return raw;
   }
-  const elapsedSec = Math.max(0, (nowMs - Number(room.updatedAtMs || nowMs)) / 1000);
+
+  const legacyMs = Number(room.updatedAtMs || 0);
+  if (Number.isFinite(legacyMs) && legacyMs > 0) {
+    return legacyMs;
+  }
+  return fallbackNowMs;
+}
+
+export function isRoomPlaying(
+  room: Pick<WatchRoomState, 'isPlaying' | 'playbackState'>
+): boolean {
+  if (typeof room.isPlaying === 'boolean') return room.isPlaying;
+  return room.playbackState === 'playing';
+}
+
+export function computeTargetSyncedTime(
+  room: Pick<WatchRoomState, 'playbackState' | 'playbackTime' | 'updatedAtMs' | 'isPlaying' | 'anchorTime' | 'updatedAt'>,
+  nowMs = Date.now(),
+  durationSec?: number | null,
+  serverClockOffsetMs = 0
+): number {
+  const rawAnchor =
+    typeof room.anchorTime === 'number' && Number.isFinite(room.anchorTime)
+      ? room.anchorTime
+      : Number(room.playbackTime || 0);
+  const base = Math.max(0, rawAnchor);
+  const clampToDuration = (val: number): number => {
+    if (durationSec && Number.isFinite(durationSec) && durationSec > 0) {
+      return Math.min(val, Math.max(0, durationSec - 0.5));
+    }
+    return val;
+  };
+  if (!isRoomPlaying(room)) {
+    return clampToDuration(base);
+  }
+  const anchorMs = resolveRoomAnchorTimestampMs(room, nowMs);
+  const adjustedNow = nowMs + (Number.isFinite(serverClockOffsetMs) ? serverClockOffsetMs : 0);
+  const elapsedSec = Math.max(0, (adjustedNow - anchorMs) / 1000);
   const projected = base + Math.min(elapsedSec, 600);
-  if (durationSec && Number.isFinite(durationSec) && durationSec > 0) {
-    return Math.min(projected, Math.max(0, durationSec - 0.5));
-  }
-  return projected;
+  return clampToDuration(projected);
+}
+
+export function computeRoomDriftSeconds(
+  localTimeSec: number,
+  room: Pick<WatchRoomState, 'playbackState' | 'playbackTime' | 'updatedAtMs' | 'isPlaying' | 'anchorTime' | 'updatedAt'>,
+  nowMs = Date.now(),
+  durationSec?: number | null,
+  serverClockOffsetMs = 0
+): number {
+  if (!Number.isFinite(localTimeSec)) return 0;
+  const target = computeTargetSyncedTime(room, nowMs, durationSec, serverClockOffsetMs);
+  return Math.abs(localTimeSec - target);
 }
 
 export function shouldSeekForDrift(
@@ -379,11 +452,11 @@ export function shouldSeekForDrift(
 }
 
 export function shouldApplyRemotePlaybackUpdate(
-  room: Pick<WatchRoomState, 'updatedAtMs' | 'updatedByUid' | 'hostUid'>,
+  room: Pick<WatchRoomState, 'updatedAt' | 'updatedAtMs' | 'updatedByUid' | 'hostUid'>,
   currentUid: string | null,
   lastAppliedUpdatedAtMs: number
 ): boolean {
-  const incomingTs = Number(room.updatedAtMs || 0);
+  const incomingTs = resolveRoomAnchorTimestampMs(room, 0);
   if (lastAppliedUpdatedAtMs === 0) {
     return true;
   }

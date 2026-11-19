@@ -126,7 +126,7 @@ service cloud.firestore {
 
     function isValidUserSettings(data) {
       return data.keys().hasAll(['uid', 'scheduleReminders', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'showAdultContent', 'createdAt', 'updatedAt'])
         && data.uid is string && data.uid.size() <= 128 && data.uid == request.auth.uid
         && data.scheduleReminders is list && data.scheduleReminders.size() <= 500
         && (!('readerBg' in data) || (data.readerBg is string && data.readerBg.size() <= 32))
@@ -141,6 +141,7 @@ service cloud.firestore {
         && (!('autoScrobble' in data) || data.autoScrobble is bool)
         && (!('pushEnabled' in data) || data.pushEnabled is bool)
         && (!('weeklySummaryPush' in data) || data.weeklySummaryPush is bool)
+        && (!('showAdultContent' in data) || data.showAdultContent is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -182,9 +183,30 @@ service cloud.firestore {
         );
     }
 
+    function isValidSha256Hex(val) {
+      return val is string && val.size() == 64 && val.matches('^[a-f0-9]{64}$');
+    }
+
+    function hasValidWatchRoomAccess(roomData, actorUid, accessHash) {
+      return (
+        actorUid == roomData.hostUid
+        && isValidWatchActor(roomData.hostUid)
+      ) || (
+        isValidSha256Hex(accessHash)
+        && (
+          ('passcodeHash' in roomData && roomData.passcodeHash is string && accessHash == roomData.passcodeHash)
+          || ('inviteTokenHash' in roomData && roomData.inviteTokenHash is string && accessHash == roomData.inviteTokenHash)
+        )
+      );
+    }
+
+    function isWatchRoomHost(roomData) {
+      return isSignedIn() && roomData.hostUid == request.auth.uid;
+    }
+
     function isValidWatchRoom(data, roomId) {
       return data.keys().hasAll(['roomId', 'hostUid', 'hostName', 'animeId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'hasPasscode', 'passcodeHash', 'inviteTokenHash', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['roomId', 'hostUid', 'hostName', 'animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'isPlaying', 'anchorTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'hasPasscode', 'passcodeHash', 'inviteTokenHash', 'createdAt', 'updatedAt'])
         && data.roomId is string && data.roomId.size() >= 4 && data.roomId.size() <= 32 && data.roomId == roomId
         && data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128
         && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 80
@@ -195,25 +217,28 @@ service cloud.firestore {
         && data.episodeNum is int && data.episodeNum >= 1 && data.episodeNum <= 10000
         && data.playbackState in ['playing', 'paused']
         && data.playbackTime is number && data.playbackTime >= 0 && data.playbackTime <= 86400
+        && (!('isPlaying' in data) || data.isPlaying is bool)
+        && (!('anchorTime' in data) || (data.anchorTime is number && data.anchorTime >= 0 && data.anchorTime <= 86400))
         && data.updatedAtMs is int && data.updatedAtMs >= 0
         && (!('updatedByUid' in data) || isValidWatchActor(data.updatedByUid))
         && (!('updatedByName' in data) || (data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 80))
         && data.status in ['active', 'closed']
         && (!('hasPasscode' in data) || data.hasPasscode is bool)
-        && (!('passcodeHash' in data) || (data.passcodeHash is string && data.passcodeHash.size() <= 128))
-        && (!('inviteTokenHash' in data) || (data.inviteTokenHash is string && data.inviteTokenHash.size() <= 128))
+        && (!('passcodeHash' in data) || isValidSha256Hex(data.passcodeHash))
+        && (!('inviteTokenHash' in data) || isValidSha256Hex(data.inviteTokenHash))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
 
     function isValidWatchRoomParticipant(data, roomId, participantId) {
-      return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'accessHash', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'roomId', 'displayName', 'avatar', 'lastSeenMs', 'accessHash', 'createdAt', 'updatedAt'])
         && isValidWatchActor(data.uid) && participantId == data.uid
         && data.roomId is string && data.roomId == roomId
         && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
         && data.avatar is string && data.avatar.size() <= 40000
         && data.lastSeenMs is int && data.lastSeenMs >= 0
+        && isValidSha256Hex(data.accessHash)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -275,14 +300,20 @@ service cloud.firestore {
         && existing().uid == request.auth.uid;
     }
 
-    // Real-Time Watch Together Rooms
+    // Real-Time Watch Together Rooms (Private by room code + passcode/invite hash; NO public listing)
     match /watch_rooms/{roomId} {
       allow get: if isValidId(roomId);
-      allow list: if request.query.limit <= 20;
+      // Strict privacy: no public room listing; hosts may only list their own rooms
+      allow list: if isSignedIn()
+        && resource.data.hostUid == request.auth.uid
+        && request.query.limit <= 20;
       allow create: if isValidId(roomId)
         && isValidWatchRoom(incoming(), roomId)
         && isValidWatchActor(incoming().hostUid)
         && incoming().status == 'active'
+        && incoming().hasPasscode == true
+        && isValidSha256Hex(incoming().passcodeHash)
+        && isValidSha256Hex(incoming().inviteTokenHash)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isValidId(roomId)
@@ -292,44 +323,67 @@ service cloud.firestore {
         && incoming().hostUid == existing().hostUid
         && incoming().hostName == existing().hostName
         && incoming().createdAt == existing().createdAt
+        && incoming().hasPasscode == existing().hasPasscode
+        && incoming().passcodeHash == existing().passcodeHash
+        && incoming().inviteTokenHash == existing().inviteTokenHash
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'updatedAt']);
+        && ('updatedByUid' in incoming())
+        && isValidWatchActor(incoming().updatedByUid)
+        && (
+          incoming().updatedByUid == existing().hostUid
+          || exists(/databases/$(database)/documents/watch_rooms/$(roomId)/participants/$(incoming().updatedByUid))
+        )
+        && (
+          incoming().status == existing().status
+          || (incoming().status == 'closed' && incoming().updatedByUid == existing().hostUid)
+        )
+        && incoming().diff(existing()).affectedKeys().hasOnly(['animeId', 'seasonId', 'animeTitle', 'seasonNum', 'episodeNum', 'playbackState', 'playbackTime', 'isPlaying', 'anchorTime', 'updatedAtMs', 'updatedByUid', 'updatedByName', 'status', 'updatedAt']);
+      // Exclusive host deletion (requires authenticated hostUid)
       allow delete: if isValidId(roomId)
-        && isValidWatchActor(existing().hostUid);
+        && isWatchRoomHost(existing());
 
       match /participants/{participantId} {
         allow get: if isValidId(roomId) && isValidId(participantId);
-        allow list: if isValidId(roomId);
+        allow list: if isValidId(roomId) && request.query.limit <= 50;
         allow create: if isValidId(roomId) && isValidId(participantId)
           && isValidWatchRoomParticipant(incoming(), roomId, participantId)
           && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
+          && get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.status == 'active'
+          && hasValidWatchRoomAccess(
+            get(/databases/$(database)/documents/watch_rooms/$(roomId)).data,
+            incoming().uid,
+            incoming().accessHash
+          )
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
         allow update: if isValidId(roomId) && isValidId(participantId)
           && isValidWatchRoomParticipant(incoming(), roomId, participantId)
           && incoming().uid == existing().uid
           && incoming().roomId == existing().roomId
+          && incoming().accessHash == existing().accessHash
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'lastSeenMs', 'createdAt', 'updatedAt']);
         allow delete: if isValidId(roomId) && isValidId(participantId)
           && (
             isValidWatchActor(existing().uid)
-            || isValidWatchActor(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.hostUid)
+            || isWatchRoomHost(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data)
           );
       }
 
       match /messages/{messageId} {
         allow get: if isValidId(roomId) && isValidId(messageId);
-        allow list: if isValidId(roomId);
+        allow list: if isValidId(roomId) && request.query.limit <= 100;
         allow create: if isValidId(roomId) && isValidId(messageId)
           && isValidWatchRoomMessage(incoming(), roomId)
           && exists(/databases/$(database)/documents/watch_rooms/$(roomId))
+          && get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.status == 'active'
+          && exists(/databases/$(database)/documents/watch_rooms/$(roomId)/participants/$(incoming().uid))
           && incoming().createdAt == request.time;
         allow update: if false;
         allow delete: if isValidId(roomId) && isValidId(messageId)
           && (
             isValidWatchActor(existing().uid)
-            || isValidWatchActor(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data.hostUid)
+            || isWatchRoomHost(get(/databases/$(database)/documents/watch_rooms/$(roomId)).data)
           );
       }
     }
@@ -469,7 +523,7 @@ service cloud.firestore {
           && incoming().uid == existing().uid
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['scheduleReminders', 'readerBg', 'readerWidth', 'readerMode', 'readerBrightness', 'readerContrast', 'readerSepia', 'readerContinuous', 'autoSkipIntro', 'autoSkipOutro', 'autoScrobble', 'pushEnabled', 'weeklySummaryPush', 'showAdultContent', 'updatedAt']);
         allow delete: if isValidId(userId) && isValidId(settingId) && isOwner(userId);
       }
 
