@@ -30,7 +30,7 @@ export interface SmartRecommendationSeeds {
 }
 
 const VALID_COLORS = ['#ff1a40', '#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185'];
-const VALID_ICONS = ['📁', '⭐', '🔥', '🎌', '📚', '💎', '🌙', '⚡'];
+const VALID_ICONS = ['Lista', 'Top', 'Fav', 'Anime', 'Manga', 'Joyas', 'Noche', 'Flash'];
 
 export function sanitizeUserScore(raw: unknown): number | null {
   if (raw === null || raw === undefined || raw === '') return null;
@@ -82,7 +82,7 @@ export function buildCustomList(
     ? opts.id
     : `list_${slugBase}_${now.toString(36)}`;
   const color = opts?.color && VALID_COLORS.includes(opts.color) ? opts.color : VALID_COLORS[0];
-  const icon = opts?.icon && VALID_ICONS.includes(opts.icon) ? opts.icon : '📁';
+  const icon = opts?.icon && VALID_ICONS.includes(opts.icon) ? opts.icon : 'Lista';
   return {
     id: rawId,
     name,

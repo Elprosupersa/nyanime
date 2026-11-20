@@ -101,7 +101,7 @@ export class KeiyoushiCatalogManager {
           </div>
           <div style="text-align:right;">
             <div style="font-size:11px; color:var(--text-muted);">${totalAll} extensiones</div>
-            <div style="font-size:10px; color:#10b981; font-weight:700;">🟢 Catálogo Activo</div>
+            <div style="font-size:10px; color:#10b981; font-weight:700;">Catálogo Activo</div>
           </div>
         </div>
         <div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
@@ -109,9 +109,9 @@ export class KeiyoushiCatalogManager {
         </div>
 
         <div class="keiyoushi-subbar" id="keiyoushi-lang-chips">
-          <button class="chip ${this.filterLang === 'es' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('es', this)">🇪🇸 Español (${totalEs})</button>
-          <button class="chip ${this.filterLang === 'en' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('en', this)">🇺🇸 English (${totalEn})</button>
-          <button class="chip ${this.filterLang === 'all' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('all', this)">🌐 Todas (${totalAll})</button>
+          <button class="chip ${this.filterLang === 'es' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('es', this)">Español (${totalEs})</button>
+          <button class="chip ${this.filterLang === 'en' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('en', this)">English (${totalEn})</button>
+          <button class="chip ${this.filterLang === 'all' ? 'active' : ''}" onclick="KeiyoushiManager.setLang('all', this)">Todas (${totalAll})</button>
         </div>
 
         <div style="margin-top:10px;">
@@ -148,9 +148,9 @@ export class KeiyoushiCatalogManager {
                   </div>
                 </div>
                 <div class="keiyoushi-actions" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:auto;">
-                  <button class="chip active" style="padding:5px 10px; font-size:11px;" onclick="KeiyoushiManager.explorarFuente('${encName}')">📖 Explorar en App</button>
-                  <button class="chip" style="padding:5px 10px; font-size:11px; background:rgba(99,102,241,0.22); border:1px solid rgba(99,102,241,0.45); color:#c7d2fe;" onclick="KeiyoushiManager.abrirEnMihon('${safePkg}', '${escapeHTML(safeSite)}', '${encName}')">📱 Mihon</button>
-                  ${safeSite ? `<button class="chip" style="padding:5px 9px; font-size:11px;" onclick="handleOpenExternal('${escapeHTML(safeSite)}')">🌐 Web</button>` : ''}
+                  <button class="chip active" style="padding:5px 10px; font-size:11px;" onclick="KeiyoushiManager.explorarFuente('${encName}')">Explorar en App</button>
+                  <button class="chip" style="padding:5px 10px; font-size:11px; background:rgba(99,102,241,0.22); border:1px solid rgba(99,102,241,0.45); color:#c7d2fe;" onclick="KeiyoushiManager.abrirEnMihon('${safePkg}', '${escapeHTML(safeSite)}', '${encName}')">Mihon</button>
+                  ${safeSite ? `<button class="chip" style="padding:5px 9px; font-size:11px;" onclick="handleOpenExternal('${escapeHTML(safeSite)}')">Web</button>` : ''}
                 </div>
               </div>
             `;

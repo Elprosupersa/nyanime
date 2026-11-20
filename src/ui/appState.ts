@@ -1972,7 +1972,7 @@ export const MangaHistoryManager = {
         status: manga.status || 'En Emisión',
         year: manga.year || '2024',
         origLang: manga.origLang || 'jp',
-        flag: manga.flag || '🇯🇵 Manga',
+        flag: manga.flag || 'Manga',
         genres: manga.genres || [],
         chaptersCount: manga.chaptersCount || 0,
         preferredSource: manga.preferredSource || null
@@ -2095,7 +2095,7 @@ export const DownloadManager = {
               chapterNum: Number(m.chapterNum || 1),
               title: m.chapterTitle || `Cap. ${m.chapterLabel || m.chapterNum || 1}`,
               pages: m.pageCount || 0,
-              group: 'Offline 💾',
+              group: 'Offline',
               lang: m.lang || 'es',
               source: 'Offline',
               isOfflineCached: true

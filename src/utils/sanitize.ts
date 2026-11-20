@@ -174,16 +174,16 @@ export function computeUserRank(
   verifiedRole?: string
 ): UserRankInfo {
   if (verifiedRole === 'CREATOR' || verifiedRole === 'VIP') {
-    return { tier: 'VIP', label: 'VIP Verificado', icon: '🌟' };
+    return { tier: 'VIP', label: 'VIP Verificado', icon: '' };
   }
   const score = Math.max(0, Number(episodesWatched || 0)) + Math.max(0, Number(chaptersRead || 0));
   if (score >= 100) {
-    return { tier: 'LEYENDA', label: 'Leyenda Anime', icon: '👑' };
+    return { tier: 'LEYENDA', label: 'Leyenda Anime', icon: '' };
   }
   if (score >= 20) {
-    return { tier: 'OTAKU', label: 'Otaku Activo', icon: '⚡' };
+    return { tier: 'OTAKU', label: 'Otaku Activo', icon: '' };
   }
-  return { tier: 'NOVATO', label: 'Explorador Novato', icon: '🌱' };
+  return { tier: 'NOVATO', label: 'Explorador Novato', icon: '' };
 }
 
 export function formatRelativeTime(timestampMs: number): string {

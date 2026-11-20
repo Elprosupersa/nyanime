@@ -298,11 +298,11 @@ function refreshPWAInstallUI() {
 
   if (installActionBtn) {
     if (deferredPrompt) {
-      installActionBtn.textContent = '📲 Instalar App Ahora (1 Clic)';
+      installActionBtn.textContent = 'Instalar App Ahora (1 Clic)';
     } else if (isIOSDevice) {
-      installActionBtn.textContent = '📱 Instalar en iPhone / iPad';
+      installActionBtn.textContent = 'Instalar en iPhone / iPad';
     } else {
-      installActionBtn.textContent = '📲 Instalar en tu Celular';
+      installActionBtn.textContent = 'Instalar en tu Celular';
     }
   }
 }

@@ -44,7 +44,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-selector-fuentes-mihon" onclick="cerrarModalFuentesManga(event)">
     <div class="ny-sheet" style="max-height:85vh;" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🌐 Selector de Fuentes Mihon</div>
+        <div class="ny-dialog-title">Selector de Fuentes Mihon</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModalFuentesManga()" aria-label="Cerrar selector de fuentes">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -60,7 +60,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-descarga-manga-mihon" onclick="cerrarModalDescargasManga(event)">
     <div class="ny-sheet" style="max-height:80vh;" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📥 Descargas para Lectura Offline</div>
+        <div class="ny-dialog-title">Descargas para Lectura Offline</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModalDescargasManga()" aria-label="Cerrar descargas de manga">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -138,7 +138,7 @@ const MODALS_MARKUP = `
             <div id="season-dl-progress-bar" class="dl-progress-fill"></div>
           </div>
           <div class="dl-progress-actions">
-            <button type="button" id="btn-pause-season-dl" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">⏸ Pausar</button>
+            <button type="button" id="btn-pause-season-dl" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">Pausar</button>
             <button type="button" id="btn-minimize-season-dl" class="dl-action-btn" onclick="minimizarModalDescargaTemporada()">Seguir en segundo plano</button>
             <button type="button" id="btn-retry-failed-dl" class="dl-action-btn primary hide" onclick="reintentarEpisodiosFallidos()">Reintentar fallidos</button>
             <button type="button" id="btn-cancel-season-dl" class="dl-cancel-btn" onclick="cancelarDescargaTemporada()">Cancelar todo</button>
@@ -262,7 +262,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-avatar" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🎭 Editar Perfil y Foto</div>
+        <div class="ny-dialog-title">Editar Perfil y Foto</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar editor de perfil">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -300,20 +300,20 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-vip" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🏆 Tu Rango Otaku & Progreso</div>
+        <div class="ny-dialog-title">Tu Rango Otaku y Progreso</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar rango otaku">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
       <div id="rank-modal-body" style="font-size:12.5px; color:var(--text-muted); line-height:1.6;">
         <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color); border-radius:12px; padding:12px; margin-bottom:12px;">
-          <div id="rank-modal-current" style="font-size:15px; font-weight:800; color:#fff; margin-bottom:4px;">🌱 Rango: Novato</div>
+          <div id="rank-modal-current" style="font-size:15px; font-weight:800; color:#fff; margin-bottom:4px;">Rango: Novato</div>
           <div id="rank-modal-summary" style="font-size:12px; color:var(--text-muted);">0 puntos de actividad</div>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;">
-          <div class="pwa-step-box" style="margin:0;"><strong>🌱 Explorador Novato</strong> (0 – 19 pts): Inicio de viaje en NyAnime TV.</div>
-          <div class="pwa-step-box" style="margin:0;"><strong>⚡ Otaku Activo</strong> (20 – 99 pts): Maratonista habitual de anime y manga.</div>
-          <div class="pwa-step-box" style="margin:0;"><strong>👑 Leyenda Anime</strong> (100+ pts): Coleccionista veterano verificado por actividad real.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>Explorador Novato</strong> (0 – 19 pts): Inicio de viaje en NyAnime TV.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>Otaku Activo</strong> (20 – 99 pts): Maratonista habitual de anime y manga.</div>
+          <div class="pwa-step-box" style="margin:0;"><strong>Leyenda Anime</strong> (100+ pts): Coleccionista veterano verificado por actividad real.</div>
         </div>
       </div>
       <button class="oled-btn-secondary" style="width:100%; justify-content:center;" onclick="cerrarModales()">
@@ -326,7 +326,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-auth-email" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title" id="auth-modal-title">🔐 Iniciar Sesión con Correo</div>
+        <div class="ny-dialog-title" id="auth-modal-title">Iniciar Sesión con Correo</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar autenticación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -361,7 +361,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-mal" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🔄 Importar MyAnimeList / AniList</div>
+        <div class="ny-dialog-title">Importar MyAnimeList / AniList</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar importador">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -378,7 +378,7 @@ const MODALS_MARKUP = `
         <input type="text" id="input-mal-username" style="flex:1; background:var(--bg-card); border:1px solid var(--border-color); padding:10px 12px; border-radius:10px; color:white; font-family:inherit; font-size:13px;" placeholder="Tu Usuario">
       </div>
       <button class="btn-download-season" id="btn-mal-sync" style="width:100%; justify-content:center; padding:12px;" onclick="sincronizarListaExterna()">
-        📥 Importar mis Animes y Mangas
+        Importar mis Animes y Mangas
       </button>
     </div>
   </div>
@@ -387,7 +387,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-sugerencias" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📮 Caja de Sugerencias</div>
+        <div class="ny-dialog-title">Caja de Sugerencias</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar sugerencias">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -396,13 +396,13 @@ const MODALS_MARKUP = `
         ¿Falta algún anime, temporada, o tienes una sugerencia? Escríbenos directamente:
       </div>
       <select id="select-sug-tipo" style="width:100%; background:var(--bg-card); color:white; border:1px solid var(--border-color); padding:10px; border-radius:10px; font-family:inherit; font-size:12px; margin-bottom:10px;">
-        <option value="Peticion">📺 Pedir nuevo Anime o Temporada</option>
-        <option value="Reporte">⚠️ Reportar servidor o episodio caído</option>
-        <option value="Mejora">💡 Idea / Sugerencia para la App</option>
+        <option value="Peticion">Pedir nuevo Anime o Temporada</option>
+        <option value="Reporte">Reportar servidor o episodio caído</option>
+        <option value="Mejora">Idea / Sugerencia para la App</option>
       </select>
       <textarea id="textarea-sugerencia" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; padding:10px; color:white; font-family:inherit; font-size:12px; min-height:80px; margin-bottom:14px;" placeholder="Detalla tu sugerencia o anime que deseas ver..."></textarea>
       <button class="btn-download-season" style="width:100%; justify-content:center; padding:12px;" onclick="enviarSugerencia()">
-        ✉️ Enviar Sugerencia
+        Enviar Sugerencia
       </button>
     </div>
   </div>
@@ -411,7 +411,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-pwa-install" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📲 Instalar NyAnime TV en tu Celular</div>
+        <div class="ny-dialog-title">Instalar NyAnime TV en tu Celular</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar guía de instalación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -421,11 +421,11 @@ const MODALS_MARKUP = `
       </div>
 
       <button id="modal-pwa-native-btn" class="btn-download-season hide" style="width:100%; justify-content:center; padding:12px; margin-bottom:14px;" onclick="window.NyAnimePWA?.install()">
-        ⚡ Instalar Aplicación Ahora
+        Instalar Aplicación Ahora
       </button>
 
       <div id="modal-pwa-android-steps" class="pwa-step-box">
-        <strong>🤖 Android (Google Chrome / Edge):</strong>
+        <strong>Android (Google Chrome / Edge):</strong>
         <ol>
           <li>Abre esta app en <strong>Chrome</strong> desde tu celular.</li>
           <li>Toca el menú de <strong>tres puntos (⋮)</strong> arriba a la derecha.</li>
@@ -435,7 +435,7 @@ const MODALS_MARKUP = `
       </div>
 
       <div id="modal-pwa-ios-steps" class="pwa-step-box">
-        <strong>🍎 iPhone / iPad (Safari):</strong>
+        <strong>iPhone / iPad (Safari):</strong>
         <ol>
           <li>Abre esta URL en <strong>Safari</strong> (requerido en iOS).</li>
           <li>Toca el botón <strong>Compartir</strong> (cuadro con flecha hacia arriba).</li>
@@ -454,7 +454,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-custom-list" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📁 Nueva Colección Personalizada</div>
+        <div class="ny-dialog-title">Nueva Colección Personalizada</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar nueva colección">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -467,16 +467,16 @@ const MODALS_MARKUP = `
         <input type="text" id="input-custom-list-name" maxlength="48" style="width:100%; background:var(--bg-card); border:1px solid var(--border-color); padding:10px 12px; border-radius:10px; color:white; font-family:inherit; font-size:13px;" placeholder="Ej. Maratón de Finde">
       </div>
       <div style="margin-bottom:12px;">
-        <div class="avatar-section-label">ICONO</div>
+        <div class="avatar-section-label">ETIQUETA</div>
         <div class="custom-list-icon-row" id="custom-list-icon-row">
-          <button type="button" class="chip active" data-icon="📁" onclick="seleccionarIconoListaNueva('📁', this)">📁</button>
-          <button type="button" class="chip" data-icon="⭐" onclick="seleccionarIconoListaNueva('⭐', this)">⭐</button>
-          <button type="button" class="chip" data-icon="🔥" onclick="seleccionarIconoListaNueva('🔥', this)">🔥</button>
-          <button type="button" class="chip" data-icon="🎌" onclick="seleccionarIconoListaNueva('🎌', this)">🎌</button>
-          <button type="button" class="chip" data-icon="📚" onclick="seleccionarIconoListaNueva('📚', this)">📚</button>
-          <button type="button" class="chip" data-icon="💎" onclick="seleccionarIconoListaNueva('💎', this)">💎</button>
-          <button type="button" class="chip" data-icon="🌙" onclick="seleccionarIconoListaNueva('🌙', this)">🌙</button>
-          <button type="button" class="chip" data-icon="⚡" onclick="seleccionarIconoListaNueva('⚡', this)">⚡</button>
+          <button type="button" class="chip active" data-icon="Lista" onclick="seleccionarIconoListaNueva('Lista', this)">Lista</button>
+          <button type="button" class="chip" data-icon="Top" onclick="seleccionarIconoListaNueva('Top', this)">Top</button>
+          <button type="button" class="chip" data-icon="Fav" onclick="seleccionarIconoListaNueva('Fav', this)">Fav</button>
+          <button type="button" class="chip" data-icon="Anime" onclick="seleccionarIconoListaNueva('Anime', this)">Anime</button>
+          <button type="button" class="chip" data-icon="Manga" onclick="seleccionarIconoListaNueva('Manga', this)">Manga</button>
+          <button type="button" class="chip" data-icon="Joyas" onclick="seleccionarIconoListaNueva('Joyas', this)">Joyas</button>
+          <button type="button" class="chip" data-icon="Noche" onclick="seleccionarIconoListaNueva('Noche', this)">Noche</button>
+          <button type="button" class="chip" data-icon="Flash" onclick="seleccionarIconoListaNueva('Flash', this)">Flash</button>
         </div>
       </div>
       <div style="margin-bottom:14px;">
@@ -500,7 +500,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-personal-review" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title" id="review-modal-title">⭐ Calificar y Escribir Nota</div>
+        <div class="ny-dialog-title" id="review-modal-title">Calificar y Escribir Nota</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar calificación">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -529,7 +529,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-weekly-summary" onclick="cerrarModales(event)">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">📊 Tu Resumen Semanal</div>
+        <div class="ny-dialog-title">Tu Resumen Semanal</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModales()" aria-label="Cerrar resumen semanal">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -542,7 +542,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-wipe-profile" role="alertdialog" aria-modal="true" aria-labelledby="wipe-step-title">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title" style="color:#ff8ea0;">⚠️ Restablecer Perfil</div>
+        <div class="ny-dialog-title" style="color:#ff8ea0;">Restablecer Perfil</div>
         <button type="button" class="ny-dialog-close" onclick="cancelarLimpiarPerfil()" aria-label="Cerrar confirmación de limpieza">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -565,7 +565,7 @@ const MODALS_MARKUP = `
   <div class="ny-dialog" id="modal-wt-join-pass" onclick="if(event.target===this) cerrarModalPasscodeWatchTogether()">
     <div class="ny-sheet" onclick="event.stopPropagation()">
       <div class="ny-dialog-header">
-        <div class="ny-dialog-title">🔒 Sala Protegida</div>
+        <div class="ny-dialog-title">Sala Protegida</div>
         <button type="button" class="ny-dialog-close" onclick="cerrarModalPasscodeWatchTogether()" aria-label="Cerrar acceso de sala">
           <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -584,7 +584,7 @@ const MODALS_MARKUP = `
       <div id="wt-join-pass-error" style="display:none; color:#fb7185; font-size:12px; font-weight:700; margin-bottom:10px;"></div>
       <div class="oled-btn-row" style="margin-top:8px;">
         <button type="button" class="oled-btn-secondary" onclick="cerrarModalPasscodeWatchTogether()">Cancelar</button>
-        <button type="button" class="btn-download-season" id="wt-join-pass-submit" style="flex:1; justify-content:center;" onclick="confirmarPasscodeWatchTogether()">🔓 Verificar y Entrar</button>
+        <button type="button" class="btn-download-season" id="wt-join-pass-submit" style="flex:1; justify-content:center;" onclick="confirmarPasscodeWatchTogether()">Verificar y Entrar</button>
       </div>
     </div>
   </div>
@@ -714,12 +714,12 @@ export function abrirModalAuthEmail(mode: 'login' | 'register' = 'login'): void 
   if (errEl) errEl.style.display = 'none';
 
   if (mode === 'register') {
-    if (title) title.textContent = '📝 Crear Cuenta NyAnime';
+    if (title) title.textContent = 'Crear Cuenta NyAnime';
     if (submitBtn) submitBtn.textContent = 'Registrarme';
     if (toggleLink) toggleLink.textContent = '¿Ya tienes cuenta? Inicia Sesión';
     if (nameGroup) nameGroup.style.display = 'block';
   } else {
-    if (title) title.textContent = '🔐 Iniciar Sesión con Correo';
+    if (title) title.textContent = 'Iniciar Sesión con Correo';
     if (submitBtn) submitBtn.textContent = 'Iniciar Sesión';
     if (toggleLink) toggleLink.textContent = '¿No tienes cuenta? Regístrate';
     if (nameGroup) nameGroup.style.display = 'none';
@@ -1145,11 +1145,11 @@ export function abrirModalVip(): void {
   const chaps = UserManager.getTotalChaptersRead();
   const rank = nWin.NyAnimeUtils?.computeUserRank
     ? nWin.NyAnimeUtils.computeUserRank(eps, chaps, isLoggedIn ? user.role : 'FREE')
-    : { icon: '🌱', label: 'Novato', points: eps };
+    : { icon: '', label: 'Novato', points: eps };
 
   const curEl = document.getElementById('rank-modal-current');
   const sumEl = document.getElementById('rank-modal-summary');
-  if (curEl) curEl.textContent = `${rank.icon} Rango actual: ${rank.label}`;
+  if (curEl) curEl.textContent = `Rango actual: ${rank.label}`;
   if (sumEl) {
     sumEl.textContent = `${eps} eps vistos · ${formatWatchDuration(secs)} reales · ${chaps} caps leídos · ${rank.points} pts`;
   }
@@ -1215,7 +1215,7 @@ export async function sincronizarListaExterna(): Promise<void> {
       UserManager.renderProfile();
     }
     cerrarModales();
-    showToast(`✅ Importados ${addedAnimes} animes y ${addedMangas} mangas de ${username} (${servicio.toUpperCase()})`);
+    showToast(`Importados ${addedAnimes} animes y ${addedMangas} mangas de ${username} (${servicio.toUpperCase()})`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'No se pudo importar la lista.';
     if (errEl) {
@@ -1226,7 +1226,7 @@ export async function sincronizarListaExterna(): Promise<void> {
   } finally {
     if (syncBtn) {
       syncBtn.disabled = false;
-      syncBtn.textContent = '📥 Importar mis Animes y Mangas';
+      syncBtn.textContent = 'Importar mis Animes y Mangas';
     }
   }
 }
@@ -1249,21 +1249,21 @@ export function enviarSugerencia(): void {
   SuggestionsManager.add(tipo, texto);
   if (textarea) textarea.value = '';
   cerrarModales();
-  showToast('💌 ¡Muchas gracias! Tu sugerencia ha sido enviada al creador.');
+  showToast('¡Muchas gracias! Tu sugerencia ha sido enviada al creador.');
 }
 
 let pendingListColor = '#ff1a40';
-let pendingListIcon = '📁';
+let pendingListIcon = 'Lista';
 let pendingReviewTarget: { kind: 'anime' | 'manga'; item: any; score: number | null } | null = null;
 
 export function abrirModalNuevaLista(): void {
   ensureModalsMounted();
   pendingListColor = '#ff1a40';
-  pendingListIcon = '📁';
+  pendingListIcon = 'Lista';
   const input = document.getElementById('input-custom-list-name') as HTMLInputElement | null;
   if (input) input.value = '';
   document.querySelectorAll('#custom-list-icon-row .chip').forEach((c) => {
-    c.classList.toggle('active', (c as HTMLElement).dataset.icon === '📁');
+    c.classList.toggle('active', (c as HTMLElement).dataset.icon === 'Lista');
   });
   document.querySelectorAll('#custom-list-color-row .color-swatch-btn').forEach((c) => {
     c.classList.toggle('active', (c as HTMLElement).dataset.color === '#ff1a40');
@@ -1272,7 +1272,7 @@ export function abrirModalNuevaLista(): void {
 }
 
 export function seleccionarIconoListaNueva(icon: string, btn?: HTMLElement | null): void {
-  pendingListIcon = icon || '📁';
+  pendingListIcon = icon || 'Lista';
   document.querySelectorAll('#custom-list-icon-row .chip').forEach((c) => c.classList.remove('active'));
   if (btn) btn.classList.add('active');
 }
@@ -1296,7 +1296,7 @@ export function crearListaPersonalizada(): void {
   });
   if (!created) return;
   cerrarModales();
-  showToast(`${created.icon} Lista "${created.name}" creada`);
+  showToast(`Lista "${created.name}" creada`);
 }
 
 function renderReviewScorePicker(): void {
@@ -1358,7 +1358,7 @@ export function abrirModalResenaPersonal(kind: 'anime' | 'manga', itemId: string
       ? item.title?.english || item.title?.romaji || 'Anime'
       : item.title || 'Manga';
 
-  if (titleEl) titleEl.textContent = `⭐ ${displayTitle}`;
+  if (titleEl) titleEl.textContent = displayTitle;
   if (subEl) subEl.textContent = kind === 'anime' ? 'Calificación (se sincroniza con AniList/MAL si está conectado)' : 'Calificación y notas privadas de manga';
   if (revEl) revEl.value = String(item.userReview || '');
   if (notesEl) notesEl.value = String(item.userNotes || '');
@@ -1416,7 +1416,7 @@ export function abrirModalResumenSemanal(): void {
         : ''
     }
     <div class="oled-btn-row" style="margin-top:12px;">
-      <button type="button" class="oled-btn-secondary" onclick="enviarResumenSemanalPush()">📲 Enviar como Push</button>
+      <button type="button" class="oled-btn-secondary" onclick="enviarResumenSemanalPush()">Enviar como Push</button>
       <button type="button" class="btn-download-season" style="flex:1; justify-content:center;" onclick="cerrarModales()">Cerrar</button>
     </div>
   `;
@@ -1503,7 +1503,7 @@ export async function confirmarLimpiarPerfilFinal(): Promise<void> {
 
     profileWipeCurrentStep = 1;
     document.getElementById('modal-wipe-profile')?.classList.remove('active');
-    showToast('🧹 Perfil limpiado por completo. Ahora está como nuevo.');
+    showToast('Perfil limpiado por completo. Ahora está como nuevo.');
   } finally {
     profileWipeInFlight = false;
   }

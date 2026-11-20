@@ -26,7 +26,7 @@
 <body>
 
   <div id="pwa-offline-banner" class="pwa-offline-banner hide" role="status" aria-live="polite">
-    <span>⚡ Sin conexión · Modo offline activo</span>
+    <span>Sin conexión · Modo offline activo</span>
   </div>
 
   <!-- PANTALLA INICIO (HOME) -->
@@ -35,7 +35,7 @@
       <h1>NyAnime TV</h1>
       <div class="topbar-actions">
         <button type="button" class="topbar-wt-pill" id="btn-home-watch-together" onclick="toggleHomeWatchTogetherBar()" title="Salas Watch Together en vivo" aria-label="Watch Together">
-          👥 Sala <span class="topbar-wt-dot hide" id="home-wt-live-dot"></span>
+          Sala <span class="topbar-wt-dot hide" id="home-wt-live-dot"></span>
         </button>
         <button type="button" class="topbar-icon" id="btn-install-pwa-header" onclick="window.NyAnimePWA?.install()" title="Instalar App en tu dispositivo" aria-label="Instalar aplicación">
           <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14zm-4-6h3l-4 4-4-4h3V9h2v4z"/></svg>
@@ -197,13 +197,13 @@
     </div>
 
     <div class="lectura-type-chips" id="lectura-type-chips">
-      <button type="button" class="chip active" data-type="ALL" onclick="cambiarTipoLectura('ALL', this)">✨ Populares</button>
-      <button type="button" class="chip" data-type="MANGA" onclick="cambiarTipoLectura('MANGA', this)">🇯🇵 Mangas</button>
-      <button type="button" class="chip" data-type="MANHWA" onclick="cambiarTipoLectura('MANHWA', this)">🇰🇷 Manhwas</button>
-      <button type="button" class="chip" data-type="MANHUA" onclick="cambiarTipoLectura('MANHUA', this)">🇨🇳 Manhuas</button>
-      <button type="button" class="chip" data-type="FAVORITES" onclick="cambiarTipoLectura('FAVORITES', this)">❤️ Mi Biblioteca</button>
-      <button type="button" class="chip" data-type="OFFLINE" onclick="cambiarTipoLectura('OFFLINE', this)">💾 En Caché</button>
-      <button type="button" class="chip" data-type="KEIYOUSHI" onclick="cambiarTipoLectura('KEIYOUSHI', this)" style="border: 1px solid var(--primary); background: rgba(255, 26, 64, 0.15);">🧩 Extensiones Keiyoushi</button>
+      <button type="button" class="chip active" data-type="ALL" onclick="cambiarTipoLectura('ALL', this)">Populares</button>
+      <button type="button" class="chip" data-type="MANGA" onclick="cambiarTipoLectura('MANGA', this)">Mangas</button>
+      <button type="button" class="chip" data-type="MANHWA" onclick="cambiarTipoLectura('MANHWA', this)">Manhwas</button>
+      <button type="button" class="chip" data-type="MANHUA" onclick="cambiarTipoLectura('MANHUA', this)">Manhuas</button>
+      <button type="button" class="chip" data-type="FAVORITES" onclick="cambiarTipoLectura('FAVORITES', this)">Mi Biblioteca</button>
+      <button type="button" class="chip" data-type="OFFLINE" onclick="cambiarTipoLectura('OFFLINE', this)">En Caché</button>
+      <button type="button" class="chip" data-type="KEIYOUSHI" onclick="cambiarTipoLectura('KEIYOUSHI', this)" style="border: 1px solid var(--primary); background: rgba(255, 26, 64, 0.15);">Extensiones Keiyoushi</button>
     </div>
 
     <div class="lectura-genre-chips" id="lectura-genre-chips">
@@ -264,24 +264,24 @@
     </div>
 
     <div class="search-quick-chips" style="display:flex; gap:8px; overflow-x:auto; padding:0 20px 14px 20px; -webkit-overflow-scrolling:touch;">
-      <button type="button" class="chip" onclick="quickSearch('Solo Leveling')">🔥 Solo Leveling</button>
-      <button type="button" class="chip" onclick="quickSearch('Dandadan')">👻 Dandadan</button>
-      <button type="button" class="chip" onclick="quickSearch('Chainsaw Man')">⛓️ Chainsaw Man</button>
-      <button type="button" class="chip" onclick="quickSearch('Jujutsu Kaisen')">🥋 Jujutsu Kaisen</button>
-      <button type="button" class="chip" onclick="quickSearch('One Piece')">🏴‍☠️ One Piece</button>
-      <button type="button" class="chip" onclick="quickSearch('Demon Slayer')">⚔️ Demon Slayer</button>
-      <button type="button" class="chip" onclick="quickSearch('Berserk')">🗡️ Berserk</button>
+      <button type="button" class="chip" onclick="quickSearch('Solo Leveling')">Solo Leveling</button>
+      <button type="button" class="chip" onclick="quickSearch('Dandadan')">Dandadan</button>
+      <button type="button" class="chip" onclick="quickSearch('Chainsaw Man')">Chainsaw Man</button>
+      <button type="button" class="chip" onclick="quickSearch('Jujutsu Kaisen')">Jujutsu Kaisen</button>
+      <button type="button" class="chip" onclick="quickSearch('One Piece')">One Piece</button>
+      <button type="button" class="chip" onclick="quickSearch('Demon Slayer')">Demon Slayer</button>
+      <button type="button" class="chip" onclick="quickSearch('Berserk')">Berserk</button>
     </div>
 
     <div class="search-type-row">
       <div class="category-chips" id="search-filter-chips">
-        <button type="button" class="chip active" id="search-chip-all" onclick="setSearchFilter('ALL', this)">🌐 Todos</button>
-        <button type="button" class="chip" id="search-chip-anime" onclick="setSearchFilter('ANIME', this)">🎬 Animes</button>
-        <button type="button" class="chip" id="search-chip-manga" onclick="setSearchFilter('MANGA', this)">📖 Mangas</button>
+        <button type="button" class="chip active" id="search-chip-all" onclick="setSearchFilter('ALL', this)">Todos</button>
+        <button type="button" class="chip" id="search-chip-anime" onclick="setSearchFilter('ANIME', this)">Animes</button>
+        <button type="button" class="chip" id="search-chip-manga" onclick="setSearchFilter('MANGA', this)">Mangas</button>
       </div>
       <div class="search-filter-actions">
         <button type="button" class="search-filter-toggle-btn" id="btn-toggle-search-filters" onclick="toggleSearchFilterDrawer()" aria-expanded="false" aria-controls="search-filter-drawer">
-          <span>🎛️ Filtros</span>
+          <span>Filtros</span>
           <span class="search-filter-badge hide" id="search-filter-count-badge">0</span>
         </button>
         <button type="button" class="search-filter-reset-btn hide" id="btn-reset-search-filters" onclick="resetSearchFilters()">✕ Limpiar</button>
@@ -357,8 +357,8 @@
       </div>
     </div>
     <div class="category-chips" id="favoritos-tabs" style="padding: 0 20px 10px 20px;">
-      <button type="button" class="chip active" id="fav-chip-anime" onclick="cambiarSubTabFavoritos('anime', this)">🎬 Animes Guardados</button>
-      <button type="button" class="chip" id="fav-chip-manga" onclick="cambiarSubTabFavoritos('manga', this)">📚 Mangas Guardados</button>
+      <button type="button" class="chip active" id="fav-chip-anime" onclick="cambiarSubTabFavoritos('anime', this)">Animes Guardados</button>
+      <button type="button" class="chip" id="fav-chip-manga" onclick="cambiarSubTabFavoritos('manga', this)">Mangas Guardados</button>
     </div>
     <div class="category-chips hide" id="favoritos-anime-status-tabs" style="padding: 0 20px 12px 20px;"></div>
     <div class="grid" id="resultados-favoritos"></div>
@@ -390,7 +390,7 @@
         <div class="profile-hero-main">
           <div class="profile-hero-heading">
             <h2 class="profile-name" id="user-display-name">Invitado</h2>
-            <span class="profile-role-badge badge-free" id="user-role-badge">🌱 Novato</span>
+            <span class="profile-role-badge badge-free" id="user-role-badge">Novato</span>
           </div>
           <div class="profile-account-sub" id="profile-account-sub">Modo Local · Conecta tu cuenta para respaldo en la nube</div>
           <div class="profile-rank-box">
@@ -434,7 +434,7 @@
       <!-- TARJETA OLED: MIS SALAS WATCH TOGETHER CREADAS COMO PROPIETARIO -->
       <section class="oled-card profile-card-flat" id="card-profile-owned-watch-rooms" aria-label="Mis salas Watch Together creadas como propietario" style="margin-bottom:14px;">
         <div class="oled-card-title" style="justify-content:space-between; width:100%; flex-wrap:wrap; gap:8px;">
-          <span>🔒 Mis Salas Watch Together (Propietario)</span>
+          <span>Mis Salas Watch Together (Propietario)</span>
           <span id="profile-owned-rooms-count-badge" class="sync-pill offline">0 activas</span>
         </div>
         <div class="oled-card-desc">
@@ -477,8 +477,8 @@
       <section id="profile-panel-actividad" class="profile-panel hide" aria-label="Estadísticas y actividad">
         <div class="oled-card profile-card-flat" id="card-profile-ratings" style="margin-bottom:14px;">
           <div class="oled-card-title" style="justify-content:space-between; width:100%;">
-            <span>⭐ Calificaciones y Reseñas</span>
-            <button type="button" class="oled-btn-secondary" style="padding:6px 10px; font-size:11px;" onclick="abrirModalResumenSemanal()">📊 Resumen Semanal</button>
+            <span>Calificaciones y Reseñas</span>
+            <button type="button" class="oled-btn-secondary" style="padding:6px 10px; font-size:11px;" onclick="abrirModalResumenSemanal()">Resumen Semanal</button>
           </div>
           <div id="profile-ratings-summary"></div>
         </div>
@@ -582,7 +582,7 @@
 
         <!-- TARJETA OLED: SCROBBLING ANILIST / MAL (OAUTH) -->
         <div class="oled-card profile-card-flat" id="card-oauth-scrobble" style="margin-bottom:14px;">
-          <div class="oled-card-title">🔄 Sincronización Bidireccional (AniList / MAL)</div>
+          <div class="oled-card-title">Sincronización Bidireccional (AniList / MAL)</div>
           <div class="oled-card-desc">
             Conecta tus cuentas por OAuth para actualizar automáticamente tu progreso, estado y nota (1–10) en AniList y MyAnimeList al ver cada episodio.
           </div>
@@ -616,7 +616,7 @@
           </div>
           <div class="oled-btn-row">
             <button type="button" id="btn-open-wipe-profile" class="oled-btn-secondary danger-tint" style="width:100%; justify-content:center;" onclick="solicitarLimpiarPerfil()">
-              🧹 Limpiar Perfil desde Cero
+              Limpiar Perfil desde Cero
             </button>
           </div>
         </div>
@@ -654,7 +654,7 @@
 
         <!-- TARJETA OLED: NOTIFICACIONES PUSH Y RESUMEN SEMANAL -->
         <div class="oled-card profile-card-flat" id="card-web-push" style="margin-bottom:14px;">
-          <div class="oled-card-title">🔔 Alertas Push de Emisión y Resumen Semanal</div>
+          <div class="oled-card-title">Alertas Push de Emisión y Resumen Semanal</div>
           <div class="oled-card-desc">
             Recibe notificaciones en tu celular cuando se estrene un episodio nuevo de tus animes en "Viendo" o marcados en el calendario, junto con tu resumen semanal.
           </div>
@@ -663,7 +663,7 @@
 
         <!-- TARJETA OLED: MODO SEGURO Y CONTENIDO +18 -->
         <div class="oled-card profile-card-flat" id="card-content-safety" style="margin-bottom:14px;">
-          <div class="oled-card-title">🛡️ Modo Seguro y Contenido +18</div>
+          <div class="oled-card-title">Modo Seguro y Contenido +18</div>
           <div class="oled-card-desc">
             Por defecto el Modo Seguro está activado y excluye fuentes y resultados +18 (HentaiLA, HentaiJK y contenido adulto) del catálogo, búsqueda y reproductor.
           </div>
@@ -774,7 +774,7 @@
 
       <div class="det-cta-row">
         <button type="button" class="btn-watch-primary" id="det-btn-continue" onclick="iniciarOContinuarAnime()">
-          ▶ Empezar Episodio 1
+          Empezar Episodio 1
         </button>
         <div class="det-watch-progress-pill" id="det-watch-progress">0 / 0 vistos</div>
       </div>
@@ -829,7 +829,7 @@
       <img id="manga-det-poster" class="mihon-poster-img" src="" alt="Portada">
       <div class="mihon-info-col">
         <h1 class="mihon-title" id="manga-det-titulo">Cargando...</h1>
-        <div class="mihon-author" id="manga-det-author">✍️ Autor / Artista</div>
+        <div class="mihon-author" id="manga-det-author">Autor / Artista</div>
         <div class="mihon-badges-row" id="manga-det-badges"></div>
         <div class="mihon-genres-scroll" id="manga-det-genres"></div>
       </div>
@@ -837,26 +837,22 @@
 
     <div class="mihon-resume-bar">
       <button type="button" class="mihon-resume-btn" id="mihon-btn-start-resume" onclick="iniciarOReanudarLecturaManga()">
-        <span>▶ Empezar a Leer · Cap. 1</span>
+        <span>Empezar a Leer · Cap. 1</span>
       </button>
       <div class="mihon-progress-pill" id="mihon-read-progress-pill">0 leídos</div>
     </div>
 
     <div class="mihon-actions-grid">
       <button type="button" class="mihon-action-btn" id="mihon-btn-library" onclick="toggleMangaFavoritoActual()">
-        <span style="font-size:16px;">❤️</span>
         <span id="mihon-btn-library-text">Biblioteca</span>
       </button>
       <button type="button" class="mihon-action-btn" id="mihon-btn-read-all" onclick="toggleMarcarTodosLeidos()">
-        <span style="font-size:16px;">👁️</span>
         <span id="mihon-btn-read-text">Marcar Leído</span>
       </button>
       <button type="button" class="mihon-action-btn" id="mihon-btn-source" onclick="mostrarModalFuentesManga()">
-        <span style="font-size:16px;">🌐</span>
         <span id="mihon-active-source-name">Fuente</span>
       </button>
       <button type="button" class="mihon-action-btn" id="mihon-btn-download" onclick="abrirModalDescargaManga()">
-        <span style="font-size:16px;">💾</span>
         <span id="mihon-btn-download-text">Caché</span>
       </button>
     </div>
@@ -871,23 +867,23 @@
     <div class="mihon-lang-tabs-wrap">
       <div class="mihon-lang-tabs" id="manga-det-lang-tabs">
         <button type="button" class="mihon-lang-chip active" data-lang="es" onclick="cambiarIdiomaMangaModal('es', this)">
-          <span>🇪🇸 Español</span>
+          <span>Español</span>
           <span class="count-pill" id="count-lang-es">0</span>
         </button>
         <button type="button" class="mihon-lang-chip" data-lang="en" onclick="cambiarIdiomaMangaModal('en', this)">
-          <span>🇬🇧 English</span>
+          <span>English</span>
           <span class="count-pill" id="count-lang-en">0</span>
         </button>
         <button type="button" class="mihon-lang-chip" data-lang="ja" onclick="cambiarIdiomaMangaModal('ja', this)">
-          <span>🇯🇵 日本語</span>
+          <span>日本語</span>
           <span class="count-pill" id="count-lang-ja">0</span>
         </button>
         <button type="button" class="mihon-lang-chip" data-lang="ko" onclick="cambiarIdiomaMangaModal('ko', this)">
-          <span>🇰🇷 한국어</span>
+          <span>한국어</span>
           <span class="count-pill" id="count-lang-ko">0</span>
         </button>
         <button type="button" class="mihon-lang-chip" data-lang="all" onclick="cambiarIdiomaMangaModal('all', this)">
-          <span>🌐 Todos</span>
+          <span>Todos</span>
           <span class="count-pill" id="count-lang-all">0</span>
         </button>
       </div>
@@ -900,9 +896,9 @@
           <span class="badge-pill" id="manga-det-count" style="font-size:11px; background:rgba(255, 26, 64,0.15); color:var(--primary);">0 caps</span>
         </div>
         <div class="mihon-toolbar-actions">
-          <button type="button" class="mihon-tool-btn" id="btn-filter-cached-manga" onclick="toggleFiltroCacheManga()">💾 En Caché</button>
-          <button type="button" class="mihon-tool-btn" id="btn-sort-manga" onclick="toggleSortCapitulosManga()">⬇️ Ascendente</button>
-          <button type="button" class="mihon-tool-btn" id="btn-filter-read-manga" onclick="toggleFiltroLeidosManga()">👁️ Todos</button>
+          <button type="button" class="mihon-tool-btn" id="btn-filter-cached-manga" onclick="toggleFiltroCacheManga()">En Caché</button>
+          <button type="button" class="mihon-tool-btn" id="btn-sort-manga" onclick="toggleSortCapitulosManga()">Ascendente</button>
+          <button type="button" class="mihon-tool-btn" id="btn-filter-read-manga" onclick="toggleFiltroLeidosManga()">Todos</button>
         </div>
       </div>
       <input type="text" class="manga-chap-search" style="width:100%; border-radius:10px;" placeholder="Buscar número de capítulo (ej. 1, 10, 50, 150)..." aria-label="Buscar número de capítulo" oninput="filtrarCapitulosManga(this.value)">
@@ -944,17 +940,14 @@
     <div class="rep-controls">
       <div class="smart-audio-selector" role="tablist" aria-label="Idioma del reproductor">
         <button type="button" class="audio-btn active" id="btn-audio-sub" onclick="seleccionarAudio('SUB')">
-          <span class="audio-flag">🇯🇵</span>
           <span class="audio-label">Sub Español</span>
           <span class="audio-count-pill" id="count-audio-sub">0</span>
         </button>
         <button type="button" class="audio-btn" id="btn-audio-latino" onclick="seleccionarAudio('LATINO')">
-          <span class="audio-flag">🇲🇽</span>
           <span class="audio-label">Audio Latino</span>
           <span class="audio-count-pill" id="count-audio-lat">0</span>
         </button>
         <button type="button" class="audio-btn" id="btn-audio-best" onclick="seleccionarAudio('BEST')">
-          <span class="audio-flag">⚡</span>
           <span class="audio-label">Auto HD</span>
         </button>
       </div>
@@ -974,11 +967,11 @@
         </div>
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
           <a class="btn-alt-source" id="btn-open-external-stream" href="#" target="_blank" rel="noopener noreferrer" style="display:none;" title="Abrir reproductor directo en nueva pestaña">
-            <span>↗ Abrir</span>
+            <span>Abrir</span>
           </a>
-          <button type="button" class="btn-alt-source" id="btn-skip-85s" onclick="saltarSegundosPlayer(85)" title="Adelantar 85 segundos (Intro OP)">⏩ +85s</button>
+          <button type="button" class="btn-alt-source" id="btn-skip-85s" onclick="saltarSegundosPlayer(85)" title="Adelantar 85 segundos (Intro OP)">+85s</button>
           <button type="button" class="btn-alt-source" id="btn-autoskip-toggle" onclick="toggleAutoSkipIntro()" title="Activar/desactivar auto-salto de Intro/Outro">Auto-Salto: OFF</button>
-          <button type="button" class="btn-alt-source" id="btn-watch-together" onclick="toggleWatchTogetherPanel()" title="Ver sincronizado con amigos">👥 Watch Together</button>
+          <button type="button" class="btn-alt-source" id="btn-watch-together" onclick="toggleWatchTogetherPanel()" title="Ver sincronizado con amigos">Watch Together</button>
           <button type="button" class="btn-alt-source" id="btn-pip-toggle" onclick="togglePictureInPicture()" title="Mini reproductor flotante (Picture-in-Picture)">PiP</button>
           <button type="button" class="btn-alt-source" id="btn-copy-stream" onclick="copiarEnlaceStreaming()" title="Copiar enlace directo">
             <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
@@ -990,7 +983,7 @@
           </button>
           <button type="button" class="btn-alt-source" id="btn-alt-source" onclick="probarFuenteAlternativa()" title="Cambiar al siguiente servidor">
             <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
-            <span>Siguiente ⏭</span>
+            <span>Siguiente</span>
           </button>
         </div>
       </div>
@@ -1003,7 +996,7 @@
       <!-- SECCIÓN DE COMENTARIOS -->
       <div class="comments-section">
         <div class="comments-header">
-          <h4>💬 Comentarios del Episodio <span id="comments-count">(0)</span></h4>
+          <h4>Comentarios del Episodio <span id="comments-count">(0)</span></h4>
         </div>
 
         <div class="comment-box">
@@ -1013,16 +1006,16 @@
             <div class="comment-meta-bar">
               <label class="comment-spoiler-toggle">
                 <input type="checkbox" id="comment-spoiler-checkbox">
-                <span>⚠️ Marcar como spoiler</span>
+                <span>Marcar como spoiler</span>
               </label>
               <span class="comment-char-counter" id="comment-char-counter">0/500</span>
             </div>
             <div class="comment-actions">
               <div class="quick-reactions">
-                <button type="button" class="reaction-pill" onclick="insertarReaccion('🔥')">🔥 Épico</button>
-                <button type="button" class="reaction-pill" onclick="insertarReaccion('😭')">😭 Lloré</button>
-                <button type="button" class="reaction-pill" onclick="insertarReaccion('😱')">😱 Wow</button>
-                <button type="button" class="reaction-pill" onclick="insertarReaccion('❤️')">❤️ 10/10</button>
+                <button type="button" class="reaction-pill" onclick="insertarReaccion('Épico')">Épico</button>
+                <button type="button" class="reaction-pill" onclick="insertarReaccion('Emotivo')">Emotivo</button>
+                <button type="button" class="reaction-pill" onclick="insertarReaccion('Impresionante')">Impresionante</button>
+                <button type="button" class="reaction-pill" onclick="insertarReaccion('10/10')">10/10</button>
               </div>
               <button type="button" class="btn-send-comment" onclick="publicarComentario()">Publicar</button>
             </div>
@@ -1042,8 +1035,8 @@
       </button>
       <div style="font-size:14px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:46%;" id="lector-titulo">Capítulo 1</div>
       <div style="display:flex; gap:6px; align-items:center;">
-        <button type="button" class="chip" id="btn-lector-cache" style="font-size:11px; padding:5px 10px; font-weight:800;" onclick="toggleCacheCapituloActualLector(event)" aria-label="Guardar capítulo en caché sin conexión">💾 Guardar</button>
-        <button type="button" class="chip" style="font-size:11px; padding:5px 12px; font-weight:800;" onclick="abrirQuickCapsSheet(event)">📑 Caps ▾</button>
+        <button type="button" class="chip" id="btn-lector-cache" style="font-size:11px; padding:5px 10px; font-weight:800;" onclick="toggleCacheCapituloActualLector(event)" aria-label="Guardar capítulo en caché sin conexión">Guardar</button>
+        <button type="button" class="chip" style="font-size:11px; padding:5px 12px; font-weight:800;" onclick="abrirQuickCapsSheet(event)">Caps ▾</button>
         <button type="button" class="btn-circle lector-circle-btn" onclick="abrirAjustesLector(event)" title="Ajustes de Lectura" aria-label="Ajustes de lectura">
           <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
         </button>
@@ -1053,14 +1046,14 @@
     <div class="lector-content" id="lector-content"></div>
 
     <div class="lector-spread-controls hide" id="lector-spread-controls" onclick="event.stopPropagation()">
-      <button type="button" class="lector-spread-nav-btn" id="btn-spread-left" onclick="navegarSpreadLector('ArrowLeft', event)" aria-label="Página izquierda">◀</button>
-      <button type="button" class="lector-spread-nav-btn" id="btn-spread-right" onclick="navegarSpreadLector('ArrowRight', event)" aria-label="Página derecha">▶</button>
+      <button type="button" class="lector-spread-nav-btn" id="btn-spread-left" onclick="navegarSpreadLector('ArrowLeft', event)" aria-label="Página izquierda">←</button>
+      <button type="button" class="lector-spread-nav-btn" id="btn-spread-right" onclick="navegarSpreadLector('ArrowRight', event)" aria-label="Página derecha">→</button>
     </div>
 
     <div class="lector-floating-hud" id="lector-floating-hud">
-      <button type="button" class="lector-hud-btn" id="btn-lector-prev" onclick="navegarCapituloLector(-1, event)">⏮ Ant</button>
-      <div class="lector-hud-page" id="lector-page-indicator">📄 1 / 1 · 0%</div>
-      <button type="button" class="lector-hud-btn" id="btn-lector-next" onclick="navegarCapituloLector(1, event)">Sig ⏭</button>
+      <button type="button" class="lector-hud-btn" id="btn-lector-prev" onclick="navegarCapituloLector(-1, event)">← Ant</button>
+      <div class="lector-hud-page" id="lector-page-indicator">1 / 1 · 0%</div>
+      <button type="button" class="lector-hud-btn" id="btn-lector-next" onclick="navegarCapituloLector(1, event)">Sig →</button>
     </div>
 
     <div class="mihon-quick-caps-sheet" id="mihon-quick-caps-sheet" onclick="event.stopPropagation()">
@@ -1073,17 +1066,17 @@
 
     <div class="mihon-quick-caps-sheet" id="mihon-reader-settings-sheet" onclick="event.stopPropagation()">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:8px;">
-        <span style="font-weight:800; font-size:15px; color:#fff;">⚙️ Ajustes del Lector</span>
+        <span style="font-weight:800; font-size:15px; color:#fff;">Ajustes del Lector</span>
         <button type="button" class="btn-circle lector-sheet-close-btn" onclick="cerrarAjustesLector()" aria-label="Cerrar ajustes del lector">✕</button>
       </div>
       <div style="display:flex; flex-direction:column; gap:14px; margin-top:14px; max-height:66vh; overflow-y:auto;">
         <div>
           <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">MODO Y DIRECCIÓN DE LECTURA</div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button type="button" class="chip active" id="mode-webtoon-btn" onclick="setReaderMode('webtoon')">📜 Webtoon Cascada</button>
-            <button type="button" class="chip" id="mode-ltr-btn" onclick="setReaderMode('ltr')">📖 Paginado (LTR)</button>
-            <button type="button" class="chip" id="mode-rtl-btn" onclick="setReaderMode('rtl')">🇯🇵 Manga Tradicional (RTL)</button>
-            <button type="button" class="chip" id="mode-double-btn" onclick="setReaderMode('double')">📖 Doble Página</button>
+            <button type="button" class="chip active" id="mode-webtoon-btn" onclick="setReaderMode('webtoon')">Webtoon Cascada</button>
+            <button type="button" class="chip" id="mode-ltr-btn" onclick="setReaderMode('ltr')">Paginado (LTR)</button>
+            <button type="button" class="chip" id="mode-rtl-btn" onclick="setReaderMode('rtl')">Manga Tradicional (RTL)</button>
+            <button type="button" class="chip" id="mode-double-btn" onclick="setReaderMode('double')">Doble Página</button>
           </div>
         </div>
         <div>
@@ -1095,9 +1088,9 @@
         <div>
           <div style="font-size:12px; font-weight:700; color:#94a3b8; margin-bottom:6px;">COLOR DE FONDO</div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button type="button" class="chip active" id="bg-oled-btn" onclick="setReaderBg('#000000')">🖤 OLED Black</button>
-            <button type="button" class="chip" id="bg-dark-btn" onclick="setReaderBg('#0d1117')">🩶 Gris Oscuro</button>
-            <button type="button" class="chip" id="bg-light-btn" onclick="setReaderBg('#ffffff')">🤍 Blanco</button>
+            <button type="button" class="chip active" id="bg-oled-btn" onclick="setReaderBg('#000000')">OLED Black</button>
+            <button type="button" class="chip" id="bg-dark-btn" onclick="setReaderBg('#0d1117')">Gris Oscuro</button>
+            <button type="button" class="chip" id="bg-light-btn" onclick="setReaderBg('#ffffff')">Blanco</button>
           </div>
         </div>
         <div>

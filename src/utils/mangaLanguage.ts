@@ -220,9 +220,9 @@ export function lookupMangaCatalogStrict<T>(
 }
 
 /**
- * Separa estrictamente cada idioma para que el filtro "🇪🇸 Español" NUNCA mezcle capítulos
+ * Separa estrictamente cada idioma para que el filtro "Español" NUNCA mezcle capítulos
  * de Inglés (MangaPill / MangaDex EN) haciéndolos pasar por Español.
- * La pestaña "🌐 Todos" combina todos los idiomas priorizando Español primero, manteniendo
+ * La pestaña "Todos" combina todos los idiomas priorizando Español primero, manteniendo
  * intacto el campo real `lang` y `group` en cada capítulo.
  */
 export function buildStrictLanguageBuckets(input: {
@@ -252,8 +252,8 @@ export function buildStrictLanguageBuckets(input: {
       rawSpanish.push({
         ...c,
         lang: 'es',
-        group: c.group || 'ManhwaWeb ES 🇪🇸',
-        source: c.source || 'ManhwaWeb 🇪🇸'
+        group: c.group || 'ManhwaWeb ES',
+        source: c.source || 'ManhwaWeb'
       });
     }
   }
@@ -265,7 +265,7 @@ export function buildStrictLanguageBuckets(input: {
       rawSpanish.push({
         ...c,
         lang: 'es',
-        group: c.group || 'InManga Scan 🇪🇸'
+        group: c.group || 'InManga Scan'
       });
     }
   }
@@ -277,21 +277,18 @@ export function buildStrictLanguageBuckets(input: {
       rawEnglish.push({
         ...c,
         lang: 'en',
-        group: c.group || 'MangaPill HD 🇬🇧'
+        group: c.group || 'MangaPill HD'
       });
     }
   }
 
   // Within Spanish: prefer MangaDex ES first, then ManhwaWeb ES, then InManga ES, preserving alternatives in otherVersions
+  const isManhwaWebSource = (src?: string) => String(src || '').startsWith('ManhwaWeb');
+  const isInMangaSource = (src?: string) => String(src || '').startsWith('InManga');
   const spanishDexFirst = [
-    ...rawSpanish.filter(
-      (c) =>
-        c.source !== 'InManga 🇪🇸' &&
-        c.source !== 'InManga' &&
-        c.source !== 'ManhwaWeb 🇪🇸'
-    ),
-    ...rawSpanish.filter((c) => c.source === 'ManhwaWeb 🇪🇸'),
-    ...rawSpanish.filter((c) => c.source === 'InManga 🇪🇸' || c.source === 'InManga')
+    ...rawSpanish.filter((c) => !isInMangaSource(c.source) && !isManhwaWebSource(c.source)),
+    ...rawSpanish.filter((c) => isManhwaWebSource(c.source)),
+    ...rawSpanish.filter((c) => isInMangaSource(c.source))
   ];
   const englishDexFirst = [
     ...rawEnglish.filter((c) => c.source !== 'MangaPill'),

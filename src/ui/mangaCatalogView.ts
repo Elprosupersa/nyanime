@@ -465,7 +465,7 @@ export const MangaSourceManager = {
       name: 'MangaDex',
       badge: 'Oficial',
       desc: 'Catálogo global de la comunidad con soporte multilingüe (ES, EN, JA, KO).',
-      tags: ['🌐 Global', 'Oficial', 'Multi-idioma'],
+      tags: ['Global', 'Oficial', 'Multi-idioma'],
       speed: 'Alta',
       isOfficial: true
     },
@@ -474,7 +474,7 @@ export const MangaSourceManager = {
       name: 'Webtoon / Manhwa CDN',
       badge: 'Alta Velocidad',
       desc: 'Servidor CDN acelerado para manhwas y webtoons con páginas 100% alojadas y verificadas sin bloqueos DMCA.',
-      tags: ['⚡ CDN HD', '🇰🇷 Manhwas', '🇪🇸 Español'],
+      tags: ['CDN HD', 'Manhwas', 'Español'],
       speed: 'Ultra Rápida',
       isRecommended: true
     },
@@ -483,7 +483,7 @@ export const MangaSourceManager = {
       name: 'TuMangaOnline / InManga (Keiyoushi)',
       badge: 'Español Hub',
       desc: 'Red de extensiones de la comunidad en español (TMO, InManga, LectorManga, NineManga).',
-      tags: ['🇪🇸 Español', 'Comunidad', 'Scanlations'],
+      tags: ['Español', 'Comunidad', 'Scanlations'],
       speed: 'Alta'
     },
     {
@@ -491,7 +491,7 @@ export const MangaSourceManager = {
       name: 'MangaKakalot / Asura Global',
       badge: 'Al Día',
       desc: 'Capítulos al día con traducción rápida en inglés y español para obras de acción.',
-      tags: ['🇬🇧 English', 'Acción', 'Diario'],
+      tags: ['English', 'Acción', 'Diario'],
       speed: 'Media'
     }
   ],
@@ -523,7 +523,7 @@ export const MangaSourceManager = {
             <div class="mihon-source-desc">${escHtml(s.desc)}</div>
             <div class="mihon-source-tags">
               ${s.tags.map(t => `<span class="mihon-source-tag">${escHtml(t)}</span>`).join('')}
-              <span class="mihon-source-tag" style="color:#10b981;">⚡ ${escHtml(s.speed)}</span>
+              <span class="mihon-source-tag" style="color:#10b981;">${escHtml(s.speed)}</span>
             </div>
           </div>
           <div class="mihon-source-radio">${isActive ? '✓' : ''}</div>
@@ -678,9 +678,9 @@ export const InMangaProvider = {
               pages: 20,
               externalUrl: null,
               publishAt: regDate ? regDate.split('T')[0] : '2024',
-              group: 'InManga Scan 🇪🇸',
+              group: 'InManga Scan',
               lang: 'es',
-              source: 'InManga 🇪🇸'
+              source: 'InManga'
             };
           }).sort((a: any, b: any) => a.chapterNum - b.chapterNum);
         }
@@ -871,9 +871,9 @@ export const ManhwaWebProvider = {
         pages: 18,
         externalUrl: null,
         publishAt: '2025',
-        group: 'ManhwaWeb ES 🇪🇸',
+        group: 'ManhwaWeb ES',
         lang: 'es',
-        source: 'ManhwaWeb 🇪🇸'
+        source: 'ManhwaWeb'
       });
     }
     list.sort((a, b) => a.chapterNum - b.chapterNum);
@@ -1197,7 +1197,7 @@ export const MangaPillProvider = {
             pages: 22,
             externalUrl: null,
             publishAt: '2024',
-            group: 'MangaPill HD 🇬🇧',
+            group: 'MangaPill HD',
             lang: 'en',
             source: 'MangaPill'
           });
@@ -1501,7 +1501,7 @@ export const MangaDex = {
           year: m.attributes?.year || '2024',
           status: m.attributes?.status === 'completed' ? 'Finalizado' : 'En Emisión',
           origLang: m.attributes?.originalLanguage || 'ja',
-          flag: m.attributes?.originalLanguage === 'ko' ? '🇰🇷 Manhwa' : (m.attributes?.originalLanguage === 'zh' ? '🇨🇳 Manhua' : '🇯🇵 Manga'),
+          flag: m.attributes?.originalLanguage === 'ko' ? 'Manhwa' : (m.attributes?.originalLanguage === 'zh' ? 'Manhua' : 'Manga'),
           genres: (m.attributes?.tags || []).slice(0, 3).map((t: any) => t.attributes?.name?.en || 'Manga'),
           contentRating,
           isAdult: contentRating === 'erotica' || contentRating === 'pornographic',
@@ -1539,7 +1539,7 @@ export const MangaDex = {
           score: '8.5',
           year: m.attributes?.year || '2024',
           status: m.attributes?.status === 'completed' ? 'Finalizado' : 'En Emisión',
-          flag: m.attributes?.originalLanguage === 'ko' ? '🇰🇷 Manhwa' : '🇯🇵 Manga',
+          flag: m.attributes?.originalLanguage === 'ko' ? 'Manhwa' : 'Manga',
           genres: (m.attributes?.tags || []).slice(0, 3).map((t: any) => t.attributes?.name?.en || 'Acción'),
           contentRating,
           isAdult: contentRating === 'erotica' || contentRating === 'pornographic',
@@ -1667,12 +1667,12 @@ export const MangaDex = {
       };
       const spanish = dedup([
         ...dexChapters.filter(c => normLang(c.lang) === 'es'),
-        ...(mwebChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'ManhwaWeb ES 🇪🇸' })),
-        ...(inmangaChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'InManga Scan 🇪🇸' }))
+        ...(mwebChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'ManhwaWeb ES' })),
+        ...(inmangaChapters || []).map(c => ({ ...c, lang: 'es', group: c.group || 'InManga Scan' }))
       ]);
       const english = dedup([
         ...dexChapters.filter(c => normLang(c.lang) === 'en'),
-        ...(mpillChapters || []).map(c => ({ ...c, lang: 'en', group: c.group || 'MangaPill HD 🇬🇧' }))
+        ...(mpillChapters || []).map(c => ({ ...c, lang: 'en', group: c.group || 'MangaPill HD' }))
       ]);
       const japanese = dedup(dexChapters.filter(c => normLang(c.lang) === 'ja'));
       const korean = dedup(dexChapters.filter(c => normLang(c.lang) === 'ko'));
@@ -1918,7 +1918,7 @@ export const MangaDex = {
           try {
             const pages = await ManhwaWebProvider.getChapterPages(cId);
             if (pages && pages.length > 0) {
-              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: cand.group || 'ManhwaWeb ES 🇪🇸', chapterId: cId, source: 'ManhwaWeb 🇪🇸' };
+              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: cand.group || 'ManhwaWeb ES', chapterId: cId, source: 'ManhwaWeb' };
             }
           } catch {
             // next
@@ -1927,7 +1927,7 @@ export const MangaDex = {
           try {
             const pages = await InMangaProvider.getChapterPages(cId);
             if (pages && pages.length > 0) {
-              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: cand.group || 'InManga Scan 🇪🇸', chapterId: cId, source: 'InManga' };
+              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: cand.group || 'InManga Scan', chapterId: cId, source: 'InManga' };
             }
           } catch {
             // next
@@ -1936,7 +1936,7 @@ export const MangaDex = {
           try {
             const pages = await MangaPillProvider.getChapterPages(cId);
             if (pages && pages.length > 0) {
-              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: false, lang: 'en', group: cand.group || 'MangaPill HD 🇬🇧', chapterId: cId, source: 'MangaPill' };
+              return { pages, saverPages: pages, isDirect: true, slug, chap, isSpanish: false, lang: 'en', group: cand.group || 'MangaPill HD', chapterId: cId, source: 'MangaPill' };
             }
           } catch {
             // next
@@ -1948,7 +1948,7 @@ export const MangaDex = {
         try {
           const mwebPages = await ManhwaWebProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
           if (mwebPages && mwebPages.length > 0) {
-            return { pages: mwebPages, saverPages: mwebPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'ManhwaWeb ES 🇪🇸', source: 'ManhwaWeb 🇪🇸' };
+            return { pages: mwebPages, saverPages: mwebPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'ManhwaWeb ES', source: 'ManhwaWeb' };
           }
         } catch {
           // ignore
@@ -1956,7 +1956,7 @@ export const MangaDex = {
         try {
           const inmPages = await InMangaProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
           if (inmPages && inmPages.length > 0) {
-            return { pages: inmPages, saverPages: inmPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'InManga Scan 🇪🇸', source: 'InManga' };
+            return { pages: inmPages, saverPages: inmPages, isDirect: true, slug, chap, isSpanish: true, lang: 'es', group: 'InManga Scan', source: 'InManga' };
           }
         } catch {
           // ignore
@@ -2032,7 +2032,7 @@ export const MangaDex = {
         try {
           const mpPages = await MangaPillProvider.getPagesForChapter(mangaTitle, chap, effectiveAltTitles);
           if (mpPages && mpPages.length > 0) {
-            return { pages: mpPages, saverPages: mpPages, isDirect: true, slug, chap, isSpanish: false, lang: 'en', group: 'MangaPill HD 🇬🇧', source: 'MangaPill' };
+            return { pages: mpPages, saverPages: mpPages, isDirect: true, slug, chap, isSpanish: false, lang: 'en', group: 'MangaPill HD', source: 'MangaPill' };
           }
         } catch {
           // ignore
@@ -2116,9 +2116,9 @@ export const AniListMangaService = {
       const raw = json?.data?.Page?.media || [];
 
       const list = raw.map((m: any) => {
-        let flag = '🇯🇵 Manga';
-        if (m.countryOfOrigin === 'KR') flag = '🇰🇷 Manhwa';
-        else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
+        let flag = 'Manga';
+        if (m.countryOfOrigin === 'KR') flag = 'Manhwa';
+        else if (m.countryOfOrigin === 'CN') flag = 'Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
         const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
@@ -2207,9 +2207,9 @@ export const AniListMangaService = {
       const raw = json?.data?.Page?.media || [];
 
       const mapped = raw.map((m: any) => {
-        let flag = '🇯🇵 Manga';
-        if (m.countryOfOrigin === 'KR') flag = '🇰🇷 Manhwa';
-        else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
+        let flag = 'Manga';
+        if (m.countryOfOrigin === 'KR') flag = 'Manhwa';
+        else if (m.countryOfOrigin === 'CN') flag = 'Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
         const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
@@ -2335,9 +2335,9 @@ export const AniListMangaService = {
 
     const normalizeRaw = (raw: any[]) =>
       raw.map((m: any) => {
-        let flag = '🇯🇵 Manga';
-        if (m.countryOfOrigin === 'KR') flag = '🇰🇷 Manhwa';
-        else if (m.countryOfOrigin === 'CN') flag = '🇨🇳 Manhua';
+        let flag = 'Manga';
+        if (m.countryOfOrigin === 'KR') flag = 'Manhwa';
+        else if (m.countryOfOrigin === 'CN') flag = 'Manhua';
 
         const cleanTitle = m.title?.english || m.title?.romaji || m.title?.native || 'Manga';
         const altList = [m.title?.english, m.title?.native, ...(m.synonyms || []), m.title?.romaji].filter(Boolean);
@@ -2581,28 +2581,28 @@ export const KeiyoushiManager = {
         for (const m of baseCatalog) {
           const clean = InMangaProvider.cleanTitle(m.title);
           const match = inMangaKeys.some(k => clean.includes(InMangaProvider.cleanTitle(k)) || InMangaProvider.cleanTitle(k).includes(clean));
-          const mCopy = { ...m, flag: '🇪🇸 InManga', preferredSource: 'keiyoushi_hub', source: 'InManga' };
+          const mCopy = { ...m, flag: 'InManga', preferredSource: 'keiyoushi_hub', source: 'InManga' };
           if (match) priorizadas.push(mCopy);
           else resto.push(mCopy);
         }
         listaObras = [...priorizadas, ...resto];
       } else if (norm.includes('tumangaonline') || norm.includes('tmo') || norm.includes('lectormanga') || norm.includes('olympus') || norm.includes('ninemanga')) {
         const baseCatalog = await AniListMangaService.getCatalog('ALL');
-        listaObras = baseCatalog.map(m => ({ ...m, flag: '🇪🇸 ' + nombre.split(' ')[0], preferredSource: 'keiyoushi_hub', source: nombre }));
+        listaObras = baseCatalog.map(m => ({ ...m, flag: nombre.split(' ')[0], preferredSource: 'keiyoushi_hub', source: nombre }));
       } else if (norm.includes('asura') || norm.includes('manganato') || norm.includes('flame') || norm.includes('webtoon')) {
         const baseCatalog = await AniListMangaService.getCatalog('MANHWA');
-        listaObras = baseCatalog.map(m => ({ ...m, flag: '⚡ ' + nombre.split(' ')[0], preferredSource: 'asura_scans', source: nombre }));
+        listaObras = baseCatalog.map(m => ({ ...m, flag: nombre.split(' ')[0], preferredSource: 'asura_scans', source: nombre }));
       } else if (norm.includes('mangaplus')) {
         const baseCatalog = await AniListMangaService.getCatalog('ALL');
         const jumpTitles = ['one piece', 'jujutsu kaisen', 'chainsaw man', 'my hero academia', 'spy x family', 'dandadan', 'sakamoto days', 'kaiju', 'black clover', 'boruto'];
         listaObras = baseCatalog.map(m => {
           const clean = (m.title || '').toLowerCase();
           const isJump = jumpTitles.some(jt => clean.includes(jt));
-          return { ...m, flag: isJump ? '✨ Jump Oficial' : '📖 MangaPlus', preferredSource: 'mangadex', source: 'MangaPlus' };
+          return { ...m, flag: isJump ? 'Jump Oficial' : 'MangaPlus', preferredSource: 'mangadex', source: 'MangaPlus' };
         });
       } else {
         const baseCatalog = await AniListMangaService.getCatalog('ALL');
-        listaObras = baseCatalog.map(m => ({ ...m, flag: '🧩 ' + (nombre.length > 12 ? nombre.slice(0, 11) + '…' : nombre), source: nombre }));
+        listaObras = baseCatalog.map(m => ({ ...m, flag: nombre.length > 12 ? nombre.slice(0, 11) + '…' : nombre, source: nombre }));
       }
     } catch {
       listaObras = await AniListMangaService.getCatalog('ALL');
@@ -2641,8 +2641,8 @@ export function renderContinuarLeyendoManga(): void {
       <img class="manga-continue-thumb" src="${escHtml(safeImg(m.cover || fallback, fallback))}" alt="${safeTitle}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${fallback}';">
       <div class="manga-continue-info">
         <div class="manga-continue-title">${safeTitle}</div>
-        <div class="manga-continue-chap">▶ Continuar Cap. ${escHtml(item.chapterLabel)}${pageSuffix}</div>
-        <div class="manga-continue-meta">${readCount} caps leídos · ${escHtml(m.flag || '🇯🇵 Manga')}</div>
+        <div class="manga-continue-chap">Continuar Cap. ${escHtml(item.chapterLabel)}${pageSuffix}</div>
+        <div class="manga-continue-meta">${readCount} caps leídos · ${escHtml(m.flag || 'Manga')}</div>
       </div>
     `;
     listEl.appendChild(card);
@@ -2665,7 +2665,7 @@ export async function loadOfflineMangaCatalogList(): Promise<any[]> {
         genres: meta?.genres || ['Offline'],
         status: meta?.status || 'En Emisión',
         year: meta?.year || new Date(entry.latestAt || Date.now()).getFullYear(),
-        flag: meta?.flag || '💾 Offline',
+        flag: meta?.flag || 'Offline',
         origLang: meta?.origLang || 'ja',
         score: meta?.score || 'HD',
         preferredSource: meta?.preferredSource,
@@ -2718,10 +2718,10 @@ export async function cargarMangasYNovelas(forceRefresh = false): Promise<void> 
       container.className = 'grid';
       container.innerHTML = buildStateCardHtml({
         kind: 'error',
-        icon: '📡',
+        icon: '',
         title: 'Error cargando catálogo de lectura',
         message: 'No pudimos obtener las obras en este momento.',
-        retryLabel: '🔄 Reintentar',
+        retryLabel: 'Reintentar',
         retryOnClick: 'cargarMangasYNovelas(true)'
       });
     }
@@ -2801,10 +2801,10 @@ export async function cambiarTipoLectura(tipo: string, el: HTMLElement | null = 
       container.className = 'grid';
       container.innerHTML = buildStateCardHtml({
         kind: 'error',
-        icon: '📡',
+        icon: '',
         title: 'No se pudo cargar esta sección',
         message: 'Intenta recargar el catálogo nuevamente.',
-        retryLabel: '🔄 Reintentar',
+        retryLabel: 'Reintentar',
         retryOnClick: 'cargarMangasYNovelas(true)'
       });
     }
@@ -2875,7 +2875,7 @@ export function renderMangaFeaturedSpotlight(list: any[]): void {
         <img class="lectura-featured-poster" src="${escHtml(safeImg(cover, fallbackCover))}" alt="${safeTitle}" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${fallbackCover}';">
         <div class="lectura-featured-info">
           <div class="lectura-featured-kicker">
-            <span>DESTACADO · ${escHtml(featured.flag || '🇯🇵 Manga')}</span>
+            <span>DESTACADO · ${escHtml(featured.flag || 'Manga')}</span>
             <span>·</span>
             <span>★ ${escHtml(featured.score || '8.8')}</span>
             <span>·</span>
@@ -2884,9 +2884,9 @@ export function renderMangaFeaturedSpotlight(list: any[]): void {
           <div class="lectura-featured-title">${safeTitle}</div>
           <div class="lectura-featured-desc">${safeDesc}</div>
           <div class="lectura-featured-actions">
-            <button type="button" class="emision-btn-primary" id="btn-manga-spot-read">📖 Leer Ahora</button>
+            <button type="button" class="emision-btn-primary" id="btn-manga-spot-read">Leer Ahora</button>
             <button type="button" class="emision-btn-secondary ${isFav ? 'reminded' : ''}" id="btn-manga-spot-fav">
-              ${isFav ? '❤️ En Biblioteca' : '🤍 Añadir a Biblioteca'}
+              ${isFav ? 'En Biblioteca' : 'Añadir a Biblioteca'}
             </button>
             <div class="lectura-spotlight-dots">
               ${topCandidates.map((_, i) => `
@@ -3011,10 +3011,10 @@ export function onMangaSearchInput(val: string): void {
         container.className = 'grid';
         container.innerHTML = buildStateCardHtml({
           kind: 'error',
-          icon: '📡',
+          icon: '',
           title: 'Error en la búsqueda de mangas',
           message: 'Comprueba tu conexión e inténtalo de nuevo.',
-          retryLabel: '🔄 Reintentar',
+          retryLabel: 'Reintentar',
           retryOnClick: 'recargarCatalogoManga()'
         });
       }
@@ -3068,12 +3068,12 @@ export function renderGridLectura(customList: any[] | null = null): void {
     const isOfflineTab = state.tipoLecturaActual === 'OFFLINE';
     container.innerHTML = buildStateCardHtml({
       kind: 'empty',
-      icon: isOfflineTab ? '💾' : '📖',
+      icon: '',
       title: isOfflineTab ? 'Aún no tienes capítulos en caché' : 'No se encontraron obras con estos filtros',
       message: isOfflineTab
-        ? 'Abre cualquier manga y pulsa 📥 en un capítulo (o "💾 Guardar" dentro del lector) para leerlo sin conexión.'
+        ? 'Abre cualquier manga y pulsa Guardar en un capítulo (o dentro del lector) para leerlo sin conexión.'
         : 'Prueba seleccionando "Todos los géneros" o recargando el catálogo.',
-      retryLabel: isOfflineTab ? undefined : '🔄 Recargar catálogo',
+      retryLabel: isOfflineTab ? undefined : 'Recargar catálogo',
       retryOnClick: isOfflineTab ? undefined : 'recargarCatalogoManga()'
     });
     return;
@@ -3083,13 +3083,13 @@ export function renderGridLectura(customList: any[] | null = null): void {
     container.className = 'manga-editorial-grid';
     container.innerHTML = filtered.map((m, index) => {
       const isFav = MangaFavoritesManager.isFavorite(m.id);
-      const fallbackCardCover = generarPortadaSVG(m.title, m.origLang, m.flag?.split(' ')[1] || 'Manga');
+      const fallbackCardCover = generarPortadaSVG(m.title, m.origLang, m.flag || 'Manga');
       const displayCover = safeImg(m.cover || fallbackCardCover, fallbackCardCover);
       const safeTitle = escHtml(m.title || 'Manga');
       const genresTxt = escHtml((m.genres || []).slice(0, 3).join(' · ') || 'Acción · Fantasía');
       const readCount = MangaReadStateManager.getReadChapters(m.id).size;
       const offlineMeta = m.offlineChaptersCount > 0
-        ? `💾 ${m.offlineChaptersCount} en caché (${formatBytesHuman(m.offlineSizeBytes || 0)})`
+        ? `${m.offlineChaptersCount} en caché (${formatBytesHuman(m.offlineSizeBytes || 0)})`
         : '';
       const readLabel = offlineMeta || (readCount > 0 ? `${readCount} caps leídos` : (m.chaptersCount > 0 ? `${m.chaptersCount} caps` : 'Capítulos HD'));
 
@@ -3099,7 +3099,7 @@ export function renderGridLectura(customList: any[] | null = null): void {
           <div class="manga-editorial-body">
             <div>
               <div class="manga-editorial-top">
-                <span>${escHtml(m.flag || '🇯🇵 Manga')} · ${escHtml(m.status || 'En Emisión')}</span>
+                <span>${escHtml(m.flag || 'Manga')} · ${escHtml(m.status || 'En Emisión')}</span>
                 <span>★ ${escHtml(m.score || '8.6')}</span>
               </div>
               <div class="manga-editorial-title" title="${safeTitle}">${safeTitle}</div>
@@ -3109,8 +3109,8 @@ export function renderGridLectura(customList: any[] | null = null): void {
             <div class="manga-editorial-footer">
               <span>${escHtml(readLabel)} · ${escHtml(m.year || '2024')}</span>
               <div style="display:flex; gap:6px; align-items:center;">
-                <button type="button" class="schedule-watch-btn" onclick="event.stopPropagation(); abrirMangaPorIndice(${index})">📖 Leer</button>
-                <button type="button" class="schedule-action-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoritoMangaCardPorIndice(${index})" aria-label="Guardar en biblioteca">${isFav ? '❤️' : '🤍'}</button>
+                <button type="button" class="schedule-watch-btn" onclick="event.stopPropagation(); abrirMangaPorIndice(${index})">Leer</button>
+                <button type="button" class="schedule-action-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoritoMangaCardPorIndice(${index})" aria-label="Guardar en biblioteca">${isFav ? '★' : '☆'}</button>
               </div>
             </div>
           </div>
@@ -3123,27 +3123,27 @@ export function renderGridLectura(customList: any[] | null = null): void {
   container.className = 'grid';
   container.innerHTML = filtered.map((m, index) => {
     const isFav = MangaFavoritesManager.isFavorite(m.id);
-    const fallbackCardCover = generarPortadaSVG(m.title, m.origLang, m.flag?.split(' ')[1] || 'Manga');
+    const fallbackCardCover = generarPortadaSVG(m.title, m.origLang, m.flag || 'Manga');
     const displayCover = safeImg(m.cover || fallbackCardCover, fallbackCardCover);
     const readCount = MangaReadStateManager.getReadChapters(m.id).size;
     const totalCapsBadge = m.offlineChaptersCount > 0
-      ? `💾 ${m.offlineChaptersCount} caps · ${formatBytesHuman(m.offlineSizeBytes || 0)}`
+      ? `${m.offlineChaptersCount} caps · ${formatBytesHuman(m.offlineSizeBytes || 0)}`
       : readCount > 0
         ? `✓ ${readCount} leídos`
-        : (m.chaptersCount > 0 ? `📖 ${m.chaptersCount} caps` : (m.flag?.includes('Manhwa') ? '⚡ Webtoon' : '📖 HD'));
+        : (m.chaptersCount > 0 ? `${m.chaptersCount} caps` : (m.flag?.includes('Manhwa') ? 'Webtoon' : 'HD'));
     const safeTitle = escHtml(m.title || 'Manga');
     const offlinePill = m.offlineChaptersCount > 0
-      ? `<div class="card-offline-pill">💾 ${m.offlineChaptersCount} Offline</div>`
+      ? `<div class="card-offline-pill">${m.offlineChaptersCount} Offline</div>`
       : '';
 
     return `
       <div class="card-h" onclick="abrirMangaPorIndice(${index})">
         <div class="card-h-cover-wrap">
           <img src="${escHtml(displayCover)}" class="card-h-cover" loading="lazy" alt="${safeTitle}" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src='${fallbackCardCover}';"/>
-          <div class="card-badge" style="background: rgba(0,0,0,0.75); color: #fff;">${escHtml(m.flag || '🇯🇵 Manga')}</div>
+          <div class="card-badge" style="background: rgba(0,0,0,0.75); color: #fff;">${escHtml(m.flag || 'Manga')}</div>
           <div class="card-score">★ ${escHtml(m.score || '8.6')}</div>
           ${offlinePill}
-          <div class="card-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoritoMangaCardPorIndice(${index})">${isFav ? '❤️' : '🤍'}</div>
+          <div class="card-fav-btn ${isFav ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoritoMangaCardPorIndice(${index})">${isFav ? '★' : '☆'}</div>
         </div>
         <div class="card-h-info">
           <div class="card-h-title" title="${safeTitle}">${safeTitle}</div>

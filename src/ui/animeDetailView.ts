@@ -109,13 +109,13 @@ export function aplicarMetadatosTemporadaUI(seasonOrMedia: any, fallbackAnime: a
 
   if (fmt) badgesContainer.innerHTML += `<span class="badge-pill">${escHtml(fmt)}</span>`;
   if (scoreVal) badgesContainer.innerHTML += `<span class="badge-pill">★ ${(Number(scoreVal) / 10).toFixed(1)}</span>`;
-  if (st === 'RELEASING') badgesContainer.innerHTML += '<span class="badge-pill status-releasing">🟢 En Emisión</span>';
-  else if (st === 'NOT_YET_RELEASED') badgesContainer.innerHTML += '<span class="badge-pill">🗓️ Próximamente</span>';
+  if (st === 'RELEASING') badgesContainer.innerHTML += '<span class="badge-pill status-releasing">En Emisión</span>';
+  else if (st === 'NOT_YET_RELEASED') badgesContainer.innerHTML += '<span class="badge-pill">Próximamente</span>';
   else if (st === 'FINISHED') badgesContainer.innerHTML += '<span class="badge-pill">Finalizado</span>';
 
   if (st === 'RELEASING' && nextAiring?.timeUntilAiring && nWin.NyAnimeVideoSources?.formatAiringCountdown) {
     const countdown = nWin.NyAnimeVideoSources.formatAiringCountdown(nextAiring.timeUntilAiring, nextAiring.episode);
-    if (countdown) badgesContainer.innerHTML += `<span class="badge-pill status-releasing">⏱️ ${escHtml(countdown)}</span>`;
+    if (countdown) badgesContainer.innerHTML += `<span class="badge-pill status-releasing">${escHtml(countdown)}</span>`;
   }
 
   const genres: string[] =
@@ -136,13 +136,13 @@ export function actualizarBotonContinuarDetalleAnime(): void {
   const watchedCount = Array.from(watchedSet).filter((n) => n >= 1 && n <= total).length;
 
   if (pill) {
-    pill.textContent = total > 0 ? `📺 ${watchedCount} / ${total} vistos` : 'Próximamente';
+    pill.textContent = total > 0 ? `${watchedCount} / ${total} vistos` : 'Próximamente';
   }
 
   if (total === 0 || season.isUpcoming) {
     btn.disabled = true;
     btn.style.opacity = '0.5';
-    btn.textContent = '🗓️ Próximamente';
+    btn.textContent = 'Próximamente';
     return;
   }
 
@@ -157,11 +157,11 @@ export function actualizarBotonContinuarDetalleAnime(): void {
     }
   }
   if (watchedCount === 0) {
-    btn.textContent = '▶ Empezar Episodio 1';
+    btn.textContent = 'Empezar Episodio 1';
   } else if (watchedCount >= total) {
     btn.textContent = '↻ Volver a ver Episodio 1';
   } else {
-    btn.textContent = `▶ Continuar · Episodio ${nextEp}`;
+    btn.textContent = `Continuar · Episodio ${nextEp}`;
   }
 }
 
@@ -767,7 +767,7 @@ export function renderAnimeDetailPersonalPanel(targetId: number | string): void 
   panel.innerHTML = `
     <div class="det-personal-row">
       <button type="button" class="det-personal-score-btn ${userScore ? 'has-score' : ''}" onclick="abrirModalResenaPersonal('anime', '${idStr}')">
-        <span>${userScore ? `⭐ ${userScore}/10` : '☆ Calificar 1–10'}</span>
+        <span>${userScore ? `★ ${userScore}/10` : '☆ Calificar 1–10'}</span>
         <span>·</span>
         <span>${userReview || userNotes ? 'Editar reseña / nota' : 'Reseña y nota privada'}</span>
       </button>
@@ -1032,7 +1032,7 @@ export function renderDetalleEpisodios(): void {
 
   if (season.isUpcoming || season.totalEpisodes === 0) {
     epContainer.innerHTML = season.isUpcoming
-      ? '<div style="grid-column: 1/-1; text-align:center; color:#cbd5e1; padding:18px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px;">🗓️ Estreno programado · Próximamente disponible para ver.</div>'
+      ? '<div style="grid-column: 1/-1; text-align:center; color:#cbd5e1; padding:18px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px;">Estreno programado · Próximamente disponible para ver.</div>'
       : '<div style="grid-column: 1/-1; text-align:center; color:var(--text-muted); padding:15px;">Aún no se han emitido episodios para este título.</div>';
     return;
   }
@@ -1223,7 +1223,7 @@ function syncProgressPanelUI(): void {
 
   if (pauseBtn) {
     pauseBtn.classList.toggle('hide', !snap.isRunning);
-    pauseBtn.textContent = snap.isPaused ? '▶ Reanudar' : '⏸ Pausar';
+    pauseBtn.textContent = snap.isPaused ? 'Reanudar' : 'Pausar';
   }
   if (minBtn) {
     minBtn.classList.toggle('hide', !snap.isRunning);
@@ -1322,7 +1322,7 @@ function renderStorageQuotaBanner(el: HTMLElement | null, quota: StorageQuotaAss
   el.style.background = isDanger ? 'rgba(239, 68, 68, 0.14)' : 'rgba(245, 158, 11, 0.14)';
   el.style.border = isDanger ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid rgba(245, 158, 11, 0.45)';
   el.style.color = isDanger ? '#fca5a5' : '#fde68a';
-  el.textContent = `${isDanger ? '⚠️' : '💾'} ${quota.message}`;
+  el.textContent = quota.message;
   el.classList.remove('hide');
 }
 
@@ -1573,9 +1573,9 @@ export function togglePausaDescargaTemporada(): void {
   }
   if (!seasonDownloadPaused) {
     resumePauseWaiters();
-    showToast('Descarga reanudada ▶');
+    showToast('Descarga reanudada');
   } else {
-    showToast('Descarga en pausa ⏸');
+    showToast('Descarga en pausa');
   }
   syncProgressPanelUI();
   notifyDownloadManagerLive(true);
@@ -1783,11 +1783,11 @@ async function runDownloadEpisodesBatch(episodes: number[], options?: {
   if (destination !== 'device') {
     const quotaCheck = await actualizarAvisoCuotaAnime(episodes.length, videoPref, destination);
     if (quotaCheck.status === 'insufficient') {
-      showToast(`⚠️ ${quotaCheck.message}`);
+      showToast(quotaCheck.message);
       return;
     }
     if (quotaCheck.status === 'low') {
-      showToast(`💾 ${quotaCheck.message}`);
+      showToast(quotaCheck.message);
     }
   }
 
@@ -2068,7 +2068,7 @@ async function runDownloadEpisodesBatch(episodes: number[], options?: {
     if (isQuotaExceededError(err)) {
       await DownloadManager.updateBadge();
       void actualizarAvisoCuotaAnime(episodes.length, videoPref, destination);
-      showToast(`⚠️ ${err?.message || 'Espacio insuficiente en el dispositivo. Descarga detenida y limpiada.'}`);
+      showToast(err?.message || 'Espacio insuficiente en el dispositivo. Descarga detenida y limpiada.');
     } else if (err?.name !== 'AbortError') {
       showToast(`Error en descarga: ${err?.message || err}`);
     }

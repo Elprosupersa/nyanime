@@ -30,9 +30,10 @@ describe('libraryEnhancements', () => {
   });
 
   it('creates custom lists and toggles membership cleanly', () => {
-    const list = buildCustomList('Top Isekai 2026', { icon: '🔥', nowMs: 1000 });
+    const list = buildCustomList('Top Isekai 2026', { icon: 'Top', nowMs: 1000 });
     expect(list).not.toBeNull();
     expect(list?.name).toBe('Top Isekai 2026');
+    expect(list?.icon).toBe('Top');
 
     const added = toggleItemInCustomList([], list!.id);
     expect(added.added).toBe(true);

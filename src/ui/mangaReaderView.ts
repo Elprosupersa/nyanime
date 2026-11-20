@@ -107,13 +107,13 @@ export function updateLectorCacheButton(isCached: boolean, isSaving = false): vo
   btn.disabled = isSaving;
   btn.classList.toggle('cached', isCached && !isSaving);
   if (isSaving) {
-    btn.textContent = '⏳ Guardando...';
+    btn.textContent = 'Guardando...';
     btn.setAttribute('aria-label', 'Guardando capítulo en caché');
   } else if (isCached) {
-    btn.textContent = '💾 Offline ✓';
+    btn.textContent = 'Offline ✓';
     btn.setAttribute('aria-label', 'Capítulo guardado en caché sin conexión (toca para eliminar)');
   } else {
-    btn.textContent = '💾 Guardar';
+    btn.textContent = 'Guardar';
     btn.setAttribute('aria-label', 'Guardar capítulo en caché sin conexión');
   }
 }
@@ -163,7 +163,7 @@ export async function toggleCacheCapituloActualLector(event?: Event): Promise<vo
 
     let pageUrls: string[] = [];
     let fallbackUrls: string[] = [];
-    let resolvedGroup = capitulo.group || 'Offline 💾';
+    let resolvedGroup = capitulo.group || 'Offline';
 
     if (
       lastResolvedReaderPages &&
@@ -224,7 +224,7 @@ export async function toggleCacheCapituloActualLector(event?: Event): Promise<vo
       await refreshOfflineMangaDetailState(activeManga);
       renderCapitulosMangaModal();
     }
-    showToast(`💾 Cap. ${capitulo.chapter} guardado en caché para leer sin conexión.`);
+    showToast(`Cap. ${capitulo.chapter} guardado en caché para leer sin conexión.`);
   } catch (err: any) {
     updateLectorCacheButton(Boolean(readerCurrentOfflineManifestId), false);
     showToast(`Error guardando capítulo: ${err?.message || err}`);
@@ -394,7 +394,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       resPages = {
         pages: offlineMatch.pages,
         saverPages: [],
-        group: 'Offline 💾',
+        group: 'Offline',
         chapterId: capitulo.id
       };
       isOfflineServed = true;
@@ -437,7 +437,7 @@ export async function abrirLectorManga(idx: number): Promise<void> {
   if (resPages?.chapterId && capitulo.id !== resPages.chapterId) capitulo.id = resPages.chapterId;
   if (resPages?.group && capitulo.group !== resPages.group) capitulo.group = resPages.group;
   if (titulo) {
-    const scanGroup = isOfflineServed ? 'Offline 💾' : (capitulo.group || (capitulo.source === 'InManga' ? 'InManga Scan 🇪🇸' : 'Oficial'));
+    const scanGroup = isOfflineServed ? 'Offline' : (capitulo.group || (capitulo.source === 'InManga' ? 'InManga Scan' : 'Oficial'));
     titulo.textContent = `${activeManga?.title || 'Manga'} · Cap. ${capitulo.chapter} (${scanGroup})`;
   }
 
@@ -450,16 +450,15 @@ export async function abrirLectorManga(idx: number): Promise<void> {
       const safeExternalArg = escHtml(String(capitulo.externalUrl || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
       content.innerHTML = `
         <div class="ny-state-card is-error" style="max-width:440px; margin:44px auto;">
-          <div class="ny-state-icon">📑</div>
           <div class="ny-state-title">Servidor de lectura no disponible</div>
           <div class="ny-state-message">
             No se pudieron cargar páginas para este capítulo en el idioma seleccionado. Puedes reintentar, cambiar de fuente o abrir la versión en Inglés si está disponible.
           </div>
           <div class="ny-state-actions" style="flex-direction:column; width:100%; max-width:280px;">
-            <button type="button" class="ny-retry-btn" style="width:100%;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">🔄 Reintentar carga</button>
-            ${enFallbackCap ? `<button type="button" class="chip" style="width:100%; padding:10px 16px; border-color:rgba(255,255,255,0.22); color:#fff;" onclick="cambiarAVersionInglesCapitulo(${Number(enFallbackCap.chapterNum)})">🇬🇧 Leer Cap. ${escHtml(enFallbackCap.chapter)} en Inglés</button>` : ''}
-            <button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="mostrarModalFuentesManga()">🌐 Cambiar de fuente</button>
-            ${capitulo.externalUrl ? `<button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="handleOpenExternal('${safeExternalArg}')">📖 Abrir en portal oficial (${escHtml(capitulo.group || 'Oficial')})</button>` : ''}
+            <button type="button" class="ny-retry-btn" style="width:100%;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">Reintentar carga</button>
+            ${enFallbackCap ? `<button type="button" class="chip" style="width:100%; padding:10px 16px; border-color:rgba(255,255,255,0.22); color:#fff;" onclick="cambiarAVersionInglesCapitulo(${Number(enFallbackCap.chapterNum)})">Leer Cap. ${escHtml(enFallbackCap.chapter)} en Inglés</button>` : ''}
+            <button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="mostrarModalFuentesManga()">Cambiar de fuente</button>
+            ${capitulo.externalUrl ? `<button type="button" class="chip" style="width:100%; padding:10px 16px;" onclick="handleOpenExternal('${safeExternalArg}')">Abrir en portal oficial (${escHtml(capitulo.group || 'Oficial')})</button>` : ''}
           </div>
         </div>
       `;
@@ -549,7 +548,7 @@ export function renderActiveMangaReaderPages(restorePage = 1): void {
       .join('');
 
     const initialPct = activeReaderPages.length > 0 ? Math.round(((targetPage - 1) / activeReaderPages.length) * 100) : 0;
-    if (pageInd) pageInd.textContent = `📄 ${targetPage} / ${activeReaderPages.length} · ${initialPct}%`;
+    if (pageInd) pageInd.textContent = `${targetPage} / ${activeReaderPages.length} · ${initialPct}%`;
     setupLectorPageObserver(activeReaderPages.length);
 
     if (targetPage > 1 && lector) {
@@ -602,7 +601,7 @@ function renderCurrentSpread(): void {
   lastTrackedReaderPage = currentPage;
   const pct = activeReaderPages.length > 0 ? Math.round(((spread.pageNumbers[spread.pageNumbers.length - 1]) / activeReaderPages.length) * 100) : 0;
   if (pageInd) {
-    pageInd.textContent = `📖 ${formatSpreadLabel(spread, activeReaderPages.length)} · ${pct}%`;
+    pageInd.textContent = `${formatSpreadLabel(spread, activeReaderPages.length)} · ${pct}%`;
   }
 
   const activeManga = getActiveManga();
@@ -848,11 +847,11 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
         let esGroupLabel = '';
         if (!alreadyManhwaWeb) {
           esPages = await ManhwaWebProvider.getPagesForChapter(title, chap, activeManga?.altTitles);
-          esGroupLabel = 'ManhwaWeb ES 🇪🇸';
+          esGroupLabel = 'ManhwaWeb ES';
         }
         if ((!esPages || esPages.length === 0) && !alreadyInManga) {
           esPages = await InMangaProvider.getPagesForChapter(title, chap, activeManga?.altTitles);
-          esGroupLabel = 'InManga Scan 🇪🇸';
+          esGroupLabel = 'InManga Scan';
         }
         if (esPages?.length > 0) {
           mostrarToast(`Cargando capítulo desde ${esGroupLabel}...`, 'info');
@@ -889,18 +888,17 @@ export async function handleMangaImgError(imgEl: HTMLImageElement): Promise<void
     );
     const pageInd = document.getElementById('lector-page-indicator');
     if (pageInd && visibleWraps.length > 0) {
-      pageInd.textContent = `📄 1 / ${visibleWraps.length} · 0%`;
+      pageInd.textContent = `1 / ${visibleWraps.length} · 0%`;
     } else if (visibleWraps.length === 0 && contentEl) {
       contentEl.innerHTML = `
         <div style="text-align:center; padding:50px 20px; color:#94a3b8;">
-          <div style="font-size:36px; margin-bottom:12px;">📑</div>
           <div style="font-size:17px; font-weight:700; color:#fff; margin-bottom:8px;">No se pudieron cargar las imágenes</div>
           <div style="font-size:13px; line-height:1.5; color:#cbd5e1; max-width:340px; margin:0 auto 20px;">
             El servidor de imágenes está ocupado o temporalmente inaccesible. Reintenta o cambia de servidor.
           </div>
           <div style="display:flex; flex-direction:column; gap:10px; max-width:260px; margin:0 auto;">
-            <button class="chip active" style="padding:10px 16px; font-weight:600;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">🔄 Reintentar Capítulo</button>
-            <button class="chip" style="padding:10px 16px;" onclick="mostrarModalFuentesManga()">🌐 Cambiar Fuente</button>
+            <button class="chip active" style="padding:10px 16px; font-weight:600;" onclick="abrirLectorManga(${mangaUiState.capituloActualIdx})">Reintentar Capítulo</button>
+            <button class="chip" style="padding:10px 16px;" onclick="mostrarModalFuentesManga()">Cambiar Fuente</button>
           </div>
         </div>
       `;
@@ -1018,7 +1016,7 @@ export function setupLectorPageObserver(totalPages: number): void {
 
     lastTrackedReaderPage = currentPage;
     const currentTotal = pageWraps.length;
-    pageInd.textContent = `📄 ${currentPage} / ${currentTotal} · ${progress}%`;
+    pageInd.textContent = `${currentPage} / ${currentTotal} · ${progress}%`;
 
     const now = Date.now();
     if (now - lastSavedPageWriteAt >= 800) {
@@ -1044,7 +1042,7 @@ export function setupLectorPageObserver(totalPages: number): void {
       isContinuousAdvancing = true;
       const nextIdx = mangaUiState.capituloActualIdx + 1;
       const nextCap = mangaUiState.capitulosLectorList[nextIdx];
-      mostrarToast(`📖 Cargando siguiente capítulo (Cap. ${nextCap?.chapter || nextIdx + 1})...`, 'info');
+      mostrarToast(`Cargando siguiente capítulo (Cap. ${nextCap?.chapter || nextIdx + 1})...`, 'info');
       setTimeout(() => {
         void abrirLectorManga(nextIdx);
       }, 320);
@@ -1105,8 +1103,8 @@ export function populateQuickCapsSheet(): void {
       const isCached = cachedSet.has(String(Number(c.chapterNum ?? 0)));
       return `
         <div class="mihon-quick-cap-item ${isActive ? 'active' : ''}" onclick="saltarACapituloDesdeSheet(${i})">
-          <span>${isCached ? '💾 ' : ''}Capítulo ${escHtml(c.chapter)} ${c.title ? `· ${escHtml(c.title)}` : ''}</span>
-          <span>${isActive ? 'Leyendo ▶' : (isCached ? 'Offline ✓' : (c.pages ? `${c.pages}p` : ''))}</span>
+          <span>Capítulo ${escHtml(c.chapter)} ${c.title ? `· ${escHtml(c.title)}` : ''}</span>
+          <span>${isActive ? 'Leyendo' : (isCached ? 'Offline ✓' : (c.pages ? `${c.pages}p` : ''))}</span>
         </div>
       `;
     }).join('');
@@ -1228,10 +1226,10 @@ export function setReaderMode(mode: string, skipCloud = false): void {
   persistReaderSettings(skipCloud);
   if (!skipCloud) {
     const labelMap: Record<MangaReaderMode, string> = {
-      webtoon: '📜 Modo Webtoon Continuo Activado',
-      ltr: '📖 Paginado Izquierda → Derecha',
-      rtl: '🇯🇵 Manga Tradicional Derecha → Izquierda',
-      double: '📖 Lectura Doble Página (Manga)'
+      webtoon: 'Modo Webtoon Continuo Activado',
+      ltr: 'Paginado Izquierda → Derecha',
+      rtl: 'Manga Tradicional Derecha → Izquierda',
+      double: 'Lectura Doble Página (Manga)'
     };
     mostrarToast(labelMap[cleanMode], 'success');
   }

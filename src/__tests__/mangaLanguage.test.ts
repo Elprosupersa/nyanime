@@ -92,7 +92,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
         chapterNum: 1,
         title: 'Capítulo 1',
         pages: 24,
-        group: 'ManhwaWeb ES 🇪🇸',
+        group: 'ManhwaWeb ES',
         lang: 'es',
         source: 'ManhwaWeb'
       },
@@ -102,7 +102,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
         chapterNum: 2,
         title: 'Capítulo 2',
         pages: 26,
-        group: 'ManhwaWeb ES 🇪🇸',
+        group: 'ManhwaWeb ES',
         lang: 'es',
         source: 'ManhwaWeb'
       }
@@ -151,7 +151,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
       chapterNum: idx + 1,
       title: `Chapter ${idx + 1}`,
       pages: 22,
-      group: 'MangaPill HD 🇬🇧',
+      group: 'MangaPill HD',
       lang: 'en',
       source: 'MangaPill'
     }));
@@ -170,7 +170,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
     // English holds all 224 English chapters cleanly
     expect(buckets.english).toHaveLength(224);
     expect(buckets.english[0].chapterNum).toBe(1);
-    expect(buckets.english[0].group).toBe('MangaPill HD 🇬🇧');
+    expect(buckets.english[0].group).toBe('MangaPill HD');
   });
 
   it('locks page candidates strictly to the active language tab and permits cross-language only under "all"', () => {
@@ -180,7 +180,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
       chapterNum: 5,
       title: 'Cap 5',
       pages: 20,
-      group: 'InManga Scan 🇪🇸',
+      group: 'InManga Scan',
       lang: 'es',
       source: 'InManga',
       otherVersions: [
@@ -190,7 +190,7 @@ describe('mangaLanguage — Strict Language Isolation & Title Matching', () => {
           chapterNum: 5,
           title: 'Chapter 5',
           pages: 20,
-          group: 'MangaPill HD 🇬🇧',
+          group: 'MangaPill HD',
           lang: 'en',
           source: 'MangaPill'
         }

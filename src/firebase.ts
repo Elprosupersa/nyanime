@@ -809,7 +809,7 @@ async function syncMangaFavoritesBidirectional(uid: string): Promise<void> {
           title: cloudItem.title,
           cover: cloudItem.cover,
           banner: cloudItem.cover,
-          flag: cloudItem.flag || '🇯🇵 Manga',
+          flag: cloudItem.flag || 'Manga',
           origLang: cloudItem.origLang || 'jp',
           score: cloudItem.score || '8.6',
           status: cloudItem.status || 'En Emisión',
@@ -895,7 +895,7 @@ async function syncCustomListsBidirectional(uid: string): Promise<void> {
         listId,
         name: sanitizeShortText(l.name, 48) || 'Lista',
         color: String(l.color || '#ff1a40').slice(0, 24),
-        icon: String(l.icon || '📁').slice(0, 16),
+        icon: String(l.icon || 'Lista').slice(0, 16),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -910,7 +910,7 @@ async function syncCustomListsBidirectional(uid: string): Promise<void> {
           id: listId,
           name: String(cloud.name || 'Lista'),
           color: String(cloud.color || '#ff1a40'),
-          icon: String(cloud.icon || '📁'),
+          icon: String(cloud.icon || 'Lista'),
           createdAt: Date.now(),
           updatedAt: Date.now()
         });
@@ -1123,7 +1123,7 @@ async function syncMangaProgressBidirectional(uid: string): Promise<void> {
           mangaId: docId,
           mangaTitle: String(manga.title || 'Manga').slice(0, 240),
           cover: String(manga.cover || '').slice(0, 600),
-          flag: String(manga.flag || '🇯🇵 Manga').slice(0, 40),
+          flag: String(manga.flag || 'Manga').slice(0, 40),
           origLang: String(manga.origLang || 'jp').slice(0, 16),
           lastChapterNum: Number(entry.chapterNum || 1),
           lastChapterLabel: String(entry.chapterLabel || '1').slice(0, 32),
@@ -1139,7 +1139,7 @@ async function syncMangaProgressBidirectional(uid: string): Promise<void> {
         await updateDoc(ref, {
           mangaTitle: String(manga.title || cloudItem.mangaTitle || 'Manga').slice(0, 240),
           cover: String(manga.cover || cloudItem.cover || '').slice(0, 600),
-          flag: String(manga.flag || cloudItem.flag || '🇯🇵 Manga').slice(0, 40),
+          flag: String(manga.flag || cloudItem.flag || 'Manga').slice(0, 40),
           origLang: String(manga.origLang || cloudItem.origLang || 'jp').slice(0, 16),
           lastChapterNum: localTs >= cloudTs ? Number(entry.chapterNum || 1) : Number(cloudItem.lastChapterNum || 1),
           lastChapterLabel:
@@ -1177,7 +1177,7 @@ async function syncMangaProgressBidirectional(uid: string): Promise<void> {
             title: cloudItem.mangaTitle,
             cover: cloudItem.cover,
             banner: cloudItem.cover,
-            flag: cloudItem.flag || '🇯🇵 Manga',
+            flag: cloudItem.flag || 'Manga',
             origLang: cloudItem.origLang || 'jp'
           },
           chapterNum: cloudItem.lastChapterNum || 1,
@@ -1660,7 +1660,7 @@ export const FirebaseSyncBridge = {
       const snap = await getDoc(ref);
       const name = sanitizeShortText(listObj.name, 48) || 'Lista';
       const color = String(listObj.color || '#ff1a40').slice(0, 24);
-      const icon = String(listObj.icon || '📁').slice(0, 16);
+      const icon = String(listObj.icon || 'Lista').slice(0, 16);
       if (!snap.exists()) {
         await setDoc(ref, {
           uid: user.uid,
@@ -1792,7 +1792,7 @@ export const FirebaseSyncBridge = {
           mangaId: docId,
           mangaTitle: String(mangaMeta?.title || 'Manga').slice(0, 240),
           cover: String(mangaMeta?.cover || '').slice(0, 600),
-          flag: String(mangaMeta?.flag || '🇯🇵 Manga').slice(0, 40),
+          flag: String(mangaMeta?.flag || 'Manga').slice(0, 40),
           origLang: String(mangaMeta?.origLang || 'jp').slice(0, 16),
           lastChapterNum: 1,
           lastChapterLabel: '1',
@@ -2662,7 +2662,7 @@ export const FirebaseMessagingBridge = {
 
 // Keep foreground FCM listener active for in-app airing episode alerts
 void FirebaseMessagingBridge.listenForeground((notif) => {
-  win.showToast?.(`🔔 ${notif.title}: ${notif.body}`);
+  win.showToast?.(`${notif.title}: ${notif.body}`);
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     try {
       new Notification(notif.title, {

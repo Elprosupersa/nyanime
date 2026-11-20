@@ -1974,19 +1974,19 @@ export function toggleAutoSkipIntro(): void {
   const next = !AppPreferencesManager.get().autoSkipIntro;
   AppPreferencesManager.setAutoSkipIntro(next);
   syncAutoSkipButtonUI();
-  showToast(next ? '⚡ Auto-Salto de Intro activado' : 'Auto-Salto desactivado');
+  showToast(next ? 'Auto-Salto de Intro activado' : 'Auto-Salto desactivado');
 }
 
 export function saltarSegundosPlayer(seconds = 85): void {
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
   if (!vidEl) {
-    showToast('⏩ Usa un servidor directo (🟢 Sin Anuncios) para adelantar +85s desde la app.');
+    showToast('Usa un servidor directo (Sin Anuncios) para adelantar +85s desde la app.');
     return;
   }
   const target = computeSafeSeekTarget(vidEl.currentTime || 0, seconds, vidEl.duration);
   vidEl.currentTime = target;
   activeVideoLastTickPos = target;
-  showToast(`⏩ +${Math.round(seconds)}s (${formatPlaybackTime(target)})`);
+  showToast(`+${Math.round(seconds)}s (${formatPlaybackTime(target)})`);
   void broadcastWatchTogetherState();
 }
 
@@ -2008,7 +2008,7 @@ function updateAniSkipOverlayUI(seg: AniSkipInterval | null): void {
   overlay.className = 'player-aniskip-overlay';
   overlay.dataset.skipId = seg.skipId;
   overlay.innerHTML = `
-    <button type="button" class="aniskip-btn" onclick="saltarSegmentoAniSkipActiva()">⚡ ${escHtml(seg.label)} →</button>
+    <button type="button" class="aniskip-btn" onclick="saltarSegmentoAniSkipActiva()">${escHtml(seg.label)} →</button>
     <button type="button" class="aniskip-dismiss-btn" title="Ocultar" aria-label="Ocultar aviso" onclick="descartarAniSkipOverlay()">✕</button>
   `;
   container.appendChild(overlay);
@@ -2023,7 +2023,7 @@ export function saltarSegmentoAniSkipActiva(): void {
   activeVideoLastTickPos = target;
   aniSkipAutoSkippedIds.add(seg.skipId);
   updateAniSkipOverlayUI(null);
-  showToast(`⚡ ${seg.label}`);
+  showToast(seg.label);
   void broadcastWatchTogetherState();
 }
 
@@ -2240,7 +2240,7 @@ export function copiarInvitacionSalaPorId(roomIdArg: string): void {
     void navigator.clipboard
       .writeText(url)
       .then(() => {
-        showToast(`🔗 Enlace de invitación copiado (${code}${passSuffix}) ✓`);
+        showToast(`Enlace de invitación copiado (${code}${passSuffix}) ✓`);
       })
       .catch(() => {
         showToast(`Sala ${code}${passSuffix}`);
@@ -2273,7 +2273,7 @@ export async function eliminarTodasMisSalasWatchTogether(): Promise<void> {
   }
   renderHomeWatchTogetherBanner();
   renderProfileOwnedWatchRooms();
-  showToast('🗑️ Todas tus salas creadas fueron cerradas y eliminadas.');
+  showToast('Todas tus salas creadas fueron cerradas y eliminadas.');
 }
 
 export function renderProfileOwnedWatchRooms(): void {
@@ -2298,7 +2298,7 @@ export function renderProfileOwnedWatchRooms(): void {
           No tienes salas creadas activas en este momento. Las salas son 100% privadas: solo se puede entrar con la <strong>contraseña del creador</strong> o mediante el <strong>enlace de invitación</strong>.
         </div>
         <div class="oled-btn-row" style="margin-top:10px; flex-wrap:wrap;">
-          <button type="button" class="oled-btn-secondary" onclick="cambiarTab('inicio'); toggleHomeWatchTogetherBar();">🔑 Unirse con Código o Enlace</button>
+          <button type="button" class="oled-btn-secondary" onclick="cambiarTab('inicio'); toggleHomeWatchTogetherBar();">Unirse con Código o Enlace</button>
         </div>
       </div>
     `;
@@ -2312,27 +2312,27 @@ export function renderProfileOwnedWatchRooms(): void {
         const titleText = r?.animeTitle
           ? `${r.animeTitle} · T${Number(r.seasonNum || 1)} Ep ${Number(r.episodeNum || 1)} (${formatPlaybackTime(liveSec)})`
           : 'Sala privada creada por ti · Lista para continuar';
-        const passText = item.passcode ? `🔑 Clave: ${escHtml(item.passcode)}` : '🔒 Protegida por enlace';
+        const passText = item.passcode ? `Clave: ${escHtml(item.passcode)}` : 'Protegida por enlace';
 
         return `
           <div class="home-wt-live-card profile-wt-owned-card" data-owned-room="${escHtml(item.roomId)}">
             <div class="home-wt-live-info">
               <div class="home-wt-live-top" style="flex-wrap:wrap; gap:6px;">
-                <span class="home-wt-live-badge">${r ? (isPlaying ? '🔴 EN VIVO' : '⏸ PAUSA') : '🟢 PROPIETARIO'}</span>
-                <span class="wt-room-code">🔒 ${escHtml(item.roomId)}</span>
+                <span class="home-wt-live-badge">${r ? (isPlaying ? 'EN VIVO' : 'PAUSA') : 'PROPIETARIO'}</span>
+                <span class="wt-room-code">${escHtml(item.roomId)}</span>
                 <span class="wt-pass-badge">${passText}</span>
               </div>
               <div class="home-wt-live-title">${escHtml(titleText)}</div>
             </div>
             <div class="home-wt-actions" style="flex-wrap:wrap;">
               <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(item.roomId)}')">
-                ${isJoined ? '▶ En Sala (Abrir) →' : '▶ Continuar Sala →'}
+                ${isJoined ? 'En Sala (Abrir) →' : 'Continuar Sala →'}
               </button>
               <button type="button" class="wt-action-chip" title="Copiar enlace de invitación y contraseña" onclick="copiarInvitacionSalaPorId('${escHtml(item.roomId)}')">
-                🔗 Invitación
+                Invitación
               </button>
               <button type="button" class="wt-action-chip danger" title="Cerrar y eliminar esta sala para todos" onclick="eliminarSalaWatchTogether('${escHtml(item.roomId)}')">
-                🗑️ Cerrar Sala
+                Cerrar Sala
               </button>
             </div>
           </div>
@@ -2347,7 +2347,7 @@ export function renderProfileOwnedWatchRooms(): void {
       ${
         ownedList.length > 1
           ? `<div style="display:flex; justify-content:flex-end;">
-               <button type="button" class="wt-action-chip danger" onclick="eliminarTodasMisSalasWatchTogether()">🗑️ Cerrar Todas Mis Salas (${ownedList.length})</button>
+               <button type="button" class="wt-action-chip danger" onclick="eliminarTodasMisSalasWatchTogether()">Cerrar Todas Mis Salas (${ownedList.length})</button>
              </div>`
           : ''
       }
@@ -2393,21 +2393,21 @@ function renderHomeWatchTogetherBanner(): void {
         <div class="home-wt-live-card">
           <div class="home-wt-live-info">
             <div class="home-wt-live-top">
-              <span class="home-wt-live-badge">${isPlaying ? '🔴 EN VIVO' : '⏸ PAUSA'}</span>
-              <span class="wt-room-code">🔒 ${escHtml(r.roomId)}</span>
-              ${ownedCreds?.passcode ? `<span class="wt-pass-badge">🔑 Clave: ${escHtml(ownedCreds.passcode)}</span>` : ''}
+              <span class="home-wt-live-badge">${isPlaying ? 'EN VIVO' : 'PAUSA'}</span>
+              <span class="wt-room-code">${escHtml(r.roomId)}</span>
+              ${ownedCreds?.passcode ? `<span class="wt-pass-badge">Clave: ${escHtml(ownedCreds.passcode)}</span>` : ''}
               <span class="home-wt-live-host">${isOwner ? 'Tu sala (Propietario)' : `por ${escHtml(r.hostName || 'Anfitrión')}`}</span>
             </div>
             <div class="home-wt-live-title">${escHtml(r.animeTitle || 'Anime')} · T${Number(r.seasonNum || 1)} Ep ${Number(r.episodeNum || 1)} (${formatPlaybackTime(liveSec)})</div>
           </div>
           <div class="home-wt-actions">
             <button type="button" class="home-wt-join-live-btn" onclick="abrirSalaWatchTogetherDesdeCodigo('${escHtml(r.roomId)}')">
-              ${isJoined ? 'Abrir Sala →' : '▶ Continuar Sala →'}
+              ${isJoined ? 'Abrir Sala →' : 'Continuar Sala →'}
             </button>
             ${
               isOwner
-                ? `<button type="button" class="wt-action-chip" title="Copiar enlace de invitación" onclick="copiarInvitacionSalaPorId('${escHtml(r.roomId)}')">🔗 Invitar</button>
-                   <button type="button" class="wt-action-chip danger" title="Cerrar y eliminar esta sala" onclick="eliminarSalaWatchTogether('${escHtml(r.roomId)}')">🗑️ Cerrar</button>`
+                ? `<button type="button" class="wt-action-chip" title="Copiar enlace de invitación" onclick="copiarInvitacionSalaPorId('${escHtml(r.roomId)}')">Invitar</button>
+                   <button type="button" class="wt-action-chip danger" title="Cerrar y eliminar esta sala" onclick="eliminarSalaWatchTogether('${escHtml(r.roomId)}')">Cerrar</button>`
                 : ''
             }
           </div>
@@ -2420,11 +2420,11 @@ function renderHomeWatchTogetherBanner(): void {
     <div class="home-wt-banner-inner">
       <div class="home-wt-banner-head">
         <div>
-          <div class="home-wt-banner-title">🔒 Watch Together · Salas Privadas Sincronizadas</div>
+          <div class="home-wt-banner-title">Watch Together · Salas Privadas Sincronizadas</div>
           <div class="home-wt-banner-sub">Acceso exclusivo con la contraseña del creador o mediante enlace de invitación. Gestiona tus salas creadas en Mi Perfil.</div>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
-          <button type="button" class="wt-action-chip" onclick="cambiarTab('perfil')">👤 Mis Salas en Perfil →</button>
+          <button type="button" class="wt-action-chip" onclick="cambiarTab('perfil')">Mis Salas en Perfil →</button>
           ${
             !hasMyLiveRooms
               ? `<button type="button" class="wt-close-btn" onclick="toggleHomeWatchTogetherBar()" aria-label="Cerrar panel">✕</button>`
@@ -2441,7 +2441,7 @@ function renderHomeWatchTogetherBanner(): void {
                maxlength="240"
                aria-label="Código o enlace de sala Watch Together"
                onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaDesdeHome(); }">
-        <button type="button" class="wt-create-btn" onclick="unirseSalaDesdeHome()">🔑 Entrar a Sala</button>
+        <button type="button" class="wt-create-btn" onclick="unirseSalaDesdeHome()">Entrar a Sala</button>
       </div>
     </div>
   `;
@@ -2566,7 +2566,7 @@ function applyRoomSyncToNativeVideo(room: WatchRoomState, forceSeek = false): bo
         // Fallback to muted autoplay if browser blocked unmuted remote play
         vidEl.muted = true;
         void vidEl.play().catch(() => {});
-        showToast('🔊 Reproducción sincronizada (activa el sonido en el reproductor)');
+        showToast('Reproducción sincronizada (activa el sonido en el reproductor)');
       });
     } else if (!playing && !vidEl.paused) {
       vidEl.pause();
@@ -2666,7 +2666,7 @@ function renderWatchTogetherMessagesAndMeta(): void {
       activeRoomParticipants.length === 0
         ? '<span class="wt-part-chip">Conectando participantes...</span>'
         : activeRoomParticipants
-            .map((p) => `<span class="wt-part-chip">🟢 ${escHtml(p.displayName || 'Otaku')}</span>`)
+            .map((p) => `<span class="wt-part-chip">${escHtml(p.displayName || 'Otaku')}</span>`)
             .join('');
   }
 
@@ -2677,11 +2677,11 @@ function renderWatchTogetherMessagesAndMeta(): void {
       ? ` · por ${activeRoomData.updatedByName}`
       : '';
     if (syncMetaEl) {
-      const stateIcon = isPlaying ? '▶ En vivo' : '⏸ En pausa';
+      const stateIcon = isPlaying ? 'En vivo' : 'En pausa';
       syncMetaEl.textContent = `${stateIcon} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
     }
     if (playToggleBtn) {
-      playToggleBtn.textContent = isPlaying ? '⏸ Pausar' : '▶ Reproducir';
+      playToggleBtn.textContent = isPlaying ? 'Pausar' : 'Reproducir';
       playToggleBtn.classList.toggle('is-playing', isPlaying);
     }
   }
@@ -2697,7 +2697,7 @@ function renderWatchTogetherMessagesAndMeta(): void {
     const unlocked = getUnlockedRoomCreds(activeRoomId);
     const knownPass = owned?.passcode || unlocked?.passcode || '';
     if (knownPass) {
-      passBadgeEl.textContent = `🔑 Clave: ${knownPass}`;
+      passBadgeEl.textContent = `Clave: ${knownPass}`;
       passBadgeEl.classList.remove('hide');
     } else {
       passBadgeEl.classList.add('hide');
@@ -2706,7 +2706,7 @@ function renderWatchTogetherMessagesAndMeta(): void {
 
   if (msgsEl) {
     if (activeRoomMessages.length === 0) {
-      msgsEl.innerHTML = '<div class="wt-chat-empty">Saluda a tus amigos en la sala 👋</div>';
+      msgsEl.innerHTML = '<div class="wt-chat-empty">Saluda a tus amigos en la sala</div>';
     } else {
       msgsEl.innerHTML = activeRoomMessages
         .map((m) => {
@@ -2729,7 +2729,7 @@ export function renderWatchTogetherPanel(): void {
   const btn = document.getElementById('btn-watch-together');
   if (btn) {
     btn.classList.toggle('active', watchTogetherOpen || Boolean(activeRoomId));
-    btn.textContent = activeRoomId ? `👥 Sala ${activeRoomId}` : '👥 Watch Together';
+    btn.textContent = activeRoomId ? `Sala ${activeRoomId}` : 'Watch Together';
   }
   if (!panel) return;
   panel.classList.toggle('hide', !watchTogetherOpen);
@@ -2740,7 +2740,7 @@ export function renderWatchTogetherPanel(): void {
     panel.innerHTML = `
       <div class="wt-panel-header">
         <div>
-          <div class="wt-title">👥 Sala Compartida (Watch Together)</div>
+          <div class="wt-title">Sala Compartida (Watch Together)</div>
           <div class="wt-sub">Salas protegidas con contraseña o enlace de invitación único. Sincroniza play, pausa y chat en vivo.</div>
         </div>
         <button type="button" class="wt-close-btn" onclick="toggleWatchTogetherPanel()">✕</button>
@@ -2753,7 +2753,7 @@ export function renderWatchTogetherPanel(): void {
                  placeholder="Contraseña (vacío = PIN automático)"
                  maxlength="32"
                  aria-label="Contraseña de la nueva sala">
-          <button type="button" class="wt-create-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="crearSalaWatchTogether()">🔒 Crear Sala</button>
+          <button type="button" class="wt-create-btn" ${isWatchTogetherBusy ? 'disabled' : ''} onclick="crearSalaWatchTogether()">Crear Sala</button>
         </div>
         <div class="wt-join-row">
           <input type="text" id="wt-join-code-input" class="wt-code-input" placeholder="Código o enlace de invitación" maxlength="240" aria-label="Código o enlace de sala" onkeydown="if(event.key==='Enter'){ event.preventDefault(); unirseSalaWatchTogether(); }">
@@ -2775,30 +2775,30 @@ export function renderWatchTogetherPanel(): void {
       <div class="wt-panel-header">
         <div>
           <div class="wt-title">
-            👥 Sala <span class="wt-room-code">${escHtml(activeRoomId)}</span>
-            <span id="wt-room-pass-badge" class="wt-pass-badge ${knownPass ? '' : 'hide'}" title="Contraseña de la sala">${knownPass ? `🔑 Clave: ${escHtml(knownPass)}` : ''}</span>
+            Sala <span class="wt-room-code">${escHtml(activeRoomId)}</span>
+            <span id="wt-room-pass-badge" class="wt-pass-badge ${knownPass ? '' : 'hide'}" title="Contraseña de la sala">${knownPass ? `Clave: ${escHtml(knownPass)}` : ''}</span>
           </div>
           <div class="wt-sub" id="wt-sync-meta">Sincronizando sala...</div>
         </div>
         <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
-          <button type="button" class="wt-action-chip" onclick="copiarEnlaceSalaWatchTogether()">🔗 Invitar</button>
-          <button type="button" id="wt-delete-room-btn" class="wt-action-chip danger ${isOwner ? '' : 'hide'}" onclick="eliminarSalaWatchTogether()">🗑️ Eliminar Sala</button>
+          <button type="button" class="wt-action-chip" onclick="copiarEnlaceSalaWatchTogether()">Invitar</button>
+          <button type="button" id="wt-delete-room-btn" class="wt-action-chip danger ${isOwner ? '' : 'hide'}" onclick="eliminarSalaWatchTogether()">Eliminar Sala</button>
           <button type="button" class="wt-action-chip" onclick="salirSalaWatchTogether()">Salir</button>
         </div>
       </div>
       <div class="wt-sync-controls-bar">
-        <button type="button" id="wt-btn-play-toggle" class="wt-ctrl-btn primary" onclick="togglePlayPauseWatchTogether()">⏸ Pausar</button>
-        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(-15)">⏪ -15s</button>
-        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(15)">⏩ +15s</button>
-        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(85)">⚡ +85s</button>
-        <button type="button" id="wt-btn-resync" class="wt-ctrl-btn" title="Resincronizar mi reproductor con el tiempo ancla de la sala" onclick="forzarSincronizacionWatchTogether()">🔄 Resincronizar</button>
+        <button type="button" id="wt-btn-play-toggle" class="wt-ctrl-btn primary" onclick="togglePlayPauseWatchTogether()">Pausar</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(-15)">-15s</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(15)">+15s</button>
+        <button type="button" class="wt-ctrl-btn" onclick="seekWatchTogether(85)">+85s</button>
+        <button type="button" id="wt-btn-resync" class="wt-ctrl-btn" title="Resincronizar mi reproductor con el tiempo ancla de la sala" onclick="forzarSincronizacionWatchTogether()">Resincronizar</button>
         <div class="wt-manual-time-group">
           <input type="text" id="wt-manual-time-input" class="wt-time-input" placeholder="MM:SS" maxlength="8" aria-label="Saltar a minuto exacto" onkeydown="if(event.key==='Enter'){ event.preventDefault(); aplicarTiempoManualWatchTogether(); }">
           <button type="button" class="wt-ctrl-btn" onclick="aplicarTiempoManualWatchTogether()">Ir</button>
         </div>
       </div>
       <div style="font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.35;">
-        💡 Puedes cambiar tu propio servidor de video arriba sin afectar a los demás; tu tiempo se mantendrá sincronizado.
+        Puedes cambiar tu propio servidor de video arriba sin afectar a los demás; tu tiempo se mantendrá sincronizado.
       </div>
       <div class="wt-participants-row" id="wt-participants-row"></div>
       <div class="wt-chat-messages" id="wt-chat-messages"></div>
@@ -2861,7 +2861,7 @@ export async function seekWatchTogether(deltaSeconds: number): Promise<void> {
     }, 350);
   }
   await broadcastWatchTogetherState(activeRoomData.playbackState, targetSec);
-  showToast(`⏱️ Sala sincronizada a ${formatPlaybackTime(targetSec)}`);
+  showToast(`Sala sincronizada a ${formatPlaybackTime(targetSec)}`);
 }
 
 export async function aplicarTiempoManualWatchTogether(): Promise<void> {
@@ -2884,7 +2884,7 @@ export async function aplicarTiempoManualWatchTogether(): Promise<void> {
     }, 350);
   }
   await broadcastWatchTogetherState(activeRoomData.playbackState, targetSec);
-  showToast(`⏱️ Sala saltó a ${formatPlaybackTime(targetSec)}`);
+  showToast(`Sala saltó a ${formatPlaybackTime(targetSec)}`);
 }
 
 export async function forzarSincronizacionWatchTogether(): Promise<void> {
@@ -2892,9 +2892,9 @@ export async function forzarSincronizacionWatchTogether(): Promise<void> {
   const targetSec = computeTargetSyncedTime(activeRoomData, Date.now());
   const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
   if (vidEl && applyRoomSyncToNativeVideo(activeRoomData, true)) {
-    showToast(`🔄 Resincronizado con la sala (${formatPlaybackTime(targetSec)})`);
+    showToast(`Resincronizado con la sala (${formatPlaybackTime(targetSec)})`);
   } else {
-    showToast(`🔄 Tiempo ancla de la sala: ${formatPlaybackTime(targetSec)} (usa un servidor directo 🟢 para resincronización automática)`);
+    showToast(`Tiempo ancla de la sala: ${formatPlaybackTime(targetSec)} (usa un servidor directo para resincronización automática)`);
   }
 }
 
@@ -2910,7 +2910,7 @@ function startWatchTogetherClockTicker(): void {
       const actorSuffix = activeRoomData.updatedByName
         ? ` · por ${activeRoomData.updatedByName}`
         : '';
-      syncMetaEl.textContent = `${playing ? '▶ En vivo' : '⏸ En pausa'} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
+      syncMetaEl.textContent = `${playing ? 'En vivo' : 'En pausa'} · Ep ${activeRoomData.episodeNum} · ${formatPlaybackTime(liveTimeSec)}${actorSuffix}`;
     }
     // Client-side anchor drift check every 3s (ZERO Firestore writes) with 1.8s tolerance
     _wtDriftCheckTick = (_wtDriftCheckTick + 1) % 3;
@@ -3067,8 +3067,8 @@ export async function crearSalaWatchTogether(): Promise<void> {
     renderProfileOwnedWatchRooms();
     showToast(
       passcode
-        ? `🔒 Sala ${roomId} creada · Clave: ${passcode}`
-        : `🎬 Sala ${roomId} creada ✓`
+        ? `Sala ${roomId} creada · Clave: ${passcode}`
+        : `Sala ${roomId} creada ✓`
     );
   } catch (err: any) {
     showToast(err?.message || 'No se pudo crear la sala.');
@@ -3142,7 +3142,7 @@ async function completeProtectedRoomJoin(
   attachWatchTogetherSubscription(room.roomId);
   applyRoomSyncToNativeVideo(room, true);
   renderProfileOwnedWatchRooms();
-  showToast(`🎬 Unido a sala ${room.roomId} · ${room.animeTitle} Ep ${room.episodeNum}`);
+  showToast(`Unido a sala ${room.roomId} · ${room.animeTitle} Ep ${room.episodeNum}`);
 }
 
 export async function confirmarPasscodeWatchTogether(): Promise<void> {
@@ -3217,7 +3217,7 @@ export async function confirmarPasscodeWatchTogether(): Promise<void> {
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = '🔓 Verificar y Entrar';
+      submitBtn.textContent = 'Verificar y Entrar';
     }
   }
 }
@@ -3375,7 +3375,7 @@ export async function eliminarSalaWatchTogether(roomIdArg?: string): Promise<voi
       renderHomeWatchTogetherBanner();
     }
     renderProfileOwnedWatchRooms();
-    showToast(`🗑️ Sala ${targetRoomId} cerrada y eliminada.`);
+    showToast(`Sala ${targetRoomId} cerrada y eliminada.`);
   } catch (err: any) {
     showToast(err?.message || 'No se pudo eliminar la sala.');
   } finally {
@@ -3690,7 +3690,7 @@ function attachNativeVideoLifecycle(vidEl: HTMLVideoElement, activeEp: number): 
         vidEl.currentTime = jumpTo;
         activeVideoLastTickPos = jumpTo;
         updateAniSkipOverlayUI(null);
-        showToast(`⚡ ${activeSeg.label} automático`);
+        showToast(`${activeSeg.label} automático`);
         void broadcastWatchTogetherState();
         return;
       }
@@ -3971,13 +3971,13 @@ export function renderPlayerServersBar(): void {
       let cleanBadge = '';
       if (badgeType === 'external') {
         cleanBadge =
-          '<span style="font-size:9.5px; font-weight:700; color:#fbbf24; background:rgba(245,158,11,0.14); border:1px solid rgba(251,191,36,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">↗ Externo</span>';
+          '<span style="font-size:9.5px; font-weight:700; color:#fbbf24; background:rgba(245,158,11,0.14); border:1px solid rgba(251,191,36,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">Externo</span>';
       } else if (!isFailed && badgeType === 'native-hls') {
         cleanBadge =
-          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 HLS 1080p · Sin Anuncios</span>';
+          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">HLS 1080p · Sin Anuncios</span>';
       } else if (!isFailed && badgeType === 'native-direct') {
         cleanBadge =
-          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">🟢 Directo · Sin Anuncios</span>';
+          '<span style="font-size:9.5px; font-weight:800; color:#34d399; background:rgba(16,185,129,0.14); border:1px solid rgba(52,211,153,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">Directo · Sin Anuncios</span>';
       } else if (!isFailed && badgeType === 'hls-cyberlocker' && (src.direct || src.type === 'hls')) {
         cleanBadge =
           '<span style="font-size:9.5px; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.14); border:1px solid rgba(56,189,248,0.35); padding:1px 5px; border-radius:999px; margin-left:2px;">HLS</span>';
@@ -4186,12 +4186,12 @@ export async function resolverYReproducirFuente(): Promise<void> {
         ${buildStateCardHtml({
           kind: 'error',
           compact: true,
-          icon: '🎬',
+          icon: '',
           title: 'Sin servidores activos',
           message: 'No encontramos fuentes reproducibles para este episodio en el idioma seleccionado.',
-          retryLabel: '🔄 Reintentar búsqueda',
+          retryLabel: 'Reintentar búsqueda',
           retryOnClick: 'resolverYReproducirFuente()',
-          secondaryLabel: '🌐 Probar otro idioma',
+          secondaryLabel: 'Probar otro idioma',
           secondaryOnClick: "seleccionarAudio(state.modoAudio === 'SUB' ? 'LATINO' : 'SUB')"
         })}
       </div>
@@ -4210,7 +4210,7 @@ export function mostrarAvisoCambioServidorVideo(texto: string): void {
   banner.className = 'video-stall-banner';
   banner.innerHTML = `
     <span>${escHtml(texto)}</span>
-    <button type="button" onclick="probarFuenteAlternativa()">Siguiente ⏭</button>
+    <button type="button" onclick="probarFuenteAlternativa()">Siguiente →</button>
   `;
   container.appendChild(banner);
 }
@@ -4239,7 +4239,7 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   const idx = state.fuenteActualIdx % state.fuentesRankeadas.length;
   const fuente = state.fuentesRankeadas[idx];
   const isAlternative = idx > 0;
-  const langBadge = fuente.language === 'LATINO' ? '🇲🇽 Latino' : (fuente.language === 'MULTI' ? '🌐 Multi' : '🇯🇵 Sub ES');
+  const langBadge = fuente.language === 'LATINO' ? 'Latino' : (fuente.language === 'MULTI' ? 'Multi' : 'Sub ES');
 
   renderPlayerServersBar();
   statusDot.className = isAlternative ? 'status-dot warning' : 'status-dot';
@@ -4268,8 +4268,8 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         <div style="font-size:15px; font-weight:700; color:#f8fafc;">${escHtml(fuente.providerName)} bloquea reproducción embebida</div>
         <div style="font-size:12.5px; color:#94a3b8; max-width:420px;">Este servidor solo permite abrirse directamente en una pestaña externa. Usa el botón de abajo o cambia a un servidor embebido/directo.</div>
         <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
-          ${safeUrl && safeUrl !== '#' ? `<a href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="chip active" style="background:var(--primary); color:#fff; text-decoration:none;">↗ Abrir en nueva pestaña</a>` : ''}
-          ${hasPlayableAlternative ? `<button type="button" class="chip" onclick="probarFuenteAlternativa()">⏭ Usar servidor directo</button>` : ''}
+          ${safeUrl && safeUrl !== '#' ? `<a href="${escHtml(safeUrl)}" target="_blank" rel="noopener noreferrer" class="chip active" style="background:var(--primary); color:#fff; text-decoration:none;">Abrir en nueva pestaña</a>` : ''}
+          ${hasPlayableAlternative ? `<button type="button" class="chip" onclick="probarFuenteAlternativa()">Usar servidor directo</button>` : ''}
         </div>
       </div>
     `;
@@ -4508,8 +4508,8 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   const megaSwitchBanner =
     isMegaEmbed && state.fuentesRankeadas.length > 1
       ? `<div class="video-stall-banner" style="top:10px; bottom:auto;">
-           <span>🔒 Mega en modo embebido (descargas externas bloqueadas)</span>
-           <button type="button" onclick="probarFuenteAlternativa()">Cambiar Servidor HD ⏭</button>
+           <span>Mega en modo embebido (descargas externas bloqueadas)</span>
+           <button type="button" onclick="probarFuenteAlternativa()">Cambiar Servidor HD →</button>
          </div>`
       : '';
 
@@ -4636,7 +4636,7 @@ export function attachPlayerKeyboardShortcuts(): void {
       if (!vidEl) return;
       e.preventDefault();
       vidEl.muted = !vidEl.muted;
-      showToast(vidEl.muted ? '🔇 Silenciado' : '🔊 Sonido activado');
+      showToast(vidEl.muted ? 'Silenciado' : 'Sonido activado');
       return;
     }
 
@@ -4849,7 +4849,7 @@ export async function descargarEpisodioActual(): Promise<void> {
           continue;
         }
 
-        showToast(`📥 Descargando T${seasonNum} · Ep ${state.epActual} (.MP4 por bloques)...`);
+        showToast(`Descargando T${seasonNum} · Ep ${state.epActual} (.MP4 por bloques)...`);
         const res = await nWin.NyAnimeOffline.downloadAnimeEpisodeOrQueue({
           animeId: seasonId,
           animeTitle: `${cleanSeriesTitle} (T${seasonNum})`,
@@ -4874,7 +4874,7 @@ export async function descargarEpisodioActual(): Promise<void> {
       } catch (err: any) {
         lastErrorMessage = err?.message || 'Error de red durante la descarga';
         if (err?.name === 'QuotaExceededError' || /espacio.*insuficiente/i.test(lastErrorMessage)) {
-          showToast(`⚠️ ${lastErrorMessage}`);
+          showToast(lastErrorMessage);
           return;
         }
       }
@@ -4916,7 +4916,7 @@ export async function reproducirVideoOfflineCacheado(manifest: any): Promise<voi
   }
 
   const titleEl = document.getElementById('rep-titulo');
-  if (titleEl) titleEl.textContent = `${manifest.title} · Ep ${manifest.episode || 1} (Offline 💾)`;
+  if (titleEl) titleEl.textContent = `${manifest.title} · Ep ${manifest.episode || 1} (Offline)`;
   const indEl = document.getElementById('player-ep-indicator');
   if (indEl) indEl.textContent = `Episodio ${manifest.episode || 1}`;
   const subEl = document.getElementById('rep-ep-subtitle');
@@ -4925,7 +4925,7 @@ export async function reproducirVideoOfflineCacheado(manifest: any): Promise<voi
   const statusDot = document.getElementById('source-status-dot');
   const statusLabel = document.getElementById('source-info-label');
   if (statusDot) statusDot.className = 'status-dot';
-  if (statusLabel) statusLabel.textContent = `💾 Archivo .MP4 Offline · Sin Anuncios`;
+  if (statusLabel) statusLabel.textContent = 'Archivo .MP4 Offline · Sin Anuncios';
 
   const container = document.getElementById('contenedor-video');
   if (container) {

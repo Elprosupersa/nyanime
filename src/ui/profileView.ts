@@ -312,8 +312,8 @@ export function toggleShowAdultContentPref(enabled: boolean): void {
   renderContentSafetyCard();
   showToast(
     next
-      ? '🔞 Contenido +18 habilitado en catálogo, búsqueda y fuentes'
-      : '🛡️ Modo Seguro activado · Contenido y fuentes +18 ocultos'
+      ? 'Contenido +18 habilitado en catálogo, búsqueda y fuentes'
+      : 'Modo Seguro activado · Contenido y fuentes +18 ocultos'
   );
 }
 
@@ -324,7 +324,7 @@ export function renderContentSafetyCard(): void {
   container.innerHTML = `
     <div class="push-status-card">
       <div class="push-status-badge ${showAdult ? '' : 'active'}" id="content-safety-badge">
-        ${showAdult ? '🔞 Contenido +18 habilitado' : '🛡️ Modo Seguro Activo (contenido +18 excluido)'}
+        ${showAdult ? 'Contenido +18 habilitado' : 'Modo Seguro Activo (contenido +18 excluido)'}
       </div>
       <label class="reader-toggle-row" style="margin:8px 0 0;">
         <input type="checkbox" id="toggle-show-adult-content" ${showAdult ? 'checked' : ''} onchange="toggleShowAdultContentPref(this.checked)">
@@ -364,12 +364,12 @@ async function renderWebPushStatusCard(): Promise<void> {
 
   const active = Boolean(status.active);
   const badgeLabel = !isSupported
-    ? '⚠️ Tu navegador actual no soporta Web Push'
+    ? 'Tu navegador actual no soporta Web Push'
     : active
       ? status.provider === 'fcm'
-        ? '🔔 Firebase Push (FCM) Activo en este dispositivo ✓'
-        : '🔔 Notificaciones Push Activas en este dispositivo ✓'
-      : '🔕 Notificaciones Push inactivas';
+        ? 'Firebase Push (FCM) Activo en este dispositivo ✓'
+        : 'Notificaciones Push Activas en este dispositivo ✓'
+      : 'Notificaciones Push inactivas';
 
   container.innerHTML = `
     <div class="push-status-card">
@@ -384,12 +384,12 @@ async function renderWebPushStatusCard(): Promise<void> {
         ${
           active
             ? `
-              <button type="button" class="oled-btn-secondary" onclick="enviarPruebaWebPush()">📲 Probar Push</button>
+              <button type="button" class="oled-btn-secondary" onclick="enviarPruebaWebPush()">Probar Push</button>
               <button type="button" class="oled-btn-secondary danger-tint" onclick="desconectarWebPush()">Desactivar Push</button>
             `
-            : `<button type="button" class="oled-btn-secondary" ${!isSupported ? 'disabled' : ''} style="border-color:rgba(255,26,64,0.45); color:#fff; background:rgba(255,26,64,0.16);" onclick="activarWebPush()">🔔 Activar Alertas Push</button>`
+            : `<button type="button" class="oled-btn-secondary" ${!isSupported ? 'disabled' : ''} style="border-color:rgba(255,26,64,0.45); color:#fff; background:rgba(255,26,64,0.16);" onclick="activarWebPush()">Activar Alertas Push</button>`
         }
-        <button type="button" class="oled-btn-secondary" onclick="abrirModalResumenSemanal()">📊 Resumen Semanal</button>
+        <button type="button" class="oled-btn-secondary" onclick="abrirModalResumenSemanal()">Resumen Semanal</button>
       </div>
     </div>
   `;
@@ -559,7 +559,6 @@ function renderProfileLibraryPanel(): void {
     const isFilteredEmpty = q.length > 0 || activeLibraryFilter !== 'all';
     gridEl.innerHTML = `
       <div class="profile-empty-state">
-        <div class="profile-empty-icon">${activeLibraryFilter === 'manga' ? '📚' : '🎬'}</div>
         <div class="profile-empty-title">${isFilteredEmpty ? 'Sin títulos en esta vista' : 'Tu biblioteca está vacía'}</div>
         <div class="profile-empty-desc">${
           isFilteredEmpty
@@ -625,7 +624,7 @@ function renderProfileLibraryPanel(): void {
                   (c) => `<option value="${c.id}" ${c.id === status ? 'selected' : ''}>${escHtml(c.label)}</option>`
                 ).join('')}
               </select>
-              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('anime', '${animeIdStr}')">⭐ Nota</button>
+              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('anime', '${animeIdStr}')">Nota</button>
               <button type="button" class="profile-lib-open-btn" onclick="abrirAnimeDesdePerfil('${animeIdStr}')">Abrir</button>
             </div>
           </div>
@@ -666,7 +665,7 @@ function renderProfileLibraryPanel(): void {
             }
             <div class="profile-lib-footer" style="margin-top:auto;">
               <span class="profile-lib-tag-manga">Biblioteca Manga</span>
-              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('manga', '${mangaIdStr}')">⭐ Nota</button>
+              <button type="button" class="profile-lib-note-btn" title="Calificar y anotar" onclick="abrirModalResenaPersonal('manga', '${mangaIdStr}')">Nota</button>
               <button type="button" class="profile-lib-open-btn" onclick="abrirMangaDesdePerfil('${mangaIdStr}')">Leer</button>
             </div>
           </div>
@@ -706,7 +705,7 @@ function renderProfileActivityPanel(): void {
     const rSum = computeLibraryRatingsSummary(animes, mangas, 6);
     if (rSum.ratedCount === 0) {
       ratingsSummaryEl.innerHTML =
-        '<div style="font-size:12px; color:var(--text-muted);">Aún no has puntuado ninguna serie. Usa "⭐ Nota" en tu biblioteca o en cualquier ficha para calificar del 1 al 10.</div>';
+        '<div style="font-size:12px; color:var(--text-muted);">Aún no has puntuado ninguna serie. Usa "Nota" en tu biblioteca o en cualquier ficha para calificar del 1 al 10.</div>';
     } else {
       const topHtml = rSum.topRated
         .map((item) => {
@@ -891,7 +890,7 @@ export function renderProfileUI(): void {
   }
   if (roleEl) {
     roleEl.className = `profile-role-badge ${badgeClass}`;
-    roleEl.textContent = `${rank.icon} ${rank.label}`;
+    roleEl.textContent = rank.label;
   }
   if (rankFillEl) {
     rankFillEl.style.width = `${rank.progressPct}%`;

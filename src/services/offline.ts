@@ -617,7 +617,7 @@ export async function downloadMangaChapterOffline(params: {
       chapterLabel,
       chapterTitle: chapterTitle || `Capítulo ${chapterLabel}`,
       lang: lang || 'es',
-      group: group || 'Offline 💾',
+      group: group || 'Offline',
       mangaMeta,
       pageKeys,
       pageCount: pageKeys.length,
@@ -791,7 +791,7 @@ export function buildOfflineChapterBucketsFromManifests(manifests: OfflineChapte
     chapterNum: Number(m.chapterNum ?? 1),
     title: m.chapterTitle || `Capítulo ${m.chapterLabel || m.chapterNum || 1}`,
     pages: m.pageCount || 0,
-    group: 'Offline 💾',
+    group: 'Offline',
     lang: (m.lang || 'es').toLowerCase(),
     source: 'Offline',
     isOfflineCached: true,
@@ -1477,7 +1477,7 @@ function renderActiveQueueSection(batch: ActiveDownloadBatchSnapshot): string {
         <div class="dl-item-actions">
           ${
             batch.isRunning
-              ? `<button type="button" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">${batch.isPaused ? '▶ Reanudar' : '⏸ Pausar'}</button>
+              ? `<button type="button" class="dl-action-btn" onclick="togglePausaDescargaTemporada()">${batch.isPaused ? 'Reanudar' : 'Pausar'}</button>
                  <button type="button" class="dl-action-btn danger" onclick="cancelarDescargaTemporada()">Cancelar</button>`
               : ''
           }
@@ -1622,9 +1622,9 @@ export async function renderOfflineDownloadsModal(
                   <span class="dl-item-meta tabular-nums">${metaText}</span>
                 </div>
                 <div class="dl-item-actions">
-                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">▶ Reproducir offline</button>
-                  <button type="button" class="dl-action-btn" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Exportar archivo .MP4 a tu dispositivo sin volver a descargar">⬇ Exportar .MP4</button>
-                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${escapeHTML(epLabel)}">🗑</button>
+                  <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Reproducir offline</button>
+                  <button type="button" class="dl-action-btn" onclick="window.NyAnimeOffline.exportMp4('${safeId}')" title="Exportar archivo .MP4 a tu dispositivo sin volver a descargar">Exportar .MP4</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${escapeHTML(epLabel)}">Eliminar</button>
                 </div>
               </div>
             `;
@@ -1672,7 +1672,7 @@ export async function renderOfflineDownloadsModal(
                 </div>
                 <div class="dl-item-actions">
                   <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Leer offline</button>
-                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${capLabel}">🗑</button>
+                  <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${capLabel}">Eliminar</button>
                 </div>
               </div>
             `;
@@ -1721,8 +1721,8 @@ export async function renderOfflineDownloadsModal(
               </div>
             </div>
             <div class="dl-item-actions">
-              <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">▶ Ver en NyAnime</button>
-              <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${safeTitle}">🗑</button>
+              <button type="button" class="dl-action-btn primary" onclick="window.NyAnimeOffline.openItem('${safeId}')">Ver en NyAnime</button>
+              <button type="button" class="dl-action-btn danger" onclick="window.NyAnimeOffline.deleteItem('${safeId}')" aria-label="Eliminar ${safeTitle}">Eliminar</button>
             </div>
           </div>
         `;

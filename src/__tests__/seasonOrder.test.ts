@@ -109,8 +109,8 @@ describe('seasonOrder — Crunchyroll Franchise Ordering', () => {
     expect(res.seasons[3].isUpcoming).toBe(true);
     expect(res.seasons[3].totalEpisodes).toBe(0);
     expect(res.seasons[3].episodeLabel).toContain('Próximamente');
-    expect(res.seasons[4].shortTag).toBe('📺 Cortos');
-    expect(res.seasons[5].shortTag).toBe('🎬 Película');
+    expect(res.seasons[4].shortTag).toBe('Cortos');
+    expect(res.seasons[5].shortTag).toBe('Película');
     expect(res.seasons[5].isUpcoming).toBe(true);
     expect(res.seasons[5].totalEpisodes).toBe(0);
 
@@ -137,7 +137,7 @@ describe('seasonOrder — Crunchyroll Franchise Ordering', () => {
 
     const res = organizeAnimeFranchise([tv], 100);
     expect(res.seasons.map((s) => s.id)).toEqual([100, 101]);
-    expect(res.seasons[1].shortTag).toBe('🎞️ OVA');
+    expect(res.seasons[1].shortTag).toBe('OVA');
     expect(res.initialIndex).toBe(0);
   });
 

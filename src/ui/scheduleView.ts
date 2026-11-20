@@ -160,7 +160,7 @@ export async function checkAndNotifyAiringEpisodes(simulcasts: any[]): Promise<v
 
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     for (const item of due) {
-      const notifTitle = `🔴 Nuevo episodio disponible: ${item.title}`;
+      const notifTitle = `Nuevo episodio disponible: ${item.title}`;
       try {
         if (navigator.serviceWorker?.ready) {
           const reg = await navigator.serviceWorker.ready;
@@ -550,10 +550,10 @@ function renderEmisionDestacadoYStats(dayItems: any[], diaIdx: number): void {
         </div>
         <div class="emision-featured-actions">
           <button type="button" class="emision-btn-primary" id="btn-featured-watch">
-            ▶ ${diffSec <= 0 ? `Ver Episodio ${epNum}` : 'Ver Ficha y Episodios'}
+            ${diffSec <= 0 ? `Ver Episodio ${epNum}` : 'Ver Ficha y Episodios'}
           </button>
           <button type="button" class="emision-btn-secondary ${isReminded ? 'reminded' : ''}" id="btn-featured-remind">
-            ${isReminded ? '🔔 Siguiendo estreno' : '🔔 Recordar estreno'}
+            ${isReminded ? 'Siguiendo estreno' : 'Recordar estreno'}
           </button>
         </div>
       </div>
@@ -629,7 +629,7 @@ function crearTarjetaTimelineEmision(anime: any): HTMLElement {
         </div>
         <div class="schedule-card-actions">
           <button type="button" class="schedule-watch-btn" data-action="watch" title="Ir al episodio">
-            ${isAired ? `▶ Ep. ${nextEp}` : 'Ficha'}
+            ${isAired ? `Ep. ${nextEp}` : 'Ficha'}
           </button>
           <button type="button" class="schedule-action-btn ${isReminded ? 'active' : ''}" data-action="remind" title="Recordatorio de emisión" aria-label="Recordar estreno">
             <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
@@ -706,10 +706,10 @@ export function renderEmisionDia(diaIdx: number): void {
     }
     container.innerHTML = buildStateCardHtml({
       kind: 'error',
-      icon: '📡',
+      icon: '',
       title: 'Calendario no disponible',
       message: scheduleLoadError || 'No se pudieron cargar los estrenos de esta semana.',
-      retryLabel: '🔄 Reintentar',
+      retryLabel: 'Reintentar',
       retryOnClick: 'cargarEmisionCalendario(true)'
     });
     return;
@@ -746,7 +746,7 @@ export function renderEmisionDia(diaIdx: number): void {
   if (baseList.length === 0) {
     container.innerHTML = buildStateCardHtml({
       kind: 'empty',
-      icon: '🗓️',
+      icon: '',
       title: 'Sin resultados en este filtro',
       message: 'Prueba cambiando el filtro activo o seleccionando otro día de la semana.',
       retryLabel: scheduleState.filter !== 'ALL' ? 'Ver todo el día' : undefined,

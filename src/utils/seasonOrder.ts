@@ -435,16 +435,16 @@ export function organizeAnimeFranchise(
       }
     } else if (fmt === 'MOVIE') {
       tier = 'MOVIE';
-      shortTag = '🎬 Película';
+      shortTag = 'Película';
     } else if (fmt === 'OVA') {
       tier = 'OVA';
-      shortTag = '🎞️ OVA';
+      shortTag = 'OVA';
     } else if (fmt === 'TV_SHORT' || fmt === 'ONA') {
       tier = 'ONA_SHORT';
-      shortTag = '📺 Cortos';
+      shortTag = 'Cortos';
     } else {
       tier = 'SPECIAL';
-      shortTag = '✨ Especial';
+      shortTag = 'Especial';
     }
 
     let episodeLabel = '';

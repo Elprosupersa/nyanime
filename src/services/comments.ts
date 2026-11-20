@@ -91,7 +91,7 @@ export function renderCommentCardMarkup(
       <div class="comment-spoiler-wrap" data-revealed="false">
         <div class="comment-text is-spoiler">${safeText}</div>
         <button type="button" class="comment-spoiler-reveal-btn" onclick="CommentsManager.revealSpoiler(this)">
-          ⚠️ Spoiler · Toca para revelar
+          Spoiler · Toca para revelar
         </button>
       </div>
     `
@@ -115,7 +115,7 @@ export function renderCommentCardMarkup(
         ${textMarkup}
         ${
           isMine
-            ? `<div class="comment-footer"><button type="button" class="comment-like-btn" onclick="CommentsManager.deleteComment('${safeAnimeArg}', '${safeEpArg}', '${safeCommentArg}')">🗑️ Eliminar</button></div>`
+            ? `<div class="comment-footer"><button type="button" class="comment-like-btn" onclick="CommentsManager.deleteComment('${safeAnimeArg}', '${safeEpArg}', '${safeCommentArg}')">Eliminar</button></div>`
             : ''
         }
       </div>
@@ -179,7 +179,7 @@ export const RealCommentsManager = {
       container.innerHTML = buildStateCardHtml({
         kind: 'empty',
         compact: true,
-        icon: '💬',
+        icon: '',
         title: 'Sin comentarios todavía',
         message: 'Sé el primero en compartir tu opinión sobre este episodio.'
       });
@@ -217,7 +217,7 @@ export const RealCommentsManager = {
       container.innerHTML = buildStateCardHtml({
         kind: 'empty',
         compact: true,
-        icon: '💬',
+        icon: '',
         title: 'Únete a la conversación',
         message: 'Inicia sesión con Google o Correo para leer y publicar comentarios de la comunidad.',
         retryLabel: 'Ir a Iniciar Sesión',
@@ -248,10 +248,10 @@ export const RealCommentsManager = {
       container.innerHTML = buildStateCardHtml({
         kind: 'error',
         compact: true,
-        icon: '⚠️',
+        icon: '',
         title: 'Error cargando comentarios',
         message: friendlyMsg,
-        retryLabel: '🔄 Reintentar',
+        retryLabel: 'Reintentar',
         retryOnClick: `CommentsManager.render('${safeAnimeArg}', '${safeEpArg}')`
       });
     }

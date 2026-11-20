@@ -262,7 +262,7 @@ export interface StateCardOptions {
 export function buildStateCardHtml(opts: StateCardOptions): string {
   const kindClass = opts.kind === 'error' ? 'is-error' : 'is-empty';
   const compactClass = opts.compact ? ' is-compact' : '';
-  const icon = escapeHTML(opts.icon || (opts.kind === 'error' ? '⚠️' : '📭'));
+  const icon = opts.icon ? escapeHTML(opts.icon.trim()) : '';
   const title = escapeHTML(opts.title);
   const message = escapeHTML(opts.message);
 
@@ -281,7 +281,7 @@ export function buildStateCardHtml(opts: StateCardOptions): string {
 
   return `
     <div class="ny-state-card ${kindClass}${compactClass}" role="${opts.kind === 'error' ? 'alert' : 'status'}">
-      <div class="ny-state-icon" aria-hidden="true">${icon}</div>
+      ${icon ? `<div class="ny-state-icon" aria-hidden="true">${icon}</div>` : ''}
       <div class="ny-state-title">${title}</div>
       <div class="ny-state-message">${message}</div>
       ${actions.length > 0 ? `<div class="ny-state-actions">${actions.join('')}</div>` : ''}

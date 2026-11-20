@@ -164,7 +164,7 @@ export async function importFromAniList(username: string): Promise<ExternalImpor
     const cover = m.coverImage?.extraLarge || m.coverImage?.large || '';
     const origLang = (m.countryOfOrigin || 'JP').toLowerCase();
     const flag =
-      m.countryOfOrigin === 'KR' ? '🇰🇷 Manhwa' : m.countryOfOrigin === 'CN' ? '🇨🇳 Manhua' : '🇯🇵 Manga';
+      m.countryOfOrigin === 'KR' ? 'Manhwa' : m.countryOfOrigin === 'CN' ? 'Manhua' : 'Manga';
     mangas.push({
       id: m.id,
       title,
@@ -334,7 +334,7 @@ export async function importFromMyAnimeList(username: string): Promise<ExternalI
           title: fm.title || 'Manga',
           cover: img,
           banner: img,
-          flag: '🇯🇵 Manga',
+          flag: 'Manga',
           origLang: 'jp',
           score: '8.7',
           status: 'Finalizado',

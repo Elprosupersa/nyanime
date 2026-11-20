@@ -837,7 +837,7 @@ export async function handleFeatureApiRoutes(
       }
 
       const result = await dispatchWebPush(targets, {
-        title: '📊 Tu Resumen Semanal · NyAnime TV',
+        title: 'Tu Resumen Semanal · NyAnime TV',
         body: headline,
         tag: 'nyanime-weekly-digest',
         url: '/?tab=profile'

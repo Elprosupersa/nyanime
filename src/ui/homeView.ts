@@ -119,10 +119,10 @@ export async function cargarCatalogoHome(): Promise<void> {
       tendEl.innerHTML = buildStateCardHtml({
         kind: 'error',
         compact: true,
-        icon: '📡',
+        icon: '',
         title: 'No se pudo cargar el catálogo',
         message: 'Revisa tu conexión a internet e inténtalo de nuevo.',
-        retryLabel: '🔄 Reintentar',
+        retryLabel: 'Reintentar',
         retryOnClick: 'cargarCatalogoHome()'
       });
     }
@@ -300,7 +300,7 @@ export function renderHero(anime: any): void {
     <div class="hero-card fade-in" id="hero-featured-card">
       <img src="${img}" alt="${title}">
       <div class="hero-overlay">
-        <div class="hero-tag">🔥 ${genre}</div>
+        <div class="hero-tag">${genre}</div>
         <div class="hero-title">${title}</div>
       </div>
     </div>
@@ -444,7 +444,7 @@ export async function filtrarPorGenero(genero: string): Promise<void> {
       popEl.innerHTML = buildStateCardHtml({
         kind: 'empty',
         compact: true,
-        icon: '🎬',
+        icon: '',
         title: `Sin resultados en ${genero}`,
         message: 'Intenta con otra categoría o vuelve a ver todos los populares.',
         retryLabel: 'Ver todos',
@@ -458,10 +458,10 @@ export async function filtrarPorGenero(genero: string): Promise<void> {
       popEl.innerHTML = buildStateCardHtml({
         kind: 'error',
         compact: true,
-        icon: '⚠️',
+        icon: '',
         title: `Error cargando ${genero}`,
         message: 'No se pudo filtrar el catálogo en este momento.',
-        retryLabel: '🔄 Reintentar',
+        retryLabel: 'Reintentar',
         retryOnClick: `filtrarPorGenero('${safeGenreArg}')`
       });
     }
@@ -658,7 +658,7 @@ export function initSearchDirectoryFilters(): void {
     allChip.type = 'button';
     allChip.className = 'chip active';
     allChip.dataset.genreId = '';
-    allChip.textContent = '✨ Todos';
+    allChip.textContent = 'Todos';
     allChip.onclick = () => selectQuickSearchGenre('');
     quickStrip.appendChild(allChip);
 
@@ -1410,10 +1410,10 @@ export async function realizarBusqueda(termArg?: string, pageArg?: number): Prom
     console.error('Error al buscar:', e);
     container.innerHTML = buildStateCardHtml({
       kind: 'error',
-      icon: '📡',
+      icon: '',
       title: 'Error al conectar con la búsqueda',
       message: 'Comprueba tu conexión e inténtalo nuevamente.',
-      retryLabel: '🔄 Reintentar',
+      retryLabel: 'Reintentar',
       retryOnClick: 'realizarBusqueda()'
     });
     renderSearchPagination(null);
@@ -1434,7 +1434,7 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
       : 'Sin resultados para esta combinación de filtros';
     container.innerHTML = buildStateCardHtml({
       kind: 'empty',
-      icon: '🔎',
+      icon: '',
       title: emptyTitle,
       message: 'Prueba cambiando el género, año o limpiando los filtros activos.',
       retryLabel: hasActiveDirectoryFilters(searchDirectoryFilters) ? 'Limpiar filtros' : undefined,
@@ -1446,7 +1446,7 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
   if (animeList.length > 0 && (searchMediaTypeFilter === 'ALL' || searchMediaTypeFilter === 'ANIME')) {
     const animeHdr = document.createElement('div');
     animeHdr.style.cssText = 'grid-column: 1/-1; display:flex; align-items:center; justify-content:space-between; padding:6px 2px 2px; font-size:14px; font-weight:800; color:#fff;';
-    animeHdr.innerHTML = `<span>🎬 Animes (${animeList.length})</span>`;
+    animeHdr.innerHTML = `<span>Animes (${animeList.length})</span>`;
     container.appendChild(animeHdr);
 
     animeList.forEach(anime => {
@@ -1474,7 +1474,7 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
   if (mangaList.length > 0 && (searchMediaTypeFilter === 'ALL' || searchMediaTypeFilter === 'MANGA')) {
     const mangaHdr = document.createElement('div');
     mangaHdr.style.cssText = 'grid-column: 1/-1; display:flex; align-items:center; justify-content:space-between; padding:14px 2px 2px; font-size:14px; font-weight:800; color:#fff;';
-    mangaHdr.innerHTML = `<span>📖 Mangas y Manhwas (${mangaList.length})</span>`;
+    mangaHdr.innerHTML = `<span>Mangas y Manhwas (${mangaList.length})</span>`;
     container.appendChild(mangaHdr);
 
     mangaList.forEach(manga => {
@@ -1482,7 +1482,7 @@ export function renderDualSearchResults(animes: any[] = [], mangas: any[] = [], 
       const safeTitle = escHtml(rawTitle);
       const fallback = generarPortadaSVG(rawTitle, manga.origLang || 'ja', 'Manga');
       const img = escHtml(safeImg(manga.cover, fallback));
-      const flag = escHtml(manga.flag || '📖 Manga');
+      const flag = escHtml(manga.flag || 'Manga');
 
       const card = document.createElement('div');
       card.className = 'card-h fade-in';
@@ -1548,10 +1548,9 @@ export function renderFavoritos(): void {
     if (list.length === 0) {
       container.innerHTML = `
         <div style="grid-column: 1/-1; text-align:center; padding:50px 20px;">
-          <div style="font-size:44px; margin-bottom:12px;">🎬</div>
           <div style="font-weight:700; font-size:16px; color:white; margin-bottom:6px;">${favAnimeCategoryFilter === 'all' ? 'No tienes animes guardados' : 'No hay animes en esta categoría'}</div>
           <div style="font-size:12px; color:var(--text-muted); margin-bottom:18px;">Guarda tus animes preferidos y organízalos como Viendo, Por Ver o Completados.</div>
-          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('inicio')">✨ Explorar Animes</button>
+          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('inicio')">Explorar Animes</button>
         </div>
       `;
       return;
@@ -1583,18 +1582,17 @@ export function renderFavoritos(): void {
     if (list.length === 0) {
       container.innerHTML = `
         <div style="grid-column: 1/-1; text-align:center; padding:50px 20px;">
-          <div style="font-size:44px; margin-bottom:12px;">📖</div>
           <div style="font-weight:700; font-size:16px; color:white; margin-bottom:6px;">No tienes mangas guardados</div>
           <div style="font-size:12px; color:var(--text-muted); margin-bottom:18px;">Guarda tus mangas y manhwas favoritos para acceder a sus capítulos.</div>
-          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('lectura')">✨ Explorar Catálogo de Mangas</button>
+          <button type="button" class="chip active" style="padding:10px 24px; font-weight:700;" onclick="cambiarTab('lectura')">Explorar Catálogo de Mangas</button>
         </div>
       `;
       return;
     }
     list.forEach(manga => {
-      let flag = '🇯🇵 Manga';
-      if (manga.origLang === 'ko') flag = '🇰🇷 Manhwa';
-      else if (manga.origLang === 'zh') flag = '🇨🇳 Manhua';
+      let flag = 'Manga';
+      if (manga.origLang === 'ko') flag = 'Manhwa';
+      else if (manga.origLang === 'zh') flag = 'Manhua';
 
       const fallback = generarPortadaSVG(manga.title || 'Manga', manga.origLang || 'ja', 'Manga');
       const safeTitle = escHtml(manga.title || 'Manga');

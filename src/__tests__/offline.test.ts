@@ -130,7 +130,7 @@ describe('offline service - CacheStorage & IndexedDB', () => {
         id: 'anilist-105398',
         dexId: '32d76d19-8a05-4db0-9fc2-e0b0648fe9d0',
         title: 'Solo Leveling',
-        flag: '🇰🇷 Manhwa'
+        flag: 'Manhwa'
       },
       pageUrls: ['https://cmd.mangadex.network/data/p1.webp']
     });
