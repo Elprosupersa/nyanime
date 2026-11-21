@@ -57,9 +57,12 @@ describe('playerResume helpers', () => {
     expect(buildUpNextCountdownText(2, 5)).toBe('Siguiente: Ep. 2 en 5s...');
   });
 
-  it('aborts and triggers fast failover at 8s when native <video> stays at readyState === 0 and alternative servers exist', () => {
+  it('aborts and triggers fast failover at 5s when native <video> stays at readyState === 0 and alternative servers exist', () => {
     vi.useFakeTimers();
     try {
+      expect(NATIVE_STARTUP_FAILOVER_MS).toBe(5000);
+      expect(NATIVE_BUFFER_TIMEOUT_MS).toBe(15000);
+
       const listeners = new Map<string, Set<() => void>>();
       const fakeVideo = {
         readyState: 0,
@@ -88,13 +91,14 @@ describe('playerResume helpers', () => {
         onFinalTimeout
       });
 
-      vi.advanceTimersByTime(NATIVE_STARTUP_FAILOVER_MS - 1);
+      vi.advanceTimersByTime(4999);
       expect(onAbortAttempt).not.toHaveBeenCalled();
       expect(onFastFailover).not.toHaveBeenCalled();
 
       vi.advanceTimersByTime(1);
       expect(onAbortAttempt).toHaveBeenCalledTimes(1);
       expect(onFastFailover).toHaveBeenCalledTimes(1);
+      expect(onFastFailover.mock.calls[0][0]).toContain('5s');
       expect(onFinalTimeout).not.toHaveBeenCalled();
 
       // Advancing past 15s must not fire a second time once already failed over
@@ -105,7 +109,51 @@ describe('playerResume helpers', () => {
     }
   });
 
-  it('cancels 8s fast failover once metadata arrives (readyState >= 1) and does not fail over after canplay', () => {
+  it('chains two stalled native servers to an operational third server (including iframe fallback) within 10s (< 11s)', () => {
+    vi.useFakeTimers();
+    try {
+      const serverQueue = ['MP4Upload Directo', 'HentaiLA (VIP) HLS', 'Vidhide iframe'];
+      let activeIdx = 0;
+      const abortedServers: string[] = [];
+
+      const mountServer = (idx: number) => {
+        activeIdx = idx;
+        if (idx >= 2) return; // 3rd server is operational iframe/working server
+        const fakeVideo = {
+          readyState: 0,
+          addEventListener: () => {},
+          removeEventListener: () => {}
+        };
+        attachNativeStartupFailoverWatchdog({
+          video: fakeVideo,
+          isStillActive: () => activeIdx === idx,
+          hasAlternativeServers: () => idx < serverQueue.length - 1,
+          onAbortAttempt: () => {
+            abortedServers.push(serverQueue[idx]);
+          },
+          onFastFailover: () => {
+            mountServer(idx + 1);
+          },
+          onFinalTimeout: () => {}
+        });
+      };
+
+      mountServer(0);
+
+      vi.advanceTimersByTime(5000);
+      expect(activeIdx).toBe(1);
+      expect(abortedServers).toEqual(['MP4Upload Directo']);
+
+      vi.advanceTimersByTime(5000);
+      expect(activeIdx).toBe(2);
+      expect(serverQueue[activeIdx]).toBe('Vidhide iframe');
+      expect(abortedServers).toEqual(['MP4Upload Directo', 'HentaiLA (VIP) HLS']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels 5s fast failover once metadata arrives (readyState >= 1) and does not fail over after canplay', () => {
     vi.useFakeTimers();
     try {
       const listeners = new Map<string, Set<() => void>>();
@@ -136,12 +184,12 @@ describe('playerResume helpers', () => {
         onFinalTimeout
       });
 
-      vi.advanceTimersByTime(4000);
+      vi.advanceTimersByTime(3000);
       fakeVideo.readyState = 1;
       fakeVideo.emit('loadedmetadata');
 
-      // Passing 8s must NOT abort because metadata arrived
-      vi.advanceTimersByTime(5000);
+      // Passing 5s must NOT abort because metadata arrived
+      vi.advanceTimersByTime(4000);
       expect(onAbortAttempt).not.toHaveBeenCalled();
       expect(onFastFailover).not.toHaveBeenCalled();
 
@@ -157,7 +205,7 @@ describe('playerResume helpers', () => {
     }
   });
 
-  it('waits until full timeout and notifies user when no alternative servers are available', () => {
+  it('preserves full 15s timeout when no alternative servers are available', () => {
     vi.useFakeTimers();
     try {
       const fakeVideo = {
@@ -183,7 +231,10 @@ describe('playerResume helpers', () => {
       expect(onFastFailover).not.toHaveBeenCalled();
       expect(onFinalTimeout).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(NATIVE_BUFFER_TIMEOUT_MS - NATIVE_STARTUP_FAILOVER_MS);
+      vi.advanceTimersByTime(NATIVE_BUFFER_TIMEOUT_MS - NATIVE_STARTUP_FAILOVER_MS - 1);
+      expect(onFinalTimeout).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
       expect(onFinalTimeout).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();

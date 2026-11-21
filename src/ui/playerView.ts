@@ -4372,9 +4372,15 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     state.epActual === activeEpSnapshot &&
     (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot;
 
+  const hasOtherPlayableServers = () =>
+    countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1;
+  const startupSecsLabel = Math.max(1, Math.round(NATIVE_STARTUP_FAILOVER_MS / 1000));
+
   if (canTryNativeExtract) {
     try {
-      const directStream = await StreamExtractor.extract(fuente.url);
+      const directStream = await StreamExtractor.extract(fuente.url, {
+        timeoutMs: hasOtherPlayableServers() ? NATIVE_STARTUP_FAILOVER_MS : 12000
+      });
       if (!isCurrentExecutionStillActive()) {
         return;
       }
@@ -4401,14 +4407,13 @@ export async function ejecutarFuenteActiva(): Promise<void> {
             startupTimeoutMs: NATIVE_STARTUP_FAILOVER_MS,
             fullTimeoutMs: NATIVE_BUFFER_TIMEOUT_MS,
             isStillActive: isCurrentExecutionStillActive,
-            hasAlternativeServers: () =>
-              countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1,
+            hasAlternativeServers: hasOtherPlayableServers,
             onAbortAttempt: () => {
               teardownActiveMediaElement(container);
             },
             onFastFailover: () => {
               statusDot.className = 'status-dot warning';
-              statusLabel.textContent = `${fuente.providerName} sin respuesta (8s) · saltando al siguiente servidor...`;
+              statusLabel.textContent = `${fuente.providerName} sin respuesta (${startupSecsLabel}s) · saltando al siguiente servidor...`;
               videoSourceManager.markSourceFailed(fuente.url);
               probarFuenteAlternativa(`Failover desde ${fuente.providerName}`);
             },
@@ -4426,7 +4431,10 @@ export async function ejecutarFuenteActiva(): Promise<void> {
               (fuente.url.includes('mp4upload.com') || fuente.url.includes('yourupload.com'))
             ) {
               retriedFreshToken = true;
-              void StreamExtractor.extract(fuente.url, { forceRefresh: true }).then((fresh) => {
+              void StreamExtractor.extract(fuente.url, {
+                forceRefresh: true,
+                timeoutMs: hasOtherPlayableServers() ? 4000 : 10000
+              }).then((fresh) => {
                 if (fresh?.type === 'mp4' && fresh.streamUrl && isCurrentExecutionStillActive()) {
                   vidEl.src = fresh.streamUrl;
                   vidEl.load();
@@ -4476,14 +4484,13 @@ export async function ejecutarFuenteActiva(): Promise<void> {
             startupTimeoutMs: NATIVE_STARTUP_FAILOVER_MS,
             fullTimeoutMs: NATIVE_BUFFER_TIMEOUT_MS,
             isStillActive: isCurrentExecutionStillActive,
-            hasAlternativeServers: () =>
-              countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1,
+            hasAlternativeServers: hasOtherPlayableServers,
             onAbortAttempt: () => {
               teardownActiveMediaElement(container);
             },
             onFastFailover: () => {
               statusDot.className = 'status-dot warning';
-              statusLabel.textContent = `${fuente.providerName} sin respuesta (8s) · saltando al siguiente servidor...`;
+              statusLabel.textContent = `${fuente.providerName} sin respuesta (${startupSecsLabel}s) · saltando al siguiente servidor...`;
               videoSourceManager.markSourceFailed(fuente.url);
               probarFuenteAlternativa(`Failover desde ${fuente.providerName}`);
             },

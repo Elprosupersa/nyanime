@@ -696,11 +696,13 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
       'HentaiLA (YourUpload)',
       'HentaiLA (MP4Upload)'
     ]);
-    expect(epSources[0].score).toBe(150);
+    expect(epSources[0].score).toBe(146);
     expect(epSources[2].url).toBe('https://www.mp4upload.com/embed-uemy12kknyvj.html');
 
     const ranked = rankAndDeduplicateSources(epSources, 'SUB');
-    expect(ranked[0].providerName).toBe('HentaiLA (VIP)');
+    expect(ranked[0].providerName).toBe('HentaiLA (MP4Upload)');
+    expect(ranked[1].providerName).toBe('HentaiLA (VIP)');
+    expect(ranked[2].providerName).toBe('HentaiLA (YourUpload)');
 
     const detail = parseHentaiLaMediaDetail({
       nodes: [
@@ -1018,41 +1020,19 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
     expect(pickBestSlugMatch(['rance-hikari-o-motomete-season-2'], ['Rance 01: Hikari wo Motomete THE ANIMATION'], 1, 'OVA')).toBeNull();
   });
 
-  it('prioritizes MP4Upload and native HLS over YourUpload within the same language while keeping YourUpload above Mega', () => {
+  it('enforces target same-language order: Desu HLS / MP4Upload Directo > HentaiLA (VIP) HLS > Vidhide / StreamWish / MultiEmbed > YourUpload Directo > Archive / Mega / Okru', () => {
     const ranked = rankAndDeduplicateSources(
       [
         {
-          providerId: 'hentaila',
-          providerName: 'HentaiLA (YourUpload)',
-          serverName: 'YourUpload',
-          url: 'https://www.yourupload.com/embed/slow123',
+          providerId: 'tioanime',
+          providerName: 'TíoAnime (Okru)',
+          serverName: 'Okru',
+          url: 'https://ok.ru/videoembed/999',
           language: 'SUB',
           quality: '1080p',
-          type: 'mp4',
-          direct: true,
-          score: 142
-        },
-        {
-          providerId: 'hentaila',
-          providerName: 'HentaiLA (MP4Upload)',
-          serverName: 'MP4Upload',
-          url: 'https://www.mp4upload.com/embed-fast123.html',
-          language: 'SUB',
-          quality: '1080p',
-          type: 'mp4',
-          direct: true,
-          score: 146
-        },
-        {
-          providerId: 'animeav1',
-          providerName: 'AnimeAV1 (HLS)',
-          serverName: 'HLS',
-          url: 'https://cdn.example.com/stream/master.m3u8',
-          language: 'SUB',
-          quality: '1080p',
-          type: 'hls',
-          direct: true,
-          score: 140
+          type: 'embed',
+          direct: false,
+          score: 94
         },
         {
           providerId: 'tvanime',
@@ -1064,15 +1044,120 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
           type: 'embed',
           direct: false,
           score: 98
+        },
+        {
+          providerId: 'archive_org',
+          providerName: 'Archive Español HD (Direct MP4)',
+          serverName: 'Archive Direct',
+          url: 'https://archive.org/download/test/ep1.mp4',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'mp4',
+          direct: true,
+          score: 112
+        },
+        {
+          providerId: 'hentaila',
+          providerName: 'HentaiLA (YourUpload)',
+          serverName: 'YourUpload',
+          url: 'https://www.yourupload.com/embed/slow123',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'mp4',
+          direct: true,
+          score: 124
+        },
+        {
+          providerId: 'multiembed',
+          providerName: 'MultiEmbed (Sub)',
+          serverName: 'MultiEmbed',
+          url: 'https://multiembed.mov/?video_id=12345&tmdb=1&s=1&e=1',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'embed',
+          direct: false,
+          score: 132
+        },
+        {
+          providerId: 'jkanime',
+          providerName: 'JKAnime (StreamWish)',
+          serverName: 'StreamWish',
+          url: 'https://streamwish.to/e/sw123',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'embed',
+          direct: false,
+          score: 134
+        },
+        {
+          providerId: 'jkanime',
+          providerName: 'JKAnime (Vidhide)',
+          serverName: 'Vidhide',
+          url: 'https://vidhidevip.com/v/vh123',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'embed',
+          direct: false,
+          score: 134
+        },
+        {
+          providerId: 'hentaila',
+          providerName: 'HentaiLA (VIP)',
+          serverName: 'VIP',
+          url: 'https://cdn.dotanborito.net/m3u8/0123456789abcdef0123456789abcdef',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'hls',
+          direct: true,
+          score: 146
+        },
+        {
+          providerId: 'hentaila',
+          providerName: 'HentaiLA (MP4Upload)',
+          serverName: 'MP4Upload',
+          url: 'https://www.mp4upload.com/embed-fast123.html',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'mp4',
+          direct: true,
+          score: 154
+        },
+        {
+          providerId: 'jkanime',
+          providerName: 'JKAnime (Desu)',
+          serverName: 'Desu',
+          url: 'https://cdn01.playmudos.com/hls/desu123/master.m3u8',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'hls',
+          direct: true,
+          score: 160
         }
       ],
       'SUB'
     );
 
     const order = ranked.map((s) => s.serverName);
-    expect(order.indexOf('MP4Upload')).toBeLessThan(order.indexOf('YourUpload'));
-    expect(order.indexOf('HLS')).toBeLessThan(order.indexOf('YourUpload'));
-    expect(order.indexOf('YourUpload')).toBeLessThan(order.indexOf('Mega'));
+    const idxOf = (name: string) => order.indexOf(name);
+
+    // Desu HLS & MP4Upload Directo above HentaiLA (VIP) HLS
+    expect(idxOf('Desu')).toBeLessThan(idxOf('VIP'));
+    expect(idxOf('MP4Upload')).toBeLessThan(idxOf('VIP'));
+
+    // HentaiLA (VIP) HLS above Vidhide / StreamWish / MultiEmbed
+    expect(idxOf('VIP')).toBeLessThan(idxOf('Vidhide'));
+    expect(idxOf('VIP')).toBeLessThan(idxOf('StreamWish'));
+    expect(idxOf('VIP')).toBeLessThan(idxOf('MultiEmbed'));
+
+    // Reliable embeds (Vidhide / StreamWish / MultiEmbed) above YourUpload Directo
+    expect(idxOf('Vidhide')).toBeLessThan(idxOf('YourUpload'));
+    expect(idxOf('StreamWish')).toBeLessThan(idxOf('YourUpload'));
+    expect(idxOf('MultiEmbed')).toBeLessThan(idxOf('YourUpload'));
+
+    // YourUpload Directo above Archive Direct / Mega / Okru
+    expect(idxOf('YourUpload')).toBeLessThan(idxOf('Archive Direct'));
+    expect(idxOf('Archive Direct')).toBeLessThan(idxOf('Mega'));
+    expect(idxOf('Mega')).toBeLessThan(idxOf('Okru'));
   });
 });
 

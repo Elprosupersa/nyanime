@@ -51,7 +51,7 @@ export function buildUpNextCountdownText(nextEpisodeNum: number, secondsLeft: nu
   return `Siguiente: Ep. ${ep} en ${secs}s...`;
 }
 
-export const NATIVE_STARTUP_FAILOVER_MS = 8000;
+export const NATIVE_STARTUP_FAILOVER_MS = 5000;
 export const NATIVE_BUFFER_TIMEOUT_MS = 15000;
 
 export interface WatchdogVideoLike {
@@ -78,9 +78,9 @@ export interface NativeStartupWatchdogHandle {
 
 /**
  * Watches a native <video> element during startup:
- * - If readyState remains 0 (no metadata / no first frame) for 8s and alternative servers exist,
+ * - If readyState remains 0 (no metadata / no first frame) for 5s and alternative servers exist,
  *   aborts the stalled attempt immediately and triggers automatic failover to the next server.
- * - If metadata arrives (readyState >= 1), cancels the 8s fast failover and allows up to 15s
+ * - If metadata arrives (readyState >= 1) or no alternative servers exist, allows up to 15s
  *   for first-frame buffering before falling back or showing a timeout notice.
  */
 export function attachNativeStartupFailoverWatchdog(
@@ -138,7 +138,8 @@ export function attachNativeStartupFailoverWatchdog(
       clearTimers();
       detachListeners();
       options.onAbortAttempt();
-      options.onFastFailover('Sin respuesta inicial en 8s · saltando al siguiente servidor...');
+      const secs = Math.max(1, Math.round(startupMs / 1000));
+      options.onFastFailover(`Sin respuesta inicial en ${secs}s · saltando al siguiente servidor...`);
     }
   }, startupMs);
 

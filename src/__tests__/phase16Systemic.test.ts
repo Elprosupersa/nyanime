@@ -235,11 +235,11 @@ describe('Fase 1.6 — Systemic JKAnime, Health Probes, Strict SUB/LAT, Deduplic
 
     // Deduplicated cleanly: 11 raw -> 9 unique
     expect(ranked).toHaveLength(9);
-    // Exact priority order verified: live direct native hosts (Desu, MP4Upload, YourUpload, StreamWish) > Archive Direct > Mega > Okru > TransferIt
+    // Exact priority order verified: Desu > MP4Upload > StreamWish > YourUpload > Archive Direct > Mega > Okru > TransferIt
     expect(ranked[0].serverName).toBe('Desu');
     expect(ranked[1].serverName).toBe('MP4Upload');
-    expect(ranked[2].serverName).toBe('YourUpload');
-    expect(ranked[3].serverName).toBe('StreamWish');
+    expect(ranked[2].serverName).toBe('StreamWish');
+    expect(ranked[3].serverName).toBe('YourUpload');
     expect(ranked[4].serverName).toBe('Archive Direct');
     const megaIdx = ranked.findIndex((s) => s.serverName === 'Mega');
     const okruIdx = ranked.findIndex((s) => s.serverName === 'Okru');

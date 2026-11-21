@@ -109,25 +109,27 @@ export function isBlockedOrUnsafeStreamHost(url: string, serverName = ''): boole
 export const JKANIME_PROVIDER_BONUS = 14;
 
 const SERVER_RELIABILITY_SCORES: Record<string, number> = {
-  // Tier 1: Native HLS 1080p Ad-Free (JKAnime Desu/Desuka & VIP Dotanborito)
-  desu: 156,
-  desuv: 154,
-  desuka: 152,
-  vip: 150,
-  dotanborito: 150,
-  // Tier 2: Direct MP4 Ad-Free (MP4Upload slightly above YourUpload due to lower initial timeout rate)
-  mp4upload: 146,
-  yourupload: 142,
-  // Tier 3: Extractable HLS cyberlockers
-  streamwish: 132,
-  flaswish: 132,
-  wish: 130,
-  vidhide: 128,
-  filelions: 126,
-  ryderjet: 126,
-  // Tier 4: Verified Spanish Archive.org Direct MP4 (below MP4Upload/YourUpload/verified HLS, above embeds)
-  archivedirect: 122,
-  // Tier 5: Verified fallback embeds (sandboxed Filemoon/Mega first, then Okru/Archive Embed/MixDrop/Byse/Uqload/Lulu/Dood)
+  // Tier 1: Fastest Native HLS / Direct MP4 (Desu HLS & MP4Upload Directo)
+  desu: 160,
+  desuv: 158,
+  desuka: 156,
+  mp4upload: 154,
+  // Tier 2: HentaiLA (VIP) HLS / Dotanborito (below Desu & MP4Upload due to higher initial timeout rate)
+  vip: 146,
+  dotanborito: 146,
+  // Tier 3: Reliable embeds & extractable cyberlockers (Vidhide / StreamWish / MultiEmbed above YourUpload)
+  vidhide: 134,
+  streamwish: 134,
+  flaswish: 134,
+  wish: 132,
+  multiembed: 132,
+  filelions: 128,
+  ryderjet: 128,
+  // Tier 4: YourUpload Directo (lowered below reliable embeds due to ~30% initial timeouts)
+  yourupload: 124,
+  // Tier 5: Verified Spanish Archive.org Direct MP4 (below YourUpload, above Mega/Okru embeds)
+  archivedirect: 112,
+  // Tier 6: Verified fallback embeds (sandboxed Filemoon/Mega first, then Okru/Archive Embed/MixDrop/Byse/Uqload/Lulu/Dood)
   filemoon: 102,
   mega: 98,
   okru: 94,
@@ -148,9 +150,8 @@ const SERVER_RELIABILITY_SCORES: Record<string, number> = {
   zilla: 70,
   vidguard: 68,
   stream: 66,
-  multiembed: 62,
   vidsrc: 60,
-  // Tier 6: Non-embeddable external hosts (never auto-selected)
+  // Tier 7: Non-embeddable external hosts (never auto-selected)
   transferit: -120
 };
 
@@ -2289,14 +2290,47 @@ export function rankAndDeduplicateSources(
     const externalOnly = Boolean(raw.externalOnly) || isNonEmbeddableHost(cleanUrl, raw.serverName);
     let score = Number(raw.score ?? getServerBaseScore(raw.serverName));
     const isHlsStream = raw.type === 'hls';
-    const isYourUploadHost = fp.hostKey === 'yourupload' || /yourupload/i.test(String(raw.serverName || ''));
+    const serverNorm = String(raw.serverName || '').toLowerCase();
+    const isHentaiLaVip =
+      fp.hostKey === 'dotanborito' ||
+      (raw.providerId === 'hentaila' && /\bvip\b/i.test(serverNorm));
+    const isYourUploadHost = fp.hostKey === 'yourupload' || /yourupload/i.test(serverNorm);
+    const isArchiveDirectHost =
+      fp.hostKey === 'archive' || /archivedirect/i.test(serverNorm.replace(/\s+/g, ''));
+    const isCyberlockerHls =
+      isHlsStream &&
+      (fp.hostKey === 'streamwish' ||
+        fp.hostKey === 'vidhide' ||
+        fp.hostKey === 'filelions' ||
+        /streamwish|flaswish|vidhide|filelions|ryderjet/i.test(serverNorm));
+
     if (isHlsStream) {
-      // Prioritize verified native HLS streams over direct YourUpload within the same language
-      if (score < 144) score = 144;
-      score += 16;
+      if (isHentaiLaVip) {
+        // HentaiLA (VIP) HLS ranks below Desu HLS & MP4Upload Directo, above Vidhide/StreamWish/MultiEmbed
+        score = Math.min(Math.max(score, 146), 146) + 6;
+      } else if (isCyberlockerHls) {
+        // Extracted Vidhide/StreamWish HLS stays below HentaiLA (VIP) HLS and above YourUpload Directo
+        score = Math.min(Math.max(score, 134), 138) + 10;
+      } else {
+        // Desu HLS & verified native HLS streams
+        if (score < 146) score = 146;
+        score += 14;
+      }
     } else if (isDirectLike) {
-      // Slightly prioritize MP4Upload/other direct streams over YourUpload (higher initial timeout rate)
-      score += isYourUploadHost ? 8 : 12;
+      if (isYourUploadHost) {
+        // Keep YourUpload Directo below Vidhide/StreamWish/MultiEmbed embeds (132..134) and above Archive/Mega/Okru
+        score = Math.min(score, 124) + 4;
+      } else if (isArchiveDirectHost) {
+        // Keep Archive Direct below YourUpload Directo (128) and above Mega/Okru
+        score = Math.min(score, 112) + 8;
+      } else {
+        // MP4Upload Directo & other verified direct MP4 streams
+        score += 14;
+      }
+    } else if (isHentaiLaVip) {
+      score = Math.min(score, 146);
+    } else if (isYourUploadHost) {
+      score = Math.min(score, 124);
     }
     if (targetMode === 'LATINO') {
       if (raw.language === 'LATINO') score += 60;
@@ -3053,7 +3087,7 @@ export function parseHentaiLaEpisodeSources(payload: unknown): AnimeSourceCandid
     const serverName = normalizePortalServerName(cleanServerRaw, rawUrl);
     if (isBlockedOrUnsafeStreamHost(rawUrl, serverName)) return;
     const isVip = serverName.toUpperCase() === 'VIP' || rawUrl.includes('dotanborito.net');
-    const score = isVip ? 150 : Math.min(148, getServerBaseScore(serverName));
+    const score = isVip ? getServerBaseScore('VIP') : getServerBaseScore(serverName);
     results.push({
       providerId: 'hentaila',
       providerName: isVip ? 'HentaiLA (VIP)' : `HentaiLA (${serverName})`,

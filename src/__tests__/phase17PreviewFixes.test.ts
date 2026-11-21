@@ -245,8 +245,8 @@ describe('Preview Streaming Fixes — Mega Probe, Archive RAW Block, Native Vide
       'SUB'
     );
     expect(ranked.map((s) => s.serverName)).toEqual([
-      'HLS',
       'MP4Upload',
+      'HLS',
       'YourUpload',
       'Archive Direct',
       'Mega',
