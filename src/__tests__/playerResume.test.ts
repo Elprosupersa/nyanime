@@ -12,6 +12,9 @@ vi.mock('../firebase.ts', () => ({
 }));
 
 import {
+  NATIVE_BUFFER_TIMEOUT_MS,
+  NATIVE_STARTUP_FAILOVER_MS,
+  attachNativeStartupFailoverWatchdog,
   buildUpNextCountdownText,
   computeProgressPercent,
   formatPlaybackTime,
@@ -52,6 +55,139 @@ describe('playerResume helpers', () => {
     expect(formatPlaybackTime(125)).toBe('02:05');
     expect(formatPlaybackTime(3665)).toBe('01:01:05');
     expect(buildUpNextCountdownText(2, 5)).toBe('Siguiente: Ep. 2 en 5s...');
+  });
+
+  it('aborts and triggers fast failover at 8s when native <video> stays at readyState === 0 and alternative servers exist', () => {
+    vi.useFakeTimers();
+    try {
+      const listeners = new Map<string, Set<() => void>>();
+      const fakeVideo = {
+        readyState: 0,
+        addEventListener(type: string, fn: () => void) {
+          if (!listeners.has(type)) listeners.set(type, new Set());
+          listeners.get(type)!.add(fn);
+        },
+        removeEventListener(type: string, fn: () => void) {
+          listeners.get(type)?.delete(fn);
+        },
+        emit(type: string) {
+          for (const fn of Array.from(listeners.get(type) || [])) fn();
+        }
+      };
+
+      const onAbortAttempt = vi.fn();
+      const onFastFailover = vi.fn();
+      const onFinalTimeout = vi.fn();
+
+      attachNativeStartupFailoverWatchdog({
+        video: fakeVideo,
+        isStillActive: () => true,
+        hasAlternativeServers: () => true,
+        onAbortAttempt,
+        onFastFailover,
+        onFinalTimeout
+      });
+
+      vi.advanceTimersByTime(NATIVE_STARTUP_FAILOVER_MS - 1);
+      expect(onAbortAttempt).not.toHaveBeenCalled();
+      expect(onFastFailover).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      expect(onAbortAttempt).toHaveBeenCalledTimes(1);
+      expect(onFastFailover).toHaveBeenCalledTimes(1);
+      expect(onFinalTimeout).not.toHaveBeenCalled();
+
+      // Advancing past 15s must not fire a second time once already failed over
+      vi.advanceTimersByTime(NATIVE_BUFFER_TIMEOUT_MS);
+      expect(onFastFailover).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels 8s fast failover once metadata arrives (readyState >= 1) and does not fail over after canplay', () => {
+    vi.useFakeTimers();
+    try {
+      const listeners = new Map<string, Set<() => void>>();
+      const fakeVideo = {
+        readyState: 0,
+        addEventListener(type: string, fn: () => void) {
+          if (!listeners.has(type)) listeners.set(type, new Set());
+          listeners.get(type)!.add(fn);
+        },
+        removeEventListener(type: string, fn: () => void) {
+          listeners.get(type)?.delete(fn);
+        },
+        emit(type: string) {
+          for (const fn of Array.from(listeners.get(type) || [])) fn();
+        }
+      };
+
+      const onAbortAttempt = vi.fn();
+      const onFastFailover = vi.fn();
+      const onFinalTimeout = vi.fn();
+
+      attachNativeStartupFailoverWatchdog({
+        video: fakeVideo,
+        isStillActive: () => true,
+        hasAlternativeServers: () => true,
+        onAbortAttempt,
+        onFastFailover,
+        onFinalTimeout
+      });
+
+      vi.advanceTimersByTime(4000);
+      fakeVideo.readyState = 1;
+      fakeVideo.emit('loadedmetadata');
+
+      // Passing 8s must NOT abort because metadata arrived
+      vi.advanceTimersByTime(5000);
+      expect(onAbortAttempt).not.toHaveBeenCalled();
+      expect(onFastFailover).not.toHaveBeenCalled();
+
+      // First frame ready before 15s settles cleanly
+      fakeVideo.readyState = 3;
+      fakeVideo.emit('canplay');
+      vi.advanceTimersByTime(NATIVE_BUFFER_TIMEOUT_MS);
+      expect(onAbortAttempt).not.toHaveBeenCalled();
+      expect(onFastFailover).not.toHaveBeenCalled();
+      expect(onFinalTimeout).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits until full timeout and notifies user when no alternative servers are available', () => {
+    vi.useFakeTimers();
+    try {
+      const fakeVideo = {
+        readyState: 0,
+        addEventListener: () => {},
+        removeEventListener: () => {}
+      };
+      const onAbortAttempt = vi.fn();
+      const onFastFailover = vi.fn();
+      const onFinalTimeout = vi.fn();
+
+      attachNativeStartupFailoverWatchdog({
+        video: fakeVideo,
+        isStillActive: () => true,
+        hasAlternativeServers: () => false,
+        onAbortAttempt,
+        onFastFailover,
+        onFinalTimeout
+      });
+
+      vi.advanceTimersByTime(NATIVE_STARTUP_FAILOVER_MS);
+      expect(onAbortAttempt).not.toHaveBeenCalled();
+      expect(onFastFailover).not.toHaveBeenCalled();
+      expect(onFinalTimeout).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(NATIVE_BUFFER_TIMEOUT_MS - NATIVE_STARTUP_FAILOVER_MS);
+      expect(onFinalTimeout).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

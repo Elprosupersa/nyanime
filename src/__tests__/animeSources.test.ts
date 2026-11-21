@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeSlugText,
+  extractAnimeTitleTargets,
+  expandRomajiParticleVariants,
   extractMainTitleSegments,
   generateAnimeSlugCandidates,
   extractBestSearchQuery,
@@ -909,6 +911,168 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
         'TV'
       )
     ).toBeNull();
+  });
+
+  it('resolves hyphenless compound words, wo/o phonetics, ordinal prefixes before colon, Main: Subtitle THE ANIMATION, and AniList romaji/synonyms priority', () => {
+    // 1. Compound hyphenless matching: Ane wa Yanmama Junyuu-chuu -> ane-wa-yan-mama-junyuu-chuu
+    expect(
+      pickBestSlugMatch(
+        ['ane-wa-yan-mama-junyuu-chuu', 'ane-wa-yan-mama-junyuu-chuu-2'],
+        ['Ane wa Yanmama Junyuu-chuu'],
+        1,
+        'OVA'
+      )
+    ).toBe('ane-wa-yan-mama-junyuu-chuu');
+
+    // 2. Single-word hyphenless split: Dropout -> drop-out (without breaking sequel protection)
+    expect(
+      pickBestSlugMatch(['drop-out'], ['Dropout'], 1, 'OVA')
+    ).toBe('drop-out');
+    expect(
+      pickBestSlugMatch(['drop-out-ova'], ['Dropout'], 1, 'OVA')
+    ).toBe('drop-out-ova');
+    expect(
+      pickBestSlugMatch(['drop-out-2nd-season', 'drop-out-2'], ['Dropout'], 1, 'OVA')
+    ).toBeNull();
+    expect(
+      pickBestSlugMatch(['drop-out'], ['Dropout Season 2'], 2, 'OVA')
+    ).toBeNull();
+
+    // 3. Phonetic wo <-> o + zero-padded ordinal before colon: Rance 01: Hikari wo Motomete THE ANIMATION -> rance-hikari-o-motomete
+    expect(expandRomajiParticleVariants('rance-hikari-wo-motomete')).toEqual([
+      'rance-hikari-wo-motomete',
+      'rance-hikari-o-motomete'
+    ]);
+    const ranceCandidates = generateAnimeSlugCandidates(
+      'Rance 01: Hikari wo Motomete THE ANIMATION',
+      null,
+      null,
+      1
+    );
+    expect(ranceCandidates).toContain('rance-hikari-o-motomete');
+    expect(ranceCandidates).toContain('rance-hikari-wo-motomete');
+    expect(
+      pickBestSlugMatch(
+        ['rance-hikari-o-motomete'],
+        ['Rance 01: Hikari wo Motomete THE ANIMATION'],
+        1,
+        'OVA'
+      )
+    ).toBe('rance-hikari-o-motomete');
+    expect(
+      pickBestSlugMatch(
+        ['rance-01-hikari-o-motomete'],
+        ['Rance 01: Hikari wo Motomete THE ANIMATION'],
+        1,
+        'OVA'
+      )
+    ).toBe('rance-01-hikari-o-motomete');
+
+    // 4. "Main Title: Subtitle... THE ANIMATION" -> "main-title-the-animation"
+    const bakuAneTitle = 'Baku Ane: Otouto Shibocchau zo! THE ANIMATION';
+    const bakuAneCandidates = generateAnimeSlugCandidates(bakuAneTitle, null, null, 1);
+    expect(bakuAneCandidates).toContain('baku-ane-the-animation');
+    expect(
+      pickBestSlugMatch(['baku-ane-the-animation'], [bakuAneTitle], 1, 'OVA')
+    ).toBe('baku-ane-the-animation');
+    // Sequel protection still rejects Season 1 compact slug when requesting Season 2
+    expect(
+      pickBestSlugMatch(['baku-ane-the-animation'], ['Baku Ane 2: Otouto Ippai Shibocchau zo! THE ANIMATION'], 2, 'OVA')
+    ).toBeNull();
+
+    // 5. AniList media with English display title + romaji + Latin/CJK synonyms -> matches romaji slug
+    const erogeMedia = {
+      title: {
+        english: 'Eroge! Sex and Gamedev',
+        romaji: 'Eroge! H mo Game mo Kaihatsu Zanmai',
+        native: 'えろげー！～Hもゲームも開発三昧～'
+      },
+      synonyms: ['えろげー!', 'Eroge! H mo Game mo Kaihatsu Zanmai OVA']
+    };
+    const targets = extractAnimeTitleTargets(erogeMedia);
+    expect(targets[0]).toBe('Eroge! H mo Game mo Kaihatsu Zanmai');
+    expect(targets).toContain('Eroge! Sex and Gamedev');
+    expect(targets).toContain('Eroge! H mo Game mo Kaihatsu Zanmai OVA');
+    expect(targets).not.toContain('えろげー!');
+
+    const erogeQueries = buildAnimeSearchQueries(
+      erogeMedia.title.romaji,
+      erogeMedia.title.english,
+      erogeMedia.title.english,
+      erogeMedia.synonyms
+    );
+    expect(erogeQueries[0]).toBe('Eroge H mo Game mo Kaihatsu Zanmai');
+    expect(erogeQueries).toContain('Eroge Sex and Gamedev');
+
+    expect(
+      pickBestSlugMatch(
+        ['eroge-h-mo-game-mo-kaihatsu-zanmai', 'unrelated-gamedev-story'],
+        targets,
+        1,
+        'OVA'
+      )
+    ).toBe('eroge-h-mo-game-mo-kaihatsu-zanmai');
+
+    // 6. Strict false-positive & sequel guards remain intact
+    expect(pickBestSlugMatch(['drop-out-special-spin-off'], ['Dropout'], 1, 'TV')).toBeNull();
+    expect(pickBestSlugMatch(['rance-hikari-o-motomete-season-2'], ['Rance 01: Hikari wo Motomete THE ANIMATION'], 1, 'OVA')).toBeNull();
+  });
+
+  it('prioritizes MP4Upload and native HLS over YourUpload within the same language while keeping YourUpload above Mega', () => {
+    const ranked = rankAndDeduplicateSources(
+      [
+        {
+          providerId: 'hentaila',
+          providerName: 'HentaiLA (YourUpload)',
+          serverName: 'YourUpload',
+          url: 'https://www.yourupload.com/embed/slow123',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'mp4',
+          direct: true,
+          score: 142
+        },
+        {
+          providerId: 'hentaila',
+          providerName: 'HentaiLA (MP4Upload)',
+          serverName: 'MP4Upload',
+          url: 'https://www.mp4upload.com/embed-fast123.html',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'mp4',
+          direct: true,
+          score: 146
+        },
+        {
+          providerId: 'animeav1',
+          providerName: 'AnimeAV1 (HLS)',
+          serverName: 'HLS',
+          url: 'https://cdn.example.com/stream/master.m3u8',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'hls',
+          direct: true,
+          score: 140
+        },
+        {
+          providerId: 'tvanime',
+          providerName: 'TVAnime (Mega)',
+          serverName: 'Mega',
+          url: 'https://mega.nz/embed/abc#key',
+          language: 'SUB',
+          quality: '1080p',
+          type: 'embed',
+          direct: false,
+          score: 98
+        }
+      ],
+      'SUB'
+    );
+
+    const order = ranked.map((s) => s.serverName);
+    expect(order.indexOf('MP4Upload')).toBeLessThan(order.indexOf('YourUpload'));
+    expect(order.indexOf('HLS')).toBeLessThan(order.indexOf('YourUpload'));
+    expect(order.indexOf('YourUpload')).toBeLessThan(order.indexOf('Mega'));
   });
 });
 

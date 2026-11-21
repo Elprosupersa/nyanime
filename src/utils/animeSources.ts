@@ -115,7 +115,7 @@ const SERVER_RELIABILITY_SCORES: Record<string, number> = {
   desuka: 152,
   vip: 150,
   dotanborito: 150,
-  // Tier 2: Direct MP4 Ad-Free (always above Archive.org & Mega)
+  // Tier 2: Direct MP4 Ad-Free (MP4Upload slightly above YourUpload due to lower initial timeout rate)
   mp4upload: 146,
   yourupload: 142,
   // Tier 3: Extractable HLS cyberlockers
@@ -192,6 +192,69 @@ export function normalizeSlugText(raw: string, options?: NormalizeSlugOptions): 
     .replace(/-+/g, '-');
 }
 
+export interface AnimeMediaTitleLike {
+  title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
+  romaji?: string | null;
+  english?: string | null;
+  seasonTitle?: string | null;
+  synonyms?: ReadonlyArray<string | null | undefined> | null;
+}
+
+export function isLatinQueryableTitle(raw?: string | null): boolean {
+  const s = String(raw || '').trim();
+  if (s.length < 2) return false;
+  return /[a-zA-Z0-9]{2,}/.test(s);
+}
+
+/**
+ * Extracts deduplicated, Romaji-first Latin title targets from an AniList media object or context,
+ * always keeping title.romaji, title.english, seasonTitle, and Latin/Romaji synonyms eligible.
+ */
+export function extractAnimeTitleTargets(input: AnimeMediaTitleLike | null | undefined): string[] {
+  if (!input) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (val?: string | null) => {
+    const cleaned = String(val || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned || !isLatinQueryableTitle(cleaned)) return;
+    const key = cleaned.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(cleaned);
+    }
+  };
+
+  push(input.title?.romaji);
+  push(input.romaji);
+  push(input.title?.english);
+  push(input.english);
+  push(input.seasonTitle);
+  if (Array.isArray(input.synonyms)) {
+    for (const syn of input.synonyms) {
+      push(syn);
+    }
+  }
+  return out;
+}
+
+export function expandRomajiParticleVariants(slug: string): string[] {
+  const s = String(slug || '').trim();
+  if (!s) return [];
+  const out = new Set<string>([s]);
+  if (/(?:^|-)wo(?=-|$)/.test(s)) {
+    out.add(s.replace(/(^|-)wo(?=-|$)/g, '$1o'));
+  }
+  if (/(?:^|-)o(?=-|$)/.test(s)) {
+    out.add(s.replace(/(^|-)o(?=-|$)/g, '$1wo'));
+  }
+  return Array.from(out);
+}
+
+function stripZeroPaddedOrdinalSuffix(text: string): string | null {
+  const m = String(text || '').trim().match(/^(.{3,}?)\s+0[1-9]\s*$/);
+  return m?.[1] ? m[1].trim() : null;
+}
+
 export function extractMainTitleSegments(raw: string): string[] {
   const trimmed = String(raw || '').replace(/\s+/g, ' ').trim();
   if (!trimmed) return [];
@@ -229,8 +292,29 @@ export function extractMainTitleSegments(raw: string): string[] {
   // Pre-colon main title (index >= 3 avoids splitting short prefixes like "Re:Zero" or "Re:Creators")
   const colonIdx = trimmed.indexOf(':', 3);
   if (colonIdx > 2) {
-    const beforeColon = trimmed.slice(0, colonIdx);
+    const beforeColon = trimmed.slice(0, colonIdx).trim();
+    const afterColon = trimmed.slice(colonIdx + 1).trim();
     pushSegment(beforeColon);
+
+    const beforeColonNoOrd = stripZeroPaddedOrdinalSuffix(beforeColon);
+    if (beforeColonNoOrd) {
+      if (afterColon) {
+        pushSegment(`${beforeColonNoOrd}: ${afterColon}`);
+      }
+      pushSegment(beforeColonNoOrd);
+    }
+
+    // Compact "Main Title: Long Subtitle... THE ANIMATION" -> "Main Title The Animation"
+    if (/\bthe\s+animation\s*$/i.test(afterColon) && !/\bthe\s+animation\s*$/i.test(beforeColon)) {
+      const cleanHead = beforeColon.replace(/[:\-–—\s]+$/g, '').trim();
+      if (cleanHead.length >= 3) {
+        pushSegment(`${cleanHead} The Animation`);
+      }
+      if (beforeColonNoOrd) {
+        pushSegment(`${beforeColonNoOrd} The Animation`);
+      }
+    }
+
     const beforeColonDash = beforeColon.match(/^(.{3,}?)\s+[-–—]\s+.+$/);
     if (beforeColonDash?.[1]) {
       pushSegment(beforeColonDash[1]);
@@ -278,11 +362,19 @@ export function generateAnimeSlugCandidates(
   const secondaryVariants = new Set<string>();
   const suffixVariants = new Set<string>();
   const extraSynonyms = Array.isArray(synonyms)
-    ? synonyms.filter((v): v is string => Boolean(v && v.trim())).slice(0, 4)
+    ? synonyms.filter((v): v is string => isLatinQueryableTitle(v)).slice(0, 6)
     : [];
   const titles = [romaji, seasonTitle, english, ...extraSynonyms].filter((v): v is string =>
-    Boolean(v && v.trim())
+    isLatinQueryableTitle(v)
   );
+
+  const addWithRomajiVariants = (targetSet: Set<string>, slugVal: string) => {
+    if (!slugVal) return;
+    targetSet.add(slugVal);
+    for (const v of expandRomajiParticleVariants(slugVal)) {
+      if (v !== slugVal) secondaryVariants.add(v);
+    }
+  };
 
   const addSeasonSlugs = (targetSet: Set<string>, slugBase: string, rawBase?: string) => {
     const clean = stripSeasonModifiersFromSlug(slugBase);
@@ -318,26 +410,26 @@ export function generateAnimeSlugCandidates(
     const mainSegments = extractMainTitleSegments(raw);
 
     if (seasonNum === 1) {
-      candidates.add(base);
+      addWithRomajiVariants(candidates, base);
       candidates.add(base.replace(/re-zero/g, 'rezero'));
       candidates.add(base.replace(/high-school/g, 'highschool'));
 
       if (raw.includes(';')) {
         const semiJoined = normalizeSlugText(raw.replace(/;/g, ''));
-        if (semiJoined) candidates.add(semiJoined);
+        if (semiJoined) addWithRomajiVariants(candidates, semiJoined);
       }
 
       if (cleanBase) {
-        candidates.add(cleanBase);
+        addWithRomajiVariants(candidates, cleanBase);
         candidates.add(cleanBase.replace(/re-zero/g, 'rezero'));
         suffixVariants.add(`${cleanBase}-tv`);
       }
 
       if (joinedBase && joinedBase !== base) {
-        secondaryVariants.add(joinedBase);
+        addWithRomajiVariants(secondaryVariants, joinedBase);
         const cleanJoined = stripSeasonModifiersFromSlug(joinedBase);
         if (cleanJoined) {
-          secondaryVariants.add(cleanJoined);
+          addWithRomajiVariants(secondaryVariants, cleanJoined);
           suffixVariants.add(`${cleanJoined}-tv`);
         }
       }
@@ -346,18 +438,18 @@ export function generateAnimeSlugCandidates(
         const segJoined = normalizeSlugText(seg, { joinApostrophes: true });
         const segHyphen = normalizeSlugText(seg);
         if (segJoined) {
-          secondaryVariants.add(segJoined);
+          addWithRomajiVariants(secondaryVariants, segJoined);
           secondaryVariants.add(segJoined.replace(/re-zero/g, 'rezero'));
           secondaryVariants.add(segJoined.replace(/high-school/g, 'highschool'));
           const cleanSegJoined = stripSeasonModifiersFromSlug(segJoined);
-          if (cleanSegJoined) secondaryVariants.add(cleanSegJoined);
+          if (cleanSegJoined) addWithRomajiVariants(secondaryVariants, cleanSegJoined);
         }
         if (segHyphen && segHyphen !== segJoined) {
-          secondaryVariants.add(segHyphen);
+          addWithRomajiVariants(secondaryVariants, segHyphen);
           secondaryVariants.add(segHyphen.replace(/re-zero/g, 'rezero'));
           secondaryVariants.add(segHyphen.replace(/high-school/g, 'highschool'));
           const cleanSegHyphen = stripSeasonModifiersFromSlug(segHyphen);
-          if (cleanSegHyphen) secondaryVariants.add(cleanSegHyphen);
+          if (cleanSegHyphen) addWithRomajiVariants(secondaryVariants, cleanSegHyphen);
         }
       }
     } else if (cleanBase) {
@@ -422,10 +514,14 @@ export function buildAnimeSearchQueries(
     text.replace(/([a-zA-Z0-9])[’'\u2018\u2019\u02bc]([a-zA-Z0-9])/g, '$1$2');
 
   const primaryInputs = [romaji, english, seasonTitle];
-  const extraInputs = Array.isArray(synonyms) ? synonyms : [];
+  const extraInputs = Array.isArray(synonyms)
+    ? synonyms.filter((s): s is string => isLatinQueryableTitle(s))
+    : [];
+  const allInputs = [...primaryInputs, ...extraInputs].filter((v): v is string => Boolean(v && v.trim()));
 
-  for (const raw of [...primaryInputs, ...extraInputs]) {
-    if (!raw || !raw.trim()) continue;
+  // Pass 1: Guarantee Romaji, English, seasonTitle, and Latin/Romaji synonyms enter queries before sub-variants crowd them out
+  for (let idx = 0; idx < allInputs.length; idx++) {
+    const raw = allInputs[idx];
     const base = cleanSingleSearchQuery(raw);
     if (!base) continue;
 
@@ -436,16 +532,40 @@ export function buildAnimeSearchQueries(
       pushQuery(base);
     }
 
+    // Keep immediate pre-colon main title right after the first primary title (e.g. DARKER THAN BLACK)
+    if (idx === 0 && base.includes(':')) {
+      const beforeColon = base.split(':')[0]?.trim() || '';
+      if (beforeColon.length >= 3) {
+        pushQuery(beforeColon.replace(/;/g, ' '));
+      }
+    }
+  }
+
+  // Pass 2: Derived compact/main-title, ordinal-stripped, and apostrophe-joined queries
+  for (const raw of allInputs) {
+    const base = cleanSingleSearchQuery(raw);
+    if (!base) continue;
+
     if (base.includes(':')) {
       const colonJoined = base.replace(/\b([a-zA-Z]{2,}):([a-zA-Z0-9]{2,})\b/g, '$1$2');
       if (colonJoined !== base) {
         const joinedHead = colonJoined.split(/[\s\-:]+/)[0]?.trim() || '';
         if (joinedHead.length >= 4) pushQuery(joinedHead);
       }
-      const beforeColon = base.split(':')[0]?.trim() || '';
+      const colonPos = base.indexOf(':');
+      const beforeColon = base.slice(0, colonPos).trim();
+      const afterColon = base.slice(colonPos + 1).trim();
       if (beforeColon.length >= 3) {
         const cleanedBeforeColon = beforeColon.replace(/;/g, ' ');
         pushQuery(cleanedBeforeColon);
+        const beforeNoOrd = stripZeroPaddedOrdinalSuffix(cleanedBeforeColon);
+        if (beforeNoOrd) {
+          pushQuery(beforeNoOrd);
+          if (afterColon) {
+            const afterClean = afterColon.replace(/\s+the\s+animation$/i, '').trim();
+            if (afterClean) pushQuery(`${beforeNoOrd} ${afterClean}`);
+          }
+        }
         const withoutAnim = cleanedBeforeColon.replace(/\s+the\s+animation$/i, '').trim();
         if (withoutAnim.length >= 3 && withoutAnim !== cleanedBeforeColon) {
           pushQuery(withoutAnim);
@@ -471,7 +591,7 @@ export function buildAnimeSearchQueries(
     }
   }
 
-  return out.slice(0, synonyms && synonyms.length > 0 ? 6 : 4);
+  return out.slice(0, extraInputs.length > 0 ? 8 : 6);
 }
 
 export function parseAnimeAv1CatalogLinks(html: string): string[] {
@@ -641,12 +761,14 @@ export function pickBestSlugMatch(
 
   interface MainTitleProfile {
     slugs: Set<string>;
+    compactSlugs: Set<string>;
     sigTokens: Set<string>;
     sigOrder: string[];
   }
 
   interface PreparedTarget {
     exactSlugs: Set<string>;
+    exactCompactSlugs: Set<string>;
     beforeColonSlug: string;
     usesNumberedSeasonTitle: boolean;
     hasDistinctSubtitle: boolean;
@@ -670,47 +792,94 @@ export function pickBestSlugMatch(
     return sig.length > 0 ? sig : parts.filter((tok) => tok.length >= 2 || tok === '0');
   };
 
-  const addSlugVariantsToSet = (targetSet: Set<string>, s: string) => {
+  const toCompactKey = (s: string): string => String(s || '').replace(/-/g, '');
+
+  const addSlugVariantsToSet = (targetSet: Set<string>, compactSet: Set<string>, s: string) => {
     if (!s) return;
-    targetSet.add(s);
-    if (s.includes('re-zero')) targetSet.add(s.replace(/re-zero/g, 'rezero'));
-    if (s.includes('high-school')) targetSet.add(s.replace(/high-school/g, 'highschool'));
+    const baseForms = new Set<string>([s]);
+    if (s.includes('re-zero')) baseForms.add(s.replace(/re-zero/g, 'rezero'));
+    if (s.includes('high-school')) baseForms.add(s.replace(/high-school/g, 'highschool'));
+
+    for (const form of baseForms) {
+      for (const phonetic of expandRomajiParticleVariants(form)) {
+        targetSet.add(phonetic);
+        const compact = toCompactKey(phonetic);
+        if (compact.length >= 4) {
+          compactSet.add(compact);
+        }
+      }
+    }
   };
 
   const preparedTargets: PreparedTarget[] = cleanTargets.map((t) => {
     const exactSlugs = new Set<string>();
+    const exactCompactSlugs = new Set<string>();
     const norm = normalizeSlugText(t);
     const joinedNorm = normalizeSlugText(t, { joinApostrophes: true });
+    const colonIdx = t.indexOf(':', 3);
+    const beforeColonRaw = colonIdx > 2 ? t.slice(0, colonIdx).trim() : '';
+    const afterColonRaw = colonIdx > 2 ? t.slice(colonIdx + 1).trim() : '';
     const usesNumberedSeasonTitle =
       /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t) ||
-      (seasonNum > 1 && /\s+(?:ii|iii|iv|[2-9])$/i.test(t.trim()));
-    const colonIdx = t.indexOf(':', 3);
-    const beforeColonSlug = colonIdx > 2 ? normalizeSlugText(t.slice(0, colonIdx)) : '';
+      (seasonNum > 1 &&
+        (/\s+(?:ii|iii|iv|[2-9])$/i.test(t.trim()) ||
+          Boolean(beforeColonRaw && /\s+(?:ii|iii|iv|[2-9])$/i.test(beforeColonRaw))));
+    const beforeColonSlug = beforeColonRaw ? normalizeSlugText(beforeColonRaw) : '';
     const hasDistinctSubtitle =
       !usesNumberedSeasonTitle &&
       (colonIdx > 2 || /\b(hen|arc|chapter|saga|part|cour|final|shippuuden|alchemist|brotherhood|alicization)\b/i.test(t));
 
     if (norm) {
-      addSlugVariantsToSet(exactSlugs, norm);
+      addSlugVariantsToSet(exactSlugs, exactCompactSlugs, norm);
       if (seasonNum === 1) {
         const stripped = stripSeasonModifiersFromSlug(norm);
-        if (stripped) addSlugVariantsToSet(exactSlugs, stripped);
+        if (stripped) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, stripped);
+      }
+      if (norm.endsWith('-the-animation')) {
+        const noAnim = norm.replace(/-the-animation$/, '');
+        if (noAnim.length >= 3) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, noAnim);
       }
     }
     if (joinedNorm && joinedNorm !== norm) {
-      addSlugVariantsToSet(exactSlugs, joinedNorm);
+      addSlugVariantsToSet(exactSlugs, exactCompactSlugs, joinedNorm);
       if (seasonNum === 1) {
         const strippedJoined = stripSeasonModifiersFromSlug(joinedNorm);
-        if (strippedJoined) addSlugVariantsToSet(exactSlugs, strippedJoined);
+        if (strippedJoined) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, strippedJoined);
+      }
+      if (joinedNorm.endsWith('-the-animation')) {
+        const noAnimJoined = joinedNorm.replace(/-the-animation$/, '');
+        if (noAnimJoined.length >= 3) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, noAnimJoined);
       }
     }
     if (t.includes(';')) {
       const semiJoined = normalizeSlugText(t.replace(/;/g, ''));
-      if (semiJoined) addSlugVariantsToSet(exactSlugs, semiJoined);
+      if (semiJoined) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, semiJoined);
+    }
+
+    // Handle zero-padded ordinal prefixes before colon (e.g. "Rance 01: Hikari wo Motomete THE ANIMATION" -> "rance-hikari-o-motomete")
+    if (beforeColonRaw && afterColonRaw) {
+      const beforeNoOrd = stripZeroPaddedOrdinalSuffix(beforeColonRaw);
+      if (beforeNoOrd) {
+        const noOrdFull = normalizeSlugText(`${beforeNoOrd} ${afterColonRaw}`);
+        const noOrdFullJoined = normalizeSlugText(`${beforeNoOrd} ${afterColonRaw}`, { joinApostrophes: true });
+        for (const variant of [noOrdFull, noOrdFullJoined]) {
+          if (!variant) continue;
+          addSlugVariantsToSet(exactSlugs, exactCompactSlugs, variant);
+          if (variant.endsWith('-the-animation')) {
+            const noAnim = variant.replace(/-the-animation$/, '');
+            if (noAnim.length >= 3) addSlugVariantsToSet(exactSlugs, exactCompactSlugs, noAnim);
+          }
+        }
+      }
     }
 
     const parts = tokenizeSlugParts(norm);
     const allTokens = new Set<string>(parts);
+    // Phonetic particle wo <-> o equivalence ONLY when target explicitly carries isolated particle wo or o
+    const rawNormTokens = norm.split('-').filter(Boolean);
+    if (rawNormTokens.includes('wo')) allTokens.add('o');
+    if (rawNormTokens.includes('o')) allTokens.add('wo');
+    if (rawNormTokens.includes('the')) allTokens.add('the');
     const sigOrder = extractSigOrder(parts);
     const sigTokens = new Set<string>(sigOrder);
 
@@ -740,16 +909,18 @@ export function pickBestSlugMatch(
       const segNorm = normalizeSlugText(seg);
       const segJoined = normalizeSlugText(seg, { joinApostrophes: true });
       const slugs = new Set<string>();
-      addSlugVariantsToSet(slugs, segNorm);
-      addSlugVariantsToSet(slugs, segJoined);
+      const compactSlugs = new Set<string>();
+      addSlugVariantsToSet(slugs, compactSlugs, segNorm);
+      addSlugVariantsToSet(slugs, compactSlugs, segJoined);
       if (seasonNum === 1) {
-        addSlugVariantsToSet(slugs, stripSeasonModifiersFromSlug(segNorm));
-        addSlugVariantsToSet(slugs, stripSeasonModifiersFromSlug(segJoined));
+        addSlugVariantsToSet(slugs, compactSlugs, stripSeasonModifiersFromSlug(segNorm));
+        addSlugVariantsToSet(slugs, compactSlugs, stripSeasonModifiersFromSlug(segJoined));
       }
       const segParts = tokenizeSlugParts(segNorm);
       const segSigOrder = extractSigOrder(segParts);
       return {
         slugs,
+        compactSlugs,
         sigTokens: new Set<string>(segSigOrder),
         sigOrder: segSigOrder
       };
@@ -757,6 +928,7 @@ export function pickBestSlugMatch(
 
     return {
       exactSlugs,
+      exactCompactSlugs,
       beforeColonSlug,
       usesNumberedSeasonTitle,
       hasDistinctSubtitle,
@@ -802,9 +974,13 @@ export function pickBestSlugMatch(
       const matchedSeqTokens: string[] = [];
 
       const strippedSlug = slug.replace(/-(?:tv|ova|ona|movie|pelicula|film|special)$/i, '');
+      const compactSlug = toCompactKey(slug);
+      const compactStrippedSlug = toCompactKey(strippedSlug);
       const isExact =
         pt.exactSlugs.has(slug) ||
-        (seasonNum === 1 && pt.exactSlugs.has(strippedSlug));
+        (seasonNum === 1 && pt.exactSlugs.has(strippedSlug)) ||
+        (compactSlug.length >= 4 && pt.exactCompactSlugs.has(compactSlug)) ||
+        (seasonNum === 1 && compactStrippedSlug.length >= 4 && pt.exactCompactSlugs.has(compactStrippedSlug));
 
       if (isExact) {
         score += 60;
@@ -865,7 +1041,7 @@ export function pickBestSlugMatch(
         }
       }
 
-      if (matchedCount === 0 || (pt.sigTokens.size > 0 && sigMatched.size === 0)) {
+      if (!isExact && (matchedCount === 0 || (pt.sigTokens.size > 0 && sigMatched.size === 0))) {
         continue;
       }
 
@@ -875,7 +1051,10 @@ export function pickBestSlugMatch(
       let matchesFrontConsecutive = false;
 
       for (const profile of pt.mainTitleProfiles) {
-        if (profile.slugs.has(slug) || (seasonNum === 1 && profile.slugs.has(strippedSlug))) {
+        const exactCompactMain =
+          (compactSlug.length >= 4 && profile.compactSlugs.has(compactSlug)) ||
+          (seasonNum === 1 && compactStrippedSlug.length >= 4 && profile.compactSlugs.has(compactStrippedSlug));
+        if (profile.slugs.has(slug) || (seasonNum === 1 && profile.slugs.has(strippedSlug)) || exactCompactMain) {
           isExactMainTitle = true;
           matchesMainTitle = true;
           matchesFrontConsecutive = true;
@@ -996,7 +1175,10 @@ export function pickBestSlugMatch(
         } else {
           score -= 70;
         }
-      } else if (seasonMarkerRegex && seasonMarkerRegex.test(slug)) {
+      } else if (
+        (seasonMarkerRegex && seasonMarkerRegex.test(slug)) ||
+        (pt.usesNumberedSeasonTitle && slugTokens.includes(String(seasonNum)))
+      ) {
         score += 32;
       } else if (hasAnyLaterSeasonMarker) {
         score -= 70;
@@ -2106,8 +2288,15 @@ export function rankAndDeduplicateSources(
 
     const externalOnly = Boolean(raw.externalOnly) || isNonEmbeddableHost(cleanUrl, raw.serverName);
     let score = Number(raw.score ?? getServerBaseScore(raw.serverName));
-    if (isDirectLike) {
-      score += 12;
+    const isHlsStream = raw.type === 'hls';
+    const isYourUploadHost = fp.hostKey === 'yourupload' || /yourupload/i.test(String(raw.serverName || ''));
+    if (isHlsStream) {
+      // Prioritize verified native HLS streams over direct YourUpload within the same language
+      if (score < 144) score = 144;
+      score += 16;
+    } else if (isDirectLike) {
+      // Slightly prioritize MP4Upload/other direct streams over YourUpload (higher initial timeout rate)
+      score += isYourUploadHost ? 8 : 12;
     }
     if (targetMode === 'LATINO') {
       if (raw.language === 'LATINO') score += 60;

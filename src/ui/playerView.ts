@@ -16,6 +16,10 @@ import {
   uiHooks
 } from './appState.ts';
 import {
+  NATIVE_BUFFER_TIMEOUT_MS,
+  NATIVE_STARTUP_FAILOVER_MS,
+  type NativeStartupWatchdogHandle,
+  attachNativeStartupFailoverWatchdog,
   buildUpNextCountdownText,
   formatPlaybackTime,
   shouldResumePlayback
@@ -58,6 +62,7 @@ import {
   classifySourceBadgeType,
   detectAudioLanguageFromSignals,
   detectDeadEmbedFromHtml,
+  extractAnimeTitleTargets,
   extractArchiveOrgSourcesFromMetadata,
   extractEmbedTitleFromHtml,
   filterSafeAnimeSources,
@@ -216,9 +221,12 @@ function buildSearchQueriesForCtx(
 }
 
 function buildTargetTitlesForCtx(ctx: EpisodeResolveContext): string[] {
-  return [ctx.seasonTitle, ctx.romaji, ctx.english, ...(ctx.synonyms || [])].filter(
-    (t): t is string => Boolean(t && t.trim())
-  );
+  return extractAnimeTitleTargets({
+    romaji: ctx.romaji,
+    english: ctx.english,
+    seasonTitle: ctx.seasonTitle,
+    synonyms: ctx.synonyms
+  });
 }
 
 class AnimeAV1SourceProvider {
@@ -881,7 +889,7 @@ class HentaiJKSourceProvider {
     const ep = Math.max(1, Number(episode || 1));
     const sNum = Math.max(1, Number(season || 1));
     const slugKey = String(seasonId || seasonTitle || romaji || english);
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 4);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 6);
     const targets = buildTargetTitlesForCtx(ctx);
 
     try {
@@ -958,7 +966,7 @@ class HentaiLASourceProvider {
     const ep = Math.max(1, Number(episode || 1));
     const sNum = Math.max(1, Number(season || 1));
     const slugKey = String(seasonId || seasonTitle || romaji || english);
-    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum).slice(0, 3);
+    const candidates = generateSlugCandidates(romaji, english, seasonTitle, sNum, synonyms).slice(0, 6);
     const targets = buildTargetTitlesForCtx(ctx);
 
     const trySlug = async (slug: string): Promise<NormalizedSource[]> => {
@@ -1927,6 +1935,8 @@ export class SmartVideoSourceManager {
 export const videoSourceManager = new SmartVideoSourceManager();
 
 let _playerWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+let _activeStartupWatchdog: NativeStartupWatchdogHandle | null = null;
+let _pendingFailoverStatusPrefix = '';
 let _upNextIntervalTimer: ReturnType<typeof setInterval> | null = null;
 let activeVideoWatchBufferSec = 0;
 let activeVideoLastTickPos: number | null = null;
@@ -3873,6 +3883,11 @@ export function cerrarReproductor(): void {
   }
   watchTogetherOpen = false;
   renderWatchTogetherPanel();
+  if (_activeStartupWatchdog) {
+    _activeStartupWatchdog.cancel();
+    _activeStartupWatchdog = null;
+  }
+  _pendingFailoverStatusPrefix = '';
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
     _playerWatchdogTimer = null;
@@ -4081,12 +4096,36 @@ export async function resolverContextoEpisodio(epNum: number): Promise<EpisodeRe
   const epInfo = mapping?.episodes?.[epNum] || {};
   const season = Number(currentSeason.seasonNumber || epInfo.seasonNumber || 1);
   const episode = Math.max(1, Number(epNum || 1));
-  const romaji = currentSeason.romaji || currentSeason.title || state.anime?.title?.romaji || '';
-  const english = currentSeason.english || currentSeason.title || state.anime?.title?.english || '';
+  const romaji =
+    currentSeason.romaji ||
+    state.anime?.title?.romaji ||
+    state.fullMedia?.title?.romaji ||
+    currentSeason.title ||
+    '';
+  const english =
+    currentSeason.english ||
+    state.anime?.title?.english ||
+    state.fullMedia?.title?.english ||
+    currentSeason.title ||
+    '';
   const seasonTitle = currentSeason.title || romaji || english;
-  const synonyms = Array.isArray(state.anime?.synonyms)
-    ? state.anime.synonyms.filter((s: unknown): s is string => typeof s === 'string' && Boolean(s.trim()))
-    : [];
+  const rawSynonyms = [
+    ...(Array.isArray(currentSeason.synonyms) ? currentSeason.synonyms : []),
+    ...(Array.isArray(state.anime?.synonyms) ? state.anime.synonyms : []),
+    ...(Array.isArray(state.fullMedia?.synonyms) ? state.fullMedia.synonyms : [])
+  ];
+  const synonymSeen = new Set<string>();
+  const synonyms: string[] = [];
+  for (const s of rawSynonyms) {
+    if (typeof s !== 'string') continue;
+    const trimmed = s.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (!synonymSeen.has(key)) {
+      synonymSeen.add(key);
+      synonyms.push(trimmed);
+    }
+  }
   const isAdult = Boolean(
     state.anime?.isAdult ||
       (Array.isArray(state.anime?.genres) && state.anime.genres.some((g: string) => /hentai/i.test(g)))
@@ -4125,6 +4164,11 @@ export async function resolverYReproducirFuente(): Promise<void> {
   const { seq } = episodeResolveGuard.next();
   sourceExecutionGuard.invalidate();
   cancelUpNextCountdown();
+  if (_activeStartupWatchdog) {
+    _activeStartupWatchdog.cancel();
+    _activeStartupWatchdog = null;
+  }
+  _pendingFailoverStatusPrefix = '';
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
     _playerWatchdogTimer = null;
@@ -4224,6 +4268,10 @@ export async function ejecutarFuenteActiva(): Promise<void> {
 
   const { seq: execSeq } = sourceExecutionGuard.next();
   cancelUpNextCountdown();
+  if (_activeStartupWatchdog) {
+    _activeStartupWatchdog.cancel();
+    _activeStartupWatchdog = null;
+  }
   if (_playerWatchdogTimer) {
     clearTimeout(_playerWatchdogTimer);
     _playerWatchdogTimer = null;
@@ -4240,10 +4288,14 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   const fuente = state.fuentesRankeadas[idx];
   const isAlternative = idx > 0;
   const langBadge = fuente.language === 'LATINO' ? 'Latino' : (fuente.language === 'MULTI' ? 'Multi' : 'Sub ES');
+  const failoverPrefix = _pendingFailoverStatusPrefix;
+  _pendingFailoverStatusPrefix = '';
 
   renderPlayerServersBar();
-  statusDot.className = isAlternative ? 'status-dot warning' : 'status-dot';
-  statusLabel.textContent = `${langBadge} · ${fuente.providerName} (${idx + 1}/${state.fuentesRankeadas.length})`;
+  statusDot.className = isAlternative || failoverPrefix ? 'status-dot warning' : 'status-dot';
+  statusLabel.textContent = failoverPrefix
+    ? `${failoverPrefix} · ${langBadge} · ${fuente.providerName} (${idx + 1}/${state.fuentesRankeadas.length})`
+    : `${langBadge} · ${fuente.providerName} (${idx + 1}/${state.fuentesRankeadas.length})`;
 
   const safeUrl = nWin.safeExternalUrl ? nWin.safeExternalUrl(fuente.url) : fuente.url;
   if (extBtn) {
@@ -4306,26 +4358,30 @@ export async function ejecutarFuenteActiva(): Promise<void> {
     fuente.url.includes('filelions') ||
     fuente.url.includes('movearnpre.com');
 
-  const countRemainingPlayable = () =>
+  const countRemainingPlayable = (excludeUrl?: string) =>
     state.fuentesRankeadas.filter(
       (f) =>
+        f.url !== excludeUrl &&
         !f.externalOnly &&
         !isNonEmbeddableHost(f.url, f.serverName) &&
         !videoSourceManager.failedSourcesInSession.has(f.url)
     ).length;
 
+  const isCurrentExecutionStillActive = () =>
+    sourceExecutionGuard.isCurrent(execSeq) &&
+    state.epActual === activeEpSnapshot &&
+    (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot;
+
   if (canTryNativeExtract) {
     try {
       const directStream = await StreamExtractor.extract(fuente.url);
-      if (
-        !sourceExecutionGuard.isCurrent(execSeq) ||
-        state.epActual !== activeEpSnapshot ||
-        (state.fuenteActualIdx % state.fuentesRankeadas.length) !== activeIdxSnapshot
-      ) {
+      if (!isCurrentExecutionStillActive()) {
         return;
       }
       if (directStream && directStream.type === 'mp4' && directStream.streamUrl) {
-        statusLabel.textContent = `${langBadge} · ${fuente.providerName} · Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`;
+        statusLabel.textContent = failoverPrefix
+          ? `${failoverPrefix} · ${langBadge} · ${fuente.providerName} · Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`
+          : `${langBadge} · ${fuente.providerName} · Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`;
         container.innerHTML = `
           <video 
             id="video-player-native" 
@@ -4340,27 +4396,29 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
         if (vidEl) {
           attachNativeVideoLifecycle(vidEl, activeEpSnapshot);
-          let streamReady = false;
-          const markStreamReady = () => {
-            streamReady = true;
-            if (_playerWatchdogTimer) {
-              clearTimeout(_playerWatchdogTimer);
-              _playerWatchdogTimer = null;
-            }
-          };
-          vidEl.addEventListener('loadeddata', markStreamReady, { once: true });
-          vidEl.addEventListener('canplay', markStreamReady, { once: true });
-          vidEl.addEventListener('playing', markStreamReady, { once: true });
-          _playerWatchdogTimer = setTimeout(() => {
-            if (!streamReady && state.epActual === activeEpSnapshot && (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot) {
+          const watchdog = attachNativeStartupFailoverWatchdog({
+            video: vidEl,
+            startupTimeoutMs: NATIVE_STARTUP_FAILOVER_MS,
+            fullTimeoutMs: NATIVE_BUFFER_TIMEOUT_MS,
+            isStillActive: isCurrentExecutionStillActive,
+            hasAlternativeServers: () =>
+              countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1,
+            onAbortAttempt: () => {
+              teardownActiveMediaElement(container);
+            },
+            onFastFailover: () => {
+              statusDot.className = 'status-dot warning';
+              statusLabel.textContent = `${fuente.providerName} sin respuesta (8s) · saltando al siguiente servidor...`;
               videoSourceManager.markSourceFailed(fuente.url);
-              if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
-                probarFuenteAlternativa();
-              } else {
-                mostrarAvisoCambioServidorVideo('El servidor tardó demasiado en cargar.');
-              }
+              probarFuenteAlternativa(`Failover desde ${fuente.providerName}`);
+            },
+            onFinalTimeout: (reason) => {
+              videoSourceManager.markSourceFailed(fuente.url);
+              mostrarAvisoCambioServidorVideo(reason);
             }
-          }, 15000);
+          });
+          _activeStartupWatchdog = watchdog;
+
           let retriedFreshToken = false;
           vidEl.onerror = () => {
             if (
@@ -4369,31 +4427,26 @@ export async function ejecutarFuenteActiva(): Promise<void> {
             ) {
               retriedFreshToken = true;
               void StreamExtractor.extract(fuente.url, { forceRefresh: true }).then((fresh) => {
-                if (
-                  fresh?.type === 'mp4' &&
-                  fresh.streamUrl &&
-                  state.epActual === activeEpSnapshot &&
-                  (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot
-                ) {
+                if (fresh?.type === 'mp4' && fresh.streamUrl && isCurrentExecutionStillActive()) {
                   vidEl.src = fresh.streamUrl;
                   vidEl.load();
                   void vidEl.play().catch(() => {});
                   return;
                 }
-                markStreamReady();
+                watchdog.markReady();
                 videoSourceManager.markSourceFailed(fuente.url);
-                if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
-                  probarFuenteAlternativa();
+                if (countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1) {
+                  probarFuenteAlternativa(`Error en ${fuente.providerName}`);
                 } else {
                   mostrarAvisoCambioServidorVideo('El video directo falló en origen.');
                 }
               });
               return;
             }
-            markStreamReady();
+            watchdog.markReady();
             videoSourceManager.markSourceFailed(fuente.url);
-            if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
-              probarFuenteAlternativa();
+            if (countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1) {
+              probarFuenteAlternativa(`Error en ${fuente.providerName}`);
             } else {
               mostrarAvisoCambioServidorVideo('El video directo falló en origen.');
             }
@@ -4402,7 +4455,9 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         return;
       }
       if (directStream && directStream.type === 'hls' && directStream.streamUrl) {
-        statusLabel.textContent = `${langBadge} · ${fuente.providerName} · HLS Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`;
+        statusLabel.textContent = failoverPrefix
+          ? `${failoverPrefix} · ${langBadge} · ${fuente.providerName} · HLS Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`
+          : `${langBadge} · ${fuente.providerName} · HLS Sin Anuncios (${idx + 1}/${state.fuentesRankeadas.length})`;
         container.innerHTML = `
           <video 
             id="video-player-native" 
@@ -4416,27 +4471,29 @@ export async function ejecutarFuenteActiva(): Promise<void> {
         const vidEl = document.getElementById('video-player-native') as HTMLVideoElement | null;
         if (vidEl) {
           attachNativeVideoLifecycle(vidEl, activeEpSnapshot);
-          let hlsReady = false;
-          const markHlsReady = () => {
-            hlsReady = true;
-            if (_playerWatchdogTimer) {
-              clearTimeout(_playerWatchdogTimer);
-              _playerWatchdogTimer = null;
-            }
-          };
-          vidEl.addEventListener('loadeddata', markHlsReady, { once: true });
-          vidEl.addEventListener('canplay', markHlsReady, { once: true });
-          vidEl.addEventListener('playing', markHlsReady, { once: true });
-          _playerWatchdogTimer = setTimeout(() => {
-            if (!hlsReady && state.epActual === activeEpSnapshot && (state.fuenteActualIdx % state.fuentesRankeadas.length) === activeIdxSnapshot) {
+          const watchdog = attachNativeStartupFailoverWatchdog({
+            video: vidEl,
+            startupTimeoutMs: NATIVE_STARTUP_FAILOVER_MS,
+            fullTimeoutMs: NATIVE_BUFFER_TIMEOUT_MS,
+            isStillActive: isCurrentExecutionStillActive,
+            hasAlternativeServers: () =>
+              countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1,
+            onAbortAttempt: () => {
+              teardownActiveMediaElement(container);
+            },
+            onFastFailover: () => {
+              statusDot.className = 'status-dot warning';
+              statusLabel.textContent = `${fuente.providerName} sin respuesta (8s) · saltando al siguiente servidor...`;
               videoSourceManager.markSourceFailed(fuente.url);
-              if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) {
-                probarFuenteAlternativa();
-              } else {
-                mostrarAvisoCambioServidorVideo('El flujo HLS no respondió a tiempo.');
-              }
+              probarFuenteAlternativa(`Failover desde ${fuente.providerName}`);
+            },
+            onFinalTimeout: () => {
+              videoSourceManager.markSourceFailed(fuente.url);
+              mostrarAvisoCambioServidorVideo('El flujo HLS no respondió a tiempo.');
             }
-          }, 15000);
+          });
+          _activeStartupWatchdog = watchdog;
+
           if (nWin.Hls?.isSupported?.()) {
             const hls = new nWin.Hls({
               enableWorker: true,
@@ -4451,11 +4508,13 @@ export async function ejecutarFuenteActiva(): Promise<void> {
             hls.attachMedia(vidEl);
             hls.on(nWin.Hls.Events.ERROR, (_ev: any, data: any) => {
               if (data?.fatal) {
-                markHlsReady();
+                watchdog.markReady();
                 try { hls.destroy(); } catch { /* ignore */ }
                 nWin._nyActiveHls = null;
                 videoSourceManager.markSourceFailed(fuente.url);
-                if (countRemainingPlayable() > 0 && state.fuentesRankeadas.length > 1) probarFuenteAlternativa();
+                if (countRemainingPlayable(fuente.url) > 0 && state.fuentesRankeadas.length > 1) {
+                  probarFuenteAlternativa(`Failover desde ${fuente.providerName}`);
+                }
               }
             });
           } else if (vidEl.canPlayType('application/vnd.apple.mpegurl')) {
@@ -4562,7 +4621,7 @@ export async function ejecutarFuenteActiva(): Promise<void> {
   }
 }
 
-export function probarFuenteAlternativa(): void {
+export function probarFuenteAlternativa(statusReason?: string): void {
   if (!state.fuentesRankeadas || state.fuentesRankeadas.length <= 1) {
     showToast('No hay más servidores alternativos en esta lista.');
     return;
@@ -4581,7 +4640,13 @@ export function probarFuenteAlternativa(): void {
     nextPlayableIdx !== currentIdx
       ? nextPlayableIdx
       : (currentIdx + 1) % state.fuentesRankeadas.length;
-  showToast(`Cambiando a ${state.fuentesRankeadas[state.fuenteActualIdx].providerName}...`);
+  const nextProviderName = state.fuentesRankeadas[state.fuenteActualIdx].providerName;
+  _pendingFailoverStatusPrefix = typeof statusReason === 'string' ? statusReason.trim() : '';
+  showToast(
+    _pendingFailoverStatusPrefix
+      ? `${_pendingFailoverStatusPrefix} · cambiando a ${nextProviderName}...`
+      : `Cambiando a ${nextProviderName}...`
+  );
   void ejecutarFuenteActiva();
 }
 

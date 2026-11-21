@@ -41,6 +41,7 @@ export interface OrganizedSeasonEntry {
   title: string;
   romaji?: string;
   english?: string;
+  synonyms?: string[];
   displayLabel: string;
   episodeLabel: string;
   format: string;
@@ -528,6 +529,7 @@ export function organizeAnimeFranchise(
       title: rawTitle,
       romaji: (node.title?.romaji || rawTitle).trim(),
       english: (node.title?.english || rawTitle).trim(),
+      ...(Array.isArray(node.synonyms) && node.synonyms.length > 0 ? { synonyms: node.synonyms } : {}),
       displayLabel,
       episodeLabel,
       format: fmt,

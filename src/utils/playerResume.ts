@@ -50,3 +50,120 @@ export function buildUpNextCountdownText(nextEpisodeNum: number, secondsLeft: nu
   const secs = Math.max(0, Math.ceil(secondsLeft));
   return `Siguiente: Ep. ${ep} en ${secs}s...`;
 }
+
+export const NATIVE_STARTUP_FAILOVER_MS = 8000;
+export const NATIVE_BUFFER_TIMEOUT_MS = 15000;
+
+export interface WatchdogVideoLike {
+  readonly readyState: number;
+  addEventListener: (type: string, listener: () => void, options?: { once?: boolean }) => void;
+  removeEventListener?: (type: string, listener: () => void) => void;
+}
+
+export interface NativeStartupWatchdogOptions {
+  video: WatchdogVideoLike;
+  startupTimeoutMs?: number;
+  fullTimeoutMs?: number;
+  isStillActive: () => boolean;
+  hasAlternativeServers: () => boolean;
+  onAbortAttempt: () => void;
+  onFastFailover: (reason: string) => void;
+  onFinalTimeout: (reason: string) => void;
+}
+
+export interface NativeStartupWatchdogHandle {
+  markReady: () => void;
+  cancel: () => void;
+}
+
+/**
+ * Watches a native <video> element during startup:
+ * - If readyState remains 0 (no metadata / no first frame) for 8s and alternative servers exist,
+ *   aborts the stalled attempt immediately and triggers automatic failover to the next server.
+ * - If metadata arrives (readyState >= 1), cancels the 8s fast failover and allows up to 15s
+ *   for first-frame buffering before falling back or showing a timeout notice.
+ */
+export function attachNativeStartupFailoverWatchdog(
+  options: NativeStartupWatchdogOptions
+): NativeStartupWatchdogHandle {
+  const startupMs = Math.max(100, Number(options.startupTimeoutMs ?? NATIVE_STARTUP_FAILOVER_MS));
+  const fullMs = Math.max(startupMs, Number(options.fullTimeoutMs ?? NATIVE_BUFFER_TIMEOUT_MS));
+
+  let settled = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  let fullTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearTimers = () => {
+    if (startupTimer !== null) {
+      clearTimeout(startupTimer);
+      startupTimer = null;
+    }
+    if (fullTimer !== null) {
+      clearTimeout(fullTimer);
+      fullTimer = null;
+    }
+  };
+
+  const onMetadata = () => {
+    if (startupTimer !== null) {
+      clearTimeout(startupTimer);
+      startupTimer = null;
+    }
+  };
+
+  const detachListeners = () => {
+    options.video.removeEventListener?.('loadedmetadata', onMetadata);
+    options.video.removeEventListener?.('loadeddata', onReady);
+    options.video.removeEventListener?.('canplay', onReady);
+    options.video.removeEventListener?.('playing', onReady);
+  };
+
+  const onReady = () => {
+    if (settled) return;
+    settled = true;
+    clearTimers();
+    detachListeners();
+  };
+
+  options.video.addEventListener('loadedmetadata', onMetadata, { once: true });
+  options.video.addEventListener('loadeddata', onReady, { once: true });
+  options.video.addEventListener('canplay', onReady, { once: true });
+  options.video.addEventListener('playing', onReady, { once: true });
+
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
+    if (settled || !options.isStillActive()) return;
+    if (Number(options.video.readyState || 0) === 0 && options.hasAlternativeServers()) {
+      settled = true;
+      clearTimers();
+      detachListeners();
+      options.onAbortAttempt();
+      options.onFastFailover('Sin respuesta inicial en 8s · saltando al siguiente servidor...');
+    }
+  }, startupMs);
+
+  fullTimer = setTimeout(() => {
+    fullTimer = null;
+    if (settled || !options.isStillActive()) return;
+    settled = true;
+    clearTimers();
+    detachListeners();
+    if (options.hasAlternativeServers()) {
+      options.onAbortAttempt();
+      options.onFastFailover('El servidor tardó demasiado en cargar · cambiando al siguiente servidor...');
+    } else {
+      options.onFinalTimeout('El servidor tardó demasiado en cargar.');
+    }
+  }, fullMs);
+
+  return {
+    markReady: onReady,
+    cancel: () => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      detachListeners();
+    }
+  };
+}
+
