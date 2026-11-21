@@ -1,6 +1,9 @@
+export type MediaNodeId = number | string;
+
 export interface AniListMediaNode {
-  id: number;
+  id: MediaNodeId;
   idMal?: number | null;
+  hentailaSlug?: string | null;
   title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
   synonyms?: string[] | null;
   isAdult?: boolean | null;
@@ -8,6 +11,7 @@ export interface AniListMediaNode {
   format?: string | null;
   status?: string | null;
   episodes?: number | null;
+  episodesCount?: number | null;
   nextAiringEpisode?: { episode?: number | null; timeUntilAiring?: number | null } | null;
   startDate?: { year?: number | null; month?: number | null; day?: number | null } | null;
   seasonYear?: number | null;
@@ -26,7 +30,11 @@ export interface AniListMediaNode {
 export type SeasonTier = 'MAIN_SEASON' | 'MOVIE' | 'OVA' | 'SPECIAL' | 'ONA_SHORT';
 
 export interface OrganizedSeasonEntry {
-  id: number;
+  id: MediaNodeId;
+  idMal?: number | null;
+  averageScore?: number | null;
+  seasonYear?: number | null;
+  hentailaSlug?: string | null;
   seasonNumber: number;
   tier: SeasonTier;
   shortTag: string;
@@ -53,6 +61,7 @@ export interface OrganizedFranchiseResult {
 }
 
 const VALID_ANIME_FORMATS = new Set(['TV', 'TV_SHORT', 'ONA', 'OVA', 'MOVIE', 'SPECIAL']);
+const NON_ANIME_FORMATS = new Set(['MANGA', 'NOVEL', 'ONE_SHOT', 'MUSIC']);
 const ALLOWED_RELATION_TYPES = new Set([
   'PREQUEL',
   'SEQUEL',
@@ -64,11 +73,37 @@ const ALLOWED_RELATION_TYPES = new Set([
 ]);
 const MAIN_CONTINUITY_RELS = new Set(['PREQUEL', 'SEQUEL', 'PARENT']);
 
+function isValidMediaId(id: unknown): id is MediaNodeId {
+  if (typeof id === 'number') return Number.isFinite(id) && id > 0;
+  if (typeof id === 'string') return id.trim().length > 0;
+  return false;
+}
+
+function toIdKey(id: MediaNodeId): string {
+  return String(id).trim();
+}
+
+function normalizeNodeFormat(rawFormat: string | null | undefined, isRootNode: boolean): string | null {
+  const upper = String(rawFormat || '').trim().toUpperCase();
+  if (!upper) return 'TV';
+  if (VALID_ANIME_FORMATS.has(upper)) return upper;
+  if (NON_ANIME_FORMATS.has(upper)) return null;
+  if (isRootNode) {
+    if (/HENTAI|CENSURA|UNCENSORED|OVA/i.test(upper)) return 'OVA';
+    if (/PELICULA|MOVIE|FILM/i.test(upper)) return 'MOVIE';
+    if (/SPECIAL|ESPECIAL/i.test(upper)) return 'SPECIAL';
+    if (/ONA|WEB/i.test(upper)) return 'ONA';
+    return 'OVA';
+  }
+  return null;
+}
+
 export function computeAvailableEpisodes(node: AniListMediaNode | null | undefined): {
   totalEpisodes: number;
   isUpcoming: boolean;
 } {
   if (!node) return { totalEpisodes: 0, isUpcoming: false };
+  const rawEpisodes = Number(node.episodes ?? node.episodesCount ?? 0);
   if (node.status === 'NOT_YET_RELEASED') {
     return { totalEpisodes: 0, isUpcoming: true };
   }
@@ -79,9 +114,9 @@ export function computeAvailableEpisodes(node: AniListMediaNode | null | undefin
         isUpcoming: false
       };
     }
-    if (node.episodes && Number(node.episodes) > 0) {
+    if (Number.isFinite(rawEpisodes) && rawEpisodes > 0) {
       return {
-        totalEpisodes: Math.max(1, Number(node.episodes)),
+        totalEpisodes: Math.max(1, Math.floor(rawEpisodes)),
         isUpcoming: false
       };
     }
@@ -91,7 +126,7 @@ export function computeAvailableEpisodes(node: AniListMediaNode | null | undefin
     };
   }
   return {
-    totalEpisodes: Math.max(0, Number(node.episodes || 0)),
+    totalEpisodes: Number.isFinite(rawEpisodes) ? Math.max(0, Math.floor(rawEpisodes)) : 0,
     isUpcoming: false
   };
 }
@@ -120,47 +155,54 @@ function stripBaseSeriesPrefix(title: string, baseTitle: string): string {
 }
 
 export function extractGraphFromMediaRoots(roots: AniListMediaNode[]): {
-  nodesById: Map<number, AniListMediaNode>;
-  directedPrequelEdges: Map<number, Set<number>>;
-  undirectedNeighbors: Map<number, Set<number>>;
+  nodesById: Map<string, AniListMediaNode>;
+  directedPrequelEdges: Map<string, Set<string>>;
+  undirectedNeighbors: Map<string, Set<string>>;
   relationKindMap: Map<string, string>;
 } {
-  const nodesById = new Map<number, AniListMediaNode>();
-  const directedPrequelEdges = new Map<number, Set<number>>();
-  const undirectedNeighbors = new Map<number, Set<number>>();
+  const nodesById = new Map<string, AniListMediaNode>();
+  const directedPrequelEdges = new Map<string, Set<string>>();
+  const undirectedNeighbors = new Map<string, Set<string>>();
   const relationKindMap = new Map<string, string>();
   const visitedObjects = new Set<AniListMediaNode>();
 
-  const addUndirected = (a: number, b: number) => {
+  const addUndirected = (a: string, b: string) => {
     if (!undirectedNeighbors.has(a)) undirectedNeighbors.set(a, new Set());
     if (!undirectedNeighbors.has(b)) undirectedNeighbors.set(b, new Set());
     undirectedNeighbors.get(a)!.add(b);
     undirectedNeighbors.get(b)!.add(a);
   };
 
-  const addDirected = (beforeId: number, afterId: number) => {
-    if (beforeId === afterId) return;
-    if (!directedPrequelEdges.has(beforeId)) directedPrequelEdges.set(beforeId, new Set());
-    directedPrequelEdges.get(beforeId)!.add(afterId);
+  const addDirected = (beforeKey: string, afterKey: string) => {
+    if (beforeKey === afterKey) return;
+    if (!directedPrequelEdges.has(beforeKey)) directedPrequelEdges.set(beforeKey, new Set());
+    directedPrequelEdges.get(beforeKey)!.add(afterKey);
   };
 
-  const mergeNodeData = (node: AniListMediaNode) => {
-    const existing = nodesById.get(node.id);
+  const mergeNodeData = (node: AniListMediaNode, normalizedFmt: string) => {
+    const key = toIdKey(node.id);
+    const existing = nodesById.get(key);
+    const mergedEpisodes = node.episodes ?? node.episodesCount ?? existing?.episodes ?? existing?.episodesCount ?? null;
     if (!existing) {
-      nodesById.set(node.id, node);
+      nodesById.set(key, {
+        ...node,
+        format: normalizedFmt,
+        episodes: mergedEpisodes
+      });
       return;
     }
-    nodesById.set(node.id, {
+    nodesById.set(key, {
       ...existing,
       ...node,
       idMal: node.idMal ?? existing.idMal,
+      hentailaSlug: node.hentailaSlug || existing.hentailaSlug,
       status:
         (existing.status === 'RELEASING' || existing.status === 'FINISHED') &&
         (!node.status || node.status === 'NOT_YET_RELEASED')
           ? existing.status
           : (node.status || existing.status),
-      format: node.format || existing.format,
-      episodes: node.episodes ?? existing.episodes,
+      format: normalizedFmt || existing.format,
+      episodes: mergedEpisodes,
       nextAiringEpisode:
         node.nextAiringEpisode?.episode
           ? node.nextAiringEpisode
@@ -198,40 +240,42 @@ export function extractGraphFromMediaRoots(roots: AniListMediaNode[]): {
     });
   };
 
-  const visit = (node: AniListMediaNode | null | undefined) => {
-    if (!node || typeof node.id !== 'number' || visitedObjects.has(node)) return;
+  const visit = (node: AniListMediaNode | null | undefined, isRootNode: boolean) => {
+    if (!node || !isValidMediaId(node.id) || visitedObjects.has(node)) return;
     visitedObjects.add(node);
 
-    const fmt = String(node.format || 'TV').toUpperCase();
-    if (!VALID_ANIME_FORMATS.has(fmt)) return;
+    const normalizedFmt = normalizeNodeFormat(node.format, isRootNode);
+    if (!normalizedFmt) return;
 
-    mergeNodeData(node);
+    const nodeKey = toIdKey(node.id);
+    mergeNodeData(node, normalizedFmt);
 
     const edges = node.relations?.edges || [];
     for (const edge of edges) {
       const rel = String(edge?.relationType || '').toUpperCase();
       const target = edge?.node;
-      if (!target || typeof target.id !== 'number') continue;
+      if (!target || !isValidMediaId(target.id)) continue;
       if (!ALLOWED_RELATION_TYPES.has(rel)) continue;
 
-      const targetFmt = String(target.format || '').toUpperCase();
-      if (!VALID_ANIME_FORMATS.has(targetFmt)) continue;
+      const targetFmt = normalizeNodeFormat(target.format, false);
+      if (!targetFmt) continue;
 
-      addUndirected(node.id, target.id);
-      relationKindMap.set(`${node.id}->${target.id}`, rel);
+      const targetKey = toIdKey(target.id);
+      addUndirected(nodeKey, targetKey);
+      relationKindMap.set(`${nodeKey}->${targetKey}`, rel);
 
       if (rel === 'SEQUEL') {
-        addDirected(node.id, target.id);
+        addDirected(nodeKey, targetKey);
       } else if (rel === 'PREQUEL') {
-        addDirected(target.id, node.id);
+        addDirected(targetKey, nodeKey);
       }
 
-      visit(target);
+      visit(target, false);
     }
   };
 
   for (const r of roots) {
-    visit(r);
+    visit(r, true);
   }
 
   return { nodesById, directedPrequelEdges, undirectedNeighbors, relationKindMap };
@@ -239,18 +283,22 @@ export function extractGraphFromMediaRoots(roots: AniListMediaNode[]): {
 
 export function organizeAnimeFranchise(
   roots: AniListMediaNode[],
-  openedAnimeId: number
+  openedAnimeId: MediaNodeId
 ): OrganizedFranchiseResult {
+  if (!isValidMediaId(openedAnimeId)) {
+    return { seasons: [], initialIndex: 0, franchiseTitle: '' };
+  }
+  const openedKey = toIdKey(openedAnimeId);
   const { nodesById, directedPrequelEdges, undirectedNeighbors, relationKindMap } =
     extractGraphFromMediaRoots(roots);
 
-  if (!nodesById.has(openedAnimeId)) {
+  if (!nodesById.has(openedKey)) {
     return { seasons: [], initialIndex: 0, franchiseTitle: '' };
   }
 
   // BFS reachable component from openedAnimeId through allowed relations
-  const reachable = new Set<number>([openedAnimeId]);
-  const queue: number[] = [openedAnimeId];
+  const reachable = new Set<string>([openedKey]);
+  const queue: string[] = [openedKey];
   while (queue.length > 0) {
     const curr = queue.shift()!;
     const neighbors = undirectedNeighbors.get(curr);
@@ -264,34 +312,34 @@ export function organizeAnimeFranchise(
   }
 
   const allNodes = Array.from(reachable)
-    .map((id) => nodesById.get(id)!)
+    .map((key) => nodesById.get(key)!)
     .filter(Boolean);
 
   const isSeriesFormat = (fmt?: string | null) => fmt === 'TV' || fmt === 'ONA';
 
   // Identify mainline continuity nodes connected strictly by PREQUEL / SEQUEL
-  const mainContinuityIds = new Set<number>();
-  const continuityStartIds = allNodes.filter((n) => isSeriesFormat(n.format));
-  if (continuityStartIds.length > 0) {
-    let seedId = openedAnimeId;
-    const openedNode = nodesById.get(openedAnimeId);
+  const mainContinuityKeys = new Set<string>();
+  const continuityStartNodes = allNodes.filter((n) => isSeriesFormat(n.format));
+  if (continuityStartNodes.length > 0) {
+    let seedKey = openedKey;
+    const openedNode = nodesById.get(openedKey);
     if (!isSeriesFormat(openedNode?.format)) {
-      const parentEdge = Array.from(undirectedNeighbors.get(openedAnimeId) || []).find(
-        (nid) =>
-          MAIN_CONTINUITY_RELS.has(relationKindMap.get(`${openedAnimeId}->${nid}`) || '') &&
-          isSeriesFormat(nodesById.get(nid)?.format)
+      const parentEdge = Array.from(undirectedNeighbors.get(openedKey) || []).find(
+        (nKey) =>
+          MAIN_CONTINUITY_RELS.has(relationKindMap.get(`${openedKey}->${nKey}`) || '') &&
+          isSeriesFormat(nodesById.get(nKey)?.format)
       );
-      if (parentEdge) seedId = parentEdge;
-      else seedId = continuityStartIds[0].id;
+      if (parentEdge) seedKey = parentEdge;
+      else seedKey = toIdKey(continuityStartNodes[0].id);
     }
 
-    const qMain = [seedId];
-    mainContinuityIds.add(seedId);
+    const qMain = [seedKey];
+    mainContinuityKeys.add(seedKey);
     while (qMain.length > 0) {
       const curr = qMain.shift()!;
-      const neighbors = undirectedNeighbors.get(curr) || new Set<number>();
+      const neighbors = undirectedNeighbors.get(curr) || new Set<string>();
       for (const nxt of neighbors) {
-        if (mainContinuityIds.has(nxt)) continue;
+        if (mainContinuityKeys.has(nxt)) continue;
         const r1 = relationKindMap.get(`${curr}->${nxt}`);
         const r2 = relationKindMap.get(`${nxt}->${curr}`);
         const rel = r1 || r2 || '';
@@ -299,7 +347,7 @@ export function organizeAnimeFranchise(
         if (!nxtNode) continue;
         if (rel === 'PREQUEL' || rel === 'SEQUEL') {
           if (isSeriesFormat(nxtNode.format)) {
-            mainContinuityIds.add(nxt);
+            mainContinuityKeys.add(nxt);
             qMain.push(nxt);
           }
         }
@@ -308,13 +356,13 @@ export function organizeAnimeFranchise(
   }
 
   // Kahn topological sort over all reachable nodes honoring directed PREQUEL -> SEQUEL edges + chronological date
-  const inDegree = new Map<number, number>();
-  for (const n of allNodes) inDegree.set(n.id, 0);
-  for (const [beforeId, afterSet] of directedPrequelEdges.entries()) {
-    if (!reachable.has(beforeId)) continue;
-    for (const afterId of afterSet) {
-      if (!reachable.has(afterId)) continue;
-      inDegree.set(afterId, (inDegree.get(afterId) || 0) + 1);
+  const inDegree = new Map<string, number>();
+  for (const n of allNodes) inDegree.set(toIdKey(n.id), 0);
+  for (const [beforeKey, afterSet] of directedPrequelEdges.entries()) {
+    if (!reachable.has(beforeKey)) continue;
+    for (const afterKey of afterSet) {
+      if (!reachable.has(afterKey)) continue;
+      inDegree.set(afterKey, (inDegree.get(afterKey) || 0) + 1);
     }
   }
 
@@ -322,30 +370,32 @@ export function organizeAnimeFranchise(
     const da = getDateSortKey(a);
     const db = getDateSortKey(b);
     if (da !== db) return da - db;
-    return a.id - b.id;
+    if (typeof a.id === 'number' && typeof b.id === 'number') return a.id - b.id;
+    return toIdKey(a.id).localeCompare(toIdKey(b.id));
   };
 
   const ready: AniListMediaNode[] = allNodes
-    .filter((n) => (inDegree.get(n.id) || 0) === 0)
+    .filter((n) => (inDegree.get(toIdKey(n.id)) || 0) === 0)
     .sort(compareByDateThenId);
 
   const topoOrdered: AniListMediaNode[] = [];
-  const usedIds = new Set<number>();
+  const usedKeys = new Set<string>();
 
   while (ready.length > 0) {
     const current = ready.shift()!;
-    if (usedIds.has(current.id)) continue;
-    usedIds.add(current.id);
+    const currentKey = toIdKey(current.id);
+    if (usedKeys.has(currentKey)) continue;
+    usedKeys.add(currentKey);
     topoOrdered.push(current);
 
-    const targets = directedPrequelEdges.get(current.id);
+    const targets = directedPrequelEdges.get(currentKey);
     if (targets) {
-      for (const tId of targets) {
-        if (!reachable.has(tId) || usedIds.has(tId)) continue;
-        const deg = (inDegree.get(tId) || 1) - 1;
-        inDegree.set(tId, deg);
+      for (const tKey of targets) {
+        if (!reachable.has(tKey) || usedKeys.has(tKey)) continue;
+        const deg = (inDegree.get(tKey) || 1) - 1;
+        inDegree.set(tKey, deg);
         if (deg <= 0) {
-          const tNode = nodesById.get(tId);
+          const tNode = nodesById.get(tKey);
           if (tNode) {
             ready.push(tNode);
             ready.sort(compareByDateThenId);
@@ -357,25 +407,26 @@ export function organizeAnimeFranchise(
 
   // Push any cyclic leftovers in chronological order
   for (const n of [...allNodes].sort(compareByDateThenId)) {
-    if (!usedIds.has(n.id)) {
-      usedIds.add(n.id);
+    const nKey = toIdKey(n.id);
+    if (!usedKeys.has(nKey)) {
+      usedKeys.add(nKey);
       topoOrdered.push(n);
     }
   }
 
-  // Partition into Mainline Seasons vs Extras (Movies, OVAs, Specials, ONA/Shorts)
+  // Partition into Mainline Seasons vs Extras (Movies, OVAs, Specials, ONA/Shorts, External Catalog)
   const mainNodes: AniListMediaNode[] = [];
   const extraNodes: AniListMediaNode[] = [];
 
   for (const n of topoOrdered) {
-    if (mainContinuityIds.has(n.id)) {
+    const nKey = toIdKey(n.id);
+    const fmt = String(n.format || 'TV').toUpperCase();
+    if (mainContinuityKeys.has(nKey)) {
       mainNodes.push(n);
-    } else if (
-      ['MOVIE', 'OVA', 'SPECIAL', 'TV_SHORT', 'ONA'].includes(String(n.format || '').toUpperCase())
-    ) {
+    } else if (['MOVIE', 'OVA', 'SPECIAL', 'TV_SHORT', 'ONA'].includes(fmt)) {
       extraNodes.push(n);
-    } else if (n.format === 'TV') {
-      // Secondary TV spinoff
+    } else if (fmt === 'TV' || !NON_ANIME_FORMATS.has(fmt)) {
+      // Secondary TV spinoff or external catalog entry
       extraNodes.push(n);
     }
   }
@@ -383,15 +434,16 @@ export function organizeAnimeFranchise(
   // Deduplicate within combined order cleanly
   const dedupedOrdered: Array<{ node: AniListMediaNode; isMain: boolean }> = [];
   const seenKeys = new Set<string>();
-  const seenIds = new Set<number>();
+  const seenIds = new Set<string>();
 
   const pushUnique = (node: AniListMediaNode, isMain: boolean) => {
-    if (seenIds.has(node.id)) return;
+    const nKey = toIdKey(node.id);
+    if (seenIds.has(nKey)) return;
     const rawTitle = node.title?.english || node.title?.romaji || `Anime ${node.id}`;
     const normTitle = normalizeTitleForDedup(rawTitle);
     const key = `${normTitle}::${node.format || 'TV'}::${node.startDate?.year || node.seasonYear || ''}`;
-    if (normTitle && seenKeys.has(key) && node.id !== openedAnimeId) return;
-    seenIds.add(node.id);
+    if (normTitle && seenKeys.has(key) && nKey !== openedKey) return;
+    seenIds.add(nKey);
     if (normTitle) seenKeys.add(key);
     dedupedOrdered.push({ node, isMain });
   };
@@ -402,21 +454,22 @@ export function organizeAnimeFranchise(
   const franchiseTitle =
     (dedupedOrdered[0]?.node.title?.english ||
       dedupedOrdered[0]?.node.title?.romaji ||
-      nodesById.get(openedAnimeId)?.title?.english ||
-      nodesById.get(openedAnimeId)?.title?.romaji ||
+      nodesById.get(openedKey)?.title?.english ||
+      nodesById.get(openedKey)?.title?.romaji ||
       '').trim();
 
   let mainCounter = 0;
   const seasons: OrganizedSeasonEntry[] = [];
 
   for (const { node, isMain } of dedupedOrdered) {
+    const nKey = toIdKey(node.id);
     const { totalEpisodes, isUpcoming } = computeAvailableEpisodes(node);
     const fmt = String(node.format || 'TV').toUpperCase();
     const rawTitle = (node.title?.english || node.title?.romaji || `Temporada ${mainCounter + 1}`).trim();
     const year = node.startDate?.year || node.seasonYear || '';
 
     // Omit completely unannounced/0-ep side-stories unless it is the currently opened item or mainline upcoming
-    if (!isMain && totalEpisodes === 0 && !isUpcoming && node.id !== openedAnimeId) {
+    if (!isMain && totalEpisodes === 0 && !isUpcoming && nKey !== openedKey) {
       continue;
     }
 
@@ -436,7 +489,7 @@ export function organizeAnimeFranchise(
     } else if (fmt === 'MOVIE') {
       tier = 'MOVIE';
       shortTag = 'Película';
-    } else if (fmt === 'OVA') {
+    } else if (fmt === 'OVA' || /HENTAI|CENSURA|UNCENSORED/i.test(fmt)) {
       tier = 'OVA';
       shortTag = 'OVA';
     } else if (fmt === 'TV_SHORT' || fmt === 'ONA') {
@@ -465,6 +518,10 @@ export function organizeAnimeFranchise(
 
     seasons.push({
       id: node.id,
+      ...(node.idMal ? { idMal: node.idMal } : {}),
+      ...(node.averageScore ? { averageScore: node.averageScore } : {}),
+      ...(node.seasonYear || node.startDate?.year ? { seasonYear: Number(node.seasonYear || node.startDate?.year) } : {}),
+      ...(node.hentailaSlug ? { hentailaSlug: node.hentailaSlug } : {}),
       seasonNumber: isMain ? mainCounter || 1 : mainCounter + 1,
       tier,
       shortTag,
@@ -485,7 +542,7 @@ export function organizeAnimeFranchise(
     });
   }
 
-  let initialIndex = seasons.findIndex((s) => s.id === openedAnimeId);
+  let initialIndex = seasons.findIndex((s) => toIdKey(s.id) === openedKey);
   if (initialIndex < 0) initialIndex = 0;
 
   return {

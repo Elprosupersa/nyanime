@@ -275,6 +275,62 @@ describe('seasonOrder — Crunchyroll Franchise Ordering', () => {
     expect(s2.isUpcoming).toBe(false);
     expect(s2.nextAiringEpisode?.episode).toBe(8);
   });
+
+  it('accepts external catalog entries with non-numeric string IDs (hla_*), custom HENTAI/SIN CENSURA formats, and apostrophes', () => {
+    const externalHentai: AniListMediaNode = {
+      id: 'hla_627',
+      hentailaSlug: 'hitozuma-no-kuchibiru-wa-kan-chuuhai-no-aji-ga-shite',
+      title: {
+        romaji: 'Hitozuma no Kuchibiru wa Kan Chuuhai no Aji ga Shite',
+        english: 'Hitozuma no Kuchibiru wa Kan Chuuhai no Aji ga Shite'
+      },
+      format: 'HENTAI',
+      status: 'FINISHED',
+      episodesCount: 4,
+      description: 'Sinopsis en español del catálogo externo.'
+    };
+
+    const organized = organizeAnimeFranchise([externalHentai], 'hla_627');
+    expect(organized.seasons).toHaveLength(1);
+    expect(organized.initialIndex).toBe(0);
+    expect(organized.seasons[0].id).toBe('hla_627');
+    expect(organized.seasons[0].hentailaSlug).toBe('hitozuma-no-kuchibiru-wa-kan-chuuhai-no-aji-ga-shite');
+    expect(organized.seasons[0].format).toBe('OVA');
+    expect(organized.seasons[0].shortTag).toBe('OVA');
+    expect(organized.seasons[0].totalEpisodes).toBe(4);
+    expect(organized.seasons[0].episodeLabel).toBe('4 Episodios');
+    expect(organized.seasons[0].title).toBe('Hitozuma no Kuchibiru wa Kan Chuuhai no Aji ga Shite');
+
+    const uncensoredOva: AniListMediaNode = {
+      id: 'hla_412',
+      hentailaSlug: 'kanochi-x-netorare-kazoku',
+      title: {
+        romaji: "Kan'ochi x Netorare Kazoku The Animation",
+        english: "Kan'ochi x Netorare Kazoku The Animation"
+      },
+      format: 'SIN CENSURA',
+      status: 'RELEASING',
+      episodes: 2
+    };
+
+    const organized2 = organizeAnimeFranchise([uncensoredOva], 'hla_412');
+    expect(organized2.seasons).toHaveLength(1);
+    expect(organized2.seasons[0].id).toBe('hla_412');
+    expect(organized2.seasons[0].totalEpisodes).toBe(2);
+    expect(organized2.seasons[0].episodeLabel).toBe('2 Episodios');
+  });
+
+  it('still rejects MANGA/NOVEL/MUSIC root nodes while preserving anime OVAs', () => {
+    const mangaRoot: AniListMediaNode = {
+      id: 'ext_manga_1',
+      title: { romaji: 'Some Manga' },
+      format: 'MANGA',
+      status: 'FINISHED',
+      episodes: 10
+    };
+    const res = organizeAnimeFranchise([mangaRoot], 'ext_manga_1');
+    expect(res.seasons).toHaveLength(0);
+  });
 });
 
 

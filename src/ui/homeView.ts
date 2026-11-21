@@ -1242,6 +1242,9 @@ async function fetchAniListAnimeDirectory(
             if (existing) {
               existing.hentailaSlug = hla.slug;
               existing.hentailaId = hla.mediaId;
+              if (!existing.episodes && hla.episodesCount > 0) {
+                existing.episodes = hla.episodesCount;
+              }
               if (hla.synopsis) {
                 existing.description = hla.synopsis;
               }

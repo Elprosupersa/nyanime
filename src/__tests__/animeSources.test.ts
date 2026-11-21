@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  normalizeSlugText,
+  extractMainTitleSegments,
   generateAnimeSlugCandidates,
   extractBestSearchQuery,
   buildAnimeSearchQueries,
@@ -743,6 +745,170 @@ describe('animeSources — Real Multi-Provider Parsers & Ranking', () => {
     // 1-word title with release year suffix matches cleanly while still rejecting unrelated titles
     expect(pickBestSlugMatch(['berserk-2016'], ['Berserk'], 1)).toBe('berserk-2016');
     expect(pickBestSlugMatch(['monster-musume-no-iru-nichijou'], ['Monster'], 1)).toBeNull();
+  });
+
+  it('matches long-subtitle titles and apostrophe contractions while strictly rejecting unrequested sequels and foreign spin-offs', () => {
+    // 1. Apostrophe normalization: backward-compatible hyphenated default + unified apostrophe-joined variant
+    expect(normalizeSlugText("Kan'ochi x Netorare Kazoku")).toBe('kan-ochi-x-netorare-kazoku');
+    expect(normalizeSlugText("Kan'ochi x Netorare Kazoku", { joinApostrophes: true })).toBe('kanochi-x-netorare-kazoku');
+    expect(normalizeSlugText("Shin'ai no Aria", { joinApostrophes: true })).toBe('shinai-no-aria');
+    expect(normalizeSlugText("D'Artagnan Monogatari", { joinApostrophes: true })).toBe('dartagnan-monogatari');
+
+    // 2. Main-title extraction across colons, spaced dashes, parentheticals, and trailing "The Animation"
+    const kanochiFullTitle =
+      "Kan'ochi x Netorare Kazoku The Animation: Anata, Yurushite. Watakushitachi, Uwaki Sex ni Honki de Hamacchatta no";
+    expect(extractMainTitleSegments(kanochiFullTitle)).toEqual([
+      "Kan'ochi x Netorare Kazoku The Animation",
+      "Kan'ochi x Netorare Kazoku"
+    ]);
+    expect(
+      extractMainTitleSegments('Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka: Familia Myth')
+    ).toEqual(['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka']);
+    expect(extractMainTitleSegments('Higurashi no Naku Koro ni - Sotsu Subtitulo Largo')).toEqual([
+      'Higurashi no Naku Koro ni'
+    ]);
+    expect(extractMainTitleSegments('Kono Subarashii Sekai ni Shukufuku wo (Blessing on This Wonderful World)')).toEqual([
+      'Kono Subarashii Sekai ni Shukufuku wo'
+    ]);
+    // Must NOT split short colon prefixes like "Re:Zero"
+    expect(extractMainTitleSegments('Re:Zero kara Hajimeru Isekai Seikatsu')).toEqual([]);
+
+    // 3. Slug candidate generation emits BOTH hyphenated and apostrophe-joined variants + compact main-title slugs
+    const kanochiCandidates = generateAnimeSlugCandidates(kanochiFullTitle, null, null, 1);
+    expect(kanochiCandidates).toContain('kan-ochi-x-netorare-kazoku');
+    expect(kanochiCandidates).toContain('kanochi-x-netorare-kazoku');
+    expect(kanochiCandidates).toContain('kanochi-x-netorare-kazoku-the-animation');
+
+    const shinaiCandidates = generateAnimeSlugCandidates("Shin'ai no Aria: Eternal Song", null, null, 1);
+    expect(shinaiCandidates).toContain('shin-ai-no-aria');
+    expect(shinaiCandidates).toContain('shinai-no-aria');
+
+    const dartagnanCandidates = generateAnimeSlugCandidates("D'Artagnan Monogatari: Three Musketeers", null, null, 1);
+    expect(dartagnanCandidates).toContain('d-artagnan-monogatari');
+    expect(dartagnanCandidates).toContain('dartagnan-monogatari');
+
+    const danmachiCandidates = generateAnimeSlugCandidates(
+      'Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka: Familia Myth',
+      'Is It Wrong to Try to Pick Up Girls in a Dungeon?',
+      null,
+      1
+    );
+    expect(danmachiCandidates).toContain('dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka');
+
+    // Search queries also emit apostrophe-joined compact main title so live portals can find it
+    const kanochiQueries = buildAnimeSearchQueries(kanochiFullTitle);
+    expect(kanochiQueries).toContain('Kanochi x Netorare Kazoku');
+
+    // 4. Critical systemic bug fix: Kan'ochi long subtitle MUST match compact provider slug "kanochi-x-netorare-kazoku"
+    expect(
+      pickBestSlugMatch(['kanochi-x-netorare-kazoku'], [kanochiFullTitle], 1, 'OVA')
+    ).toBe('kanochi-x-netorare-kazoku');
+    expect(
+      pickBestSlugMatch(['kanochi-x-netorare-kazoku'], [kanochiFullTitle], 1)
+    ).toBe('kanochi-x-netorare-kazoku');
+    // Also matches when provider appends a release year (extraTokens === 1, nonYearExtraTokens === 0)
+    expect(
+      pickBestSlugMatch(['kanochi-x-netorare-kazoku-2024'], [kanochiFullTitle], 1, 'OVA', { seasonYear: 2024 })
+    ).toBe('kanochi-x-netorare-kazoku-2024');
+    // Apostrophe contractions with single-char prefix (D'Artagnan) match both joined and hyphenated forms
+    expect(
+      pickBestSlugMatch(
+        ['dartagnan-monogatari'],
+        ["D'Artagnan Monogatari: Long Subtitle Adventure Across France"],
+        1
+      )
+    ).toBe('dartagnan-monogatari');
+    expect(
+      pickBestSlugMatch(
+        ['d-artagnan-monogatari'],
+        ["D'Artagnan Monogatari: Long Subtitle Adventure Across France"],
+        1
+      )
+    ).toBe('d-artagnan-monogatari');
+
+    // 5. Long Romaji title with ": Familia Myth" MUST match compact main-title slug
+    expect(
+      pickBestSlugMatch(
+        ['dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka'],
+        ['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka: Familia Myth'],
+        1
+      )
+    ).toBe('dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka');
+
+    // Also works with spaced-dash and parenthetical subtitles
+    expect(
+      pickBestSlugMatch(
+        ['shinai-no-aria'],
+        ["Shin'ai no Aria - Extended Director Edition Chapter One Two Three"],
+        1
+      )
+    ).toBe('shinai-no-aria');
+    expect(
+      pickBestSlugMatch(
+        ['kono-subarashii-sekai-ni-shukufuku-wo'],
+        ['Kono Subarashii Sekai ni Shukufuku wo (God Blessing on This Wonderful World Long Edition)'],
+        1
+      )
+    ).toBe('kono-subarashii-sekai-ni-shukufuku-wo');
+
+    // 6. Strict sequel protection MUST remain intact in both directions (including on long titles!)
+    // Requesting Season 1 rejects Season 2 slugs
+    expect(
+      pickBestSlugMatch(
+        ['dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka-2nd-season'],
+        ['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka: Familia Myth'],
+        1
+      )
+    ).toBeNull();
+    expect(
+      pickBestSlugMatch(
+        ['kanochi-x-netorare-kazoku-season-2'],
+        [kanochiFullTitle],
+        1,
+        'OVA'
+      )
+    ).toBeNull();
+
+    // Requesting Season 2 strictly rejects bare Season 1 slugs even on long multi-word titles
+    expect(
+      pickBestSlugMatch(
+        ['dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka'],
+        ['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka Season 2'],
+        2
+      )
+    ).toBeNull();
+    expect(
+      pickBestSlugMatch(
+        ['dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka'],
+        ['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka II'],
+        2
+      )
+    ).toBeNull();
+    expect(
+      pickBestSlugMatch(
+        ['kanochi-x-netorare-kazoku'],
+        ["Kan'ochi x Netorare Kazoku Season 2"],
+        2
+      )
+    ).toBeNull();
+
+    // Unrequested foreign spin-off words MUST still be rejected
+    expect(
+      pickBestSlugMatch(
+        ['kanochi-x-netorare-kazoku-parallel-side-story'],
+        [kanochiFullTitle],
+        1,
+        'TV'
+      )
+    ).toBeNull();
+    expect(
+      pickBestSlugMatch(
+        ['dungeon-ni-deai-wo-motomeru-no-wa-machigatteiru-darou-ka-sword-oratoria'],
+        ['Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka: Familia Myth'],
+        1,
+        'TV'
+      )
+    ).toBeNull();
   });
 });
 

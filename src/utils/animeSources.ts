@@ -168,18 +168,93 @@ export function getServerBaseScore(serverName: string): number {
   return 74;
 }
 
-export function normalizeSlugText(raw: string): string {
-  return String(raw || '')
+export interface NormalizeSlugOptions {
+  joinApostrophes?: boolean;
+}
+
+export function normalizeSlugText(raw: string, options?: NormalizeSlugOptions): string {
+  const input = String(raw || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\u00d7/g, ' x ')
-    .replace(/\((?:tv|ona|ova)\)/gi, ' ')
-    .replace(/[:’'"–—_]/g, ' ')
+    .replace(/\((?:tv|ona|ova)\)/gi, ' ');
+
+  const apostropheHandled = options?.joinApostrophes
+    ? input.replace(/([a-z0-9])[’'\u2018\u2019\u02bc]([a-z0-9])/g, '$1$2')
+    : input;
+
+  return apostropheHandled
+    .replace(/[:’'\u2018\u2019\u02bc"–—_]/g, ' ')
     .replace(/[^a-z0-9\s-]/g, ' ')
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
+}
+
+export function extractMainTitleSegments(raw: string): string[] {
+  const trimmed = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!trimmed) return [];
+
+  const seen = new Set<string>([trimmed.toLowerCase()]);
+  const segments: string[] = [];
+
+  const pushSegment = (candidate: string) => {
+    const cleaned = candidate
+      .replace(/\((?:tv|ona|ova)\)\s*$/gi, '')
+      .replace(/[:\-–—\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned.length < 3) return;
+
+    const key = cleaned.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      segments.push(cleaned);
+    }
+
+    if (/\s+the\s+animation$/i.test(cleaned)) {
+      const withoutAnim = cleaned
+        .replace(/\s+the\s+animation$/i, '')
+        .replace(/[:\-–—\s]+$/g, '')
+        .trim();
+      const animKey = withoutAnim.toLowerCase();
+      if (withoutAnim.length >= 3 && !seen.has(animKey)) {
+        seen.add(animKey);
+        segments.push(withoutAnim);
+      }
+    }
+  };
+
+  // Pre-colon main title (index >= 3 avoids splitting short prefixes like "Re:Zero" or "Re:Creators")
+  const colonIdx = trimmed.indexOf(':', 3);
+  if (colonIdx > 2) {
+    const beforeColon = trimmed.slice(0, colonIdx);
+    pushSegment(beforeColon);
+    const beforeColonDash = beforeColon.match(/^(.{3,}?)\s+[-–—]\s+.+$/);
+    if (beforeColonDash?.[1]) {
+      pushSegment(beforeColonDash[1]);
+    }
+  }
+
+  // Spaced dash subtitle ("Title - Subtitle", "Title – Subtitle", "Title — Subtitle")
+  const dashMatch = trimmed.match(/^(.{3,}?)\s+[-–—]\s+.+$/);
+  if (dashMatch?.[1]) {
+    pushSegment(dashMatch[1]);
+  }
+
+  // Parenthetical subtitle ("Title (Long Subtitle)") excluding short format tags
+  const parenMatch = trimmed.match(/^(.{3,}?)\s*\((?!(?:tv|ona|ova)\s*\))([^)]{3,})\)\s*$/i);
+  if (parenMatch?.[1]) {
+    pushSegment(parenMatch[1]);
+  }
+
+  // Trailing "The Animation" on titles without a colon/dash
+  if (/\s+the\s+animation$/i.test(trimmed)) {
+    pushSegment(trimmed.replace(/\s+the\s+animation$/i, ''));
+  }
+
+  return segments;
 }
 
 export function stripSeasonModifiersFromSlug(slug: string): string {
@@ -200,6 +275,7 @@ export function generateAnimeSlugCandidates(
   synonyms?: ReadonlyArray<string | null | undefined> | null
 ): string[] {
   const candidates = new Set<string>();
+  const secondaryVariants = new Set<string>();
   const suffixVariants = new Set<string>();
   const extraSynonyms = Array.isArray(synonyms)
     ? synonyms.filter((v): v is string => Boolean(v && v.trim())).slice(0, 4)
@@ -208,11 +284,38 @@ export function generateAnimeSlugCandidates(
     Boolean(v && v.trim())
   );
 
+  const addSeasonSlugs = (targetSet: Set<string>, slugBase: string, rawBase?: string) => {
+    const clean = stripSeasonModifiersFromSlug(slugBase);
+    if (!clean) return;
+    targetSet.add(`${clean}-${seasonNum === 2 ? '2nd' : seasonNum === 3 ? '3rd' : `${seasonNum}th`}-season`);
+    targetSet.add(`${clean}-season-${seasonNum}`);
+    if (seasonNum === 2) {
+      targetSet.add(`${clean}-segunda-temporada`);
+      targetSet.add(`${clean}-2`);
+      suffixVariants.add(`${clean}-ii`);
+      suffixVariants.add(`${clean}-part-2`);
+      suffixVariants.add(`${clean}-parte-2`);
+    } else if (seasonNum === 3) {
+      targetSet.add(`${clean}-tercera-temporada`);
+      targetSet.add(`${clean}-3`);
+      suffixVariants.add(`${clean}-iii`);
+    } else if (seasonNum === 4) {
+      targetSet.add(`${clean}-cuarta-temporada`);
+      targetSet.add(`${clean}-4`);
+      suffixVariants.add(`${clean}-iv`);
+    } else {
+      targetSet.add(`${clean}-temporada-${seasonNum}`);
+    }
+    if (rawBase) targetSet.add(rawBase);
+  };
+
   for (const raw of titles) {
     const base = normalizeSlugText(raw);
     if (!base) continue;
 
+    const joinedBase = normalizeSlugText(raw, { joinApostrophes: true });
     const cleanBase = stripSeasonModifiersFromSlug(base);
+    const mainSegments = extractMainTitleSegments(raw);
 
     if (seasonNum === 1) {
       candidates.add(base);
@@ -229,30 +332,49 @@ export function generateAnimeSlugCandidates(
         candidates.add(cleanBase.replace(/re-zero/g, 'rezero'));
         suffixVariants.add(`${cleanBase}-tv`);
       }
-    } else if (cleanBase) {
-      candidates.add(`${cleanBase}-${seasonNum === 2 ? '2nd' : seasonNum === 3 ? '3rd' : `${seasonNum}th`}-season`);
-      candidates.add(`${cleanBase}-season-${seasonNum}`);
-      if (seasonNum === 2) {
-        candidates.add(`${cleanBase}-segunda-temporada`);
-        candidates.add(`${cleanBase}-2`);
-        suffixVariants.add(`${cleanBase}-ii`);
-        suffixVariants.add(`${cleanBase}-part-2`);
-        suffixVariants.add(`${cleanBase}-parte-2`);
-      } else if (seasonNum === 3) {
-        candidates.add(`${cleanBase}-tercera-temporada`);
-        candidates.add(`${cleanBase}-3`);
-        suffixVariants.add(`${cleanBase}-iii`);
-      } else if (seasonNum === 4) {
-        candidates.add(`${cleanBase}-cuarta-temporada`);
-        candidates.add(`${cleanBase}-4`);
-        suffixVariants.add(`${cleanBase}-iv`);
-      } else {
-        candidates.add(`${cleanBase}-temporada-${seasonNum}`);
+
+      if (joinedBase && joinedBase !== base) {
+        secondaryVariants.add(joinedBase);
+        const cleanJoined = stripSeasonModifiersFromSlug(joinedBase);
+        if (cleanJoined) {
+          secondaryVariants.add(cleanJoined);
+          suffixVariants.add(`${cleanJoined}-tv`);
+        }
       }
-      candidates.add(base);
+
+      for (const seg of mainSegments) {
+        const segJoined = normalizeSlugText(seg, { joinApostrophes: true });
+        const segHyphen = normalizeSlugText(seg);
+        if (segJoined) {
+          secondaryVariants.add(segJoined);
+          secondaryVariants.add(segJoined.replace(/re-zero/g, 'rezero'));
+          secondaryVariants.add(segJoined.replace(/high-school/g, 'highschool'));
+          const cleanSegJoined = stripSeasonModifiersFromSlug(segJoined);
+          if (cleanSegJoined) secondaryVariants.add(cleanSegJoined);
+        }
+        if (segHyphen && segHyphen !== segJoined) {
+          secondaryVariants.add(segHyphen);
+          secondaryVariants.add(segHyphen.replace(/re-zero/g, 'rezero'));
+          secondaryVariants.add(segHyphen.replace(/high-school/g, 'highschool'));
+          const cleanSegHyphen = stripSeasonModifiersFromSlug(segHyphen);
+          if (cleanSegHyphen) secondaryVariants.add(cleanSegHyphen);
+        }
+      }
+    } else if (cleanBase) {
+      addSeasonSlugs(candidates, base, base);
+      if (joinedBase && joinedBase !== base) {
+        addSeasonSlugs(secondaryVariants, joinedBase, joinedBase);
+      }
+      for (const seg of mainSegments) {
+        const segJoined = normalizeSlugText(seg, { joinApostrophes: true });
+        const segHyphen = normalizeSlugText(seg);
+        if (segJoined) addSeasonSlugs(secondaryVariants, segJoined);
+        if (segHyphen && segHyphen !== segJoined) addSeasonSlugs(secondaryVariants, segHyphen);
+      }
     }
   }
 
+  for (const v of secondaryVariants) candidates.add(v);
   for (const v of suffixVariants) candidates.add(v);
   return Array.from(candidates).filter(Boolean);
 }
@@ -296,6 +418,8 @@ export function buildAnimeSearchQueries(
       out.push(cleaned);
     }
   };
+  const joinInnerApostrophes = (text: string) =>
+    text.replace(/([a-zA-Z0-9])[’'\u2018\u2019\u02bc]([a-zA-Z0-9])/g, '$1$2');
 
   const primaryInputs = [romaji, english, seasonTitle];
   const extraInputs = Array.isArray(synonyms) ? synonyms : [];
@@ -320,7 +444,29 @@ export function buildAnimeSearchQueries(
       }
       const beforeColon = base.split(':')[0]?.trim() || '';
       if (beforeColon.length >= 3) {
-        pushQuery(beforeColon.replace(/;/g, ' '));
+        const cleanedBeforeColon = beforeColon.replace(/;/g, ' ');
+        pushQuery(cleanedBeforeColon);
+        const withoutAnim = cleanedBeforeColon.replace(/\s+the\s+animation$/i, '').trim();
+        if (withoutAnim.length >= 3 && withoutAnim !== cleanedBeforeColon) {
+          pushQuery(withoutAnim);
+        }
+        const apostropheJoinedMain = joinInnerApostrophes(withoutAnim || cleanedBeforeColon);
+        if (apostropheJoinedMain !== (withoutAnim || cleanedBeforeColon)) {
+          pushQuery(apostropheJoinedMain);
+        }
+      }
+    } else {
+      const dashMain = base.match(/^(.{3,}?)\s+[-–—]\s+.+$/)?.[1]?.trim() || '';
+      if (dashMain.length >= 3) {
+        pushQuery(dashMain);
+      }
+      const withoutAnim = base.replace(/\s+the\s+animation$/i, '').trim();
+      if (withoutAnim.length >= 3 && withoutAnim !== base) {
+        pushQuery(withoutAnim);
+      }
+      const apostropheJoined = joinInnerApostrophes(withoutAnim || base);
+      if (apostropheJoined !== (withoutAnim || base)) {
+        pushQuery(apostropheJoined);
       }
     }
   }
@@ -365,7 +511,7 @@ export function parseTvAnimeDirectoryLinks(html: string): string[] {
 }
 
 const SLUG_STOPWORDS = new Set([
-  'no', 'wa', 'ga', 'ni', 'wo', 'to', 'de', 'ka', 'na', 'kara',
+  'no', 'wa', 'ga', 'ni', 'wo', 'to', 'de', 'ka', 'na', 'kara', 'x',
   'of', 'the', 'in', 'on', 'at', 'by', 'for', 'and', 'a', 'an', 'la', 'el',
   'season', 'temporada', 'part', 'parte', 'cour', 'movie', 'tv'
 ]);
@@ -487,7 +633,17 @@ export function pickBestSlugMatch(
   const isTvRequest =
     !wantsMovie && (normFormat === '' || normFormat === 'TV' || normFormat === 'TV_SHORT' || (Number(meta?.episodes || 0) >= 6));
   const expectedSeasonTokens = getExpectedSeasonTokens(seasonNum);
-  const normalizedTargets = cleanTargets.map((t) => normalizeSlugText(t));
+  const normalizedTargets = cleanTargets.flatMap((t) => {
+    const h = normalizeSlugText(t);
+    const j = normalizeSlugText(t, { joinApostrophes: true });
+    return j && j !== h ? [h, j] : [h];
+  });
+
+  interface MainTitleProfile {
+    slugs: Set<string>;
+    sigTokens: Set<string>;
+    sigOrder: string[];
+  }
 
   interface PreparedTarget {
     exactSlugs: Set<string>;
@@ -496,54 +652,108 @@ export function pickBestSlugMatch(
     hasDistinctSubtitle: boolean;
     allTokens: Set<string>;
     sigTokens: Set<string>;
+    sigOrder: string[];
     compounds: Map<string, [string, string]>;
+    apostropheCompounds: Map<string, string[]>;
+    mainTitleProfiles: MainTitleProfile[];
   }
+
+  const tokenizeSlugParts = (normSlug: string): string[] =>
+    normSlug
+      .split('-')
+      .filter((tok) => (tok.length >= 2 || tok === '0' || tok === 'x') && !['season', 'the', 'part', 'cour', 'movie', 'tv'].includes(tok));
+
+  const extractSigOrder = (parts: string[]): string[] => {
+    const sig = parts.filter(
+      (tok) => (tok.length >= 2 || tok === '0') && !SLUG_STOPWORDS.has(tok) && (!/^\d+(?:st|nd|rd|th)?$/.test(tok) || tok === '0')
+    );
+    return sig.length > 0 ? sig : parts.filter((tok) => tok.length >= 2 || tok === '0');
+  };
+
+  const addSlugVariantsToSet = (targetSet: Set<string>, s: string) => {
+    if (!s) return;
+    targetSet.add(s);
+    if (s.includes('re-zero')) targetSet.add(s.replace(/re-zero/g, 'rezero'));
+    if (s.includes('high-school')) targetSet.add(s.replace(/high-school/g, 'highschool'));
+  };
 
   const preparedTargets: PreparedTarget[] = cleanTargets.map((t) => {
     const exactSlugs = new Set<string>();
     const norm = normalizeSlugText(t);
+    const joinedNorm = normalizeSlugText(t, { joinApostrophes: true });
     const usesNumberedSeasonTitle =
-      /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t);
-    const colonIdx = t.indexOf(':');
+      /\b(?:2nd|3rd|4th|5th|\d+th)\s+season\b|\bseason\s+[2-9]\b|\btemporada\s+[2-9]\b/i.test(t) ||
+      (seasonNum > 1 && /\s+(?:ii|iii|iv|[2-9])$/i.test(t.trim()));
+    const colonIdx = t.indexOf(':', 3);
     const beforeColonSlug = colonIdx > 2 ? normalizeSlugText(t.slice(0, colonIdx)) : '';
     const hasDistinctSubtitle =
       !usesNumberedSeasonTitle &&
       (colonIdx > 2 || /\b(hen|arc|chapter|saga|part|cour|final|shippuuden|alchemist|brotherhood|alicization)\b/i.test(t));
 
-    const addVariants = (s: string) => {
-      if (!s) return;
-      exactSlugs.add(s);
-      if (s.includes('re-zero')) exactSlugs.add(s.replace(/re-zero/g, 'rezero'));
-      if (s.includes('high-school')) exactSlugs.add(s.replace(/high-school/g, 'highschool'));
-    };
-
     if (norm) {
-      addVariants(norm);
+      addSlugVariantsToSet(exactSlugs, norm);
       if (seasonNum === 1) {
         const stripped = stripSeasonModifiersFromSlug(norm);
-        if (stripped) addVariants(stripped);
+        if (stripped) addSlugVariantsToSet(exactSlugs, stripped);
+      }
+    }
+    if (joinedNorm && joinedNorm !== norm) {
+      addSlugVariantsToSet(exactSlugs, joinedNorm);
+      if (seasonNum === 1) {
+        const strippedJoined = stripSeasonModifiersFromSlug(joinedNorm);
+        if (strippedJoined) addSlugVariantsToSet(exactSlugs, strippedJoined);
       }
     }
     if (t.includes(';')) {
       const semiJoined = normalizeSlugText(t.replace(/;/g, ''));
-      if (semiJoined) addVariants(semiJoined);
+      if (semiJoined) addSlugVariantsToSet(exactSlugs, semiJoined);
     }
 
-    const parts = norm
-      .split('-')
-      .filter((tok) => (tok.length >= 2 || tok === '0') && !['season', 'the', 'part', 'cour', 'movie', 'tv'].includes(tok));
+    const parts = tokenizeSlugParts(norm);
     const allTokens = new Set<string>(parts);
-    const sigTokens = new Set<string>(
-      parts.filter((tok) => !SLUG_STOPWORDS.has(tok) && (!/^\d+(?:st|nd|rd|th)?$/.test(tok) || tok === '0'))
-    );
-    if (sigTokens.size === 0) {
-      for (const p of parts) sigTokens.add(p);
-    }
+    const sigOrder = extractSigOrder(parts);
+    const sigTokens = new Set<string>(sigOrder);
 
     const compounds = new Map<string, [string, string]>();
     for (let i = 0; i + 1 < parts.length; i++) {
       compounds.set(`${parts[i]}${parts[i + 1]}`, [parts[i], parts[i + 1]]);
     }
+
+    // Build apostrophe contraction map (e.g. "Kan'ochi" -> kanochi => ['kan', 'ochi'], "D'Artagnan" -> dartagnan => ['artagnan'])
+    const apostropheCompounds = new Map<string, string[]>();
+    const rawApostropheWords = t.match(/[a-zA-Z0-9\u00C0-\u024F]+[’'\u2018\u2019\u02bc][a-zA-Z0-9\u00C0-\u024F]+/g) || [];
+    for (const word of rawApostropheWords) {
+      const joinedWord = normalizeSlugText(word, { joinApostrophes: true });
+      const rawSplitParts = normalizeSlugText(word).split('-').filter(Boolean);
+      const meaningfulSplitParts = rawSplitParts.filter((tok) => tok.length >= 2 || tok === '0');
+      if (joinedWord && meaningfulSplitParts.length > 0) {
+        apostropheCompounds.set(joinedWord, meaningfulSplitParts);
+        // Allow 1-char split prefix (like 'd' in "d-artagnan") as non-foreign token when target explicitly had "D'Artagnan"
+        for (const sp of rawSplitParts) {
+          if (sp.length === 1) allTokens.add(sp);
+        }
+      }
+    }
+
+    const mainSegments = extractMainTitleSegments(t);
+    const mainTitleProfiles: MainTitleProfile[] = mainSegments.map((seg) => {
+      const segNorm = normalizeSlugText(seg);
+      const segJoined = normalizeSlugText(seg, { joinApostrophes: true });
+      const slugs = new Set<string>();
+      addSlugVariantsToSet(slugs, segNorm);
+      addSlugVariantsToSet(slugs, segJoined);
+      if (seasonNum === 1) {
+        addSlugVariantsToSet(slugs, stripSeasonModifiersFromSlug(segNorm));
+        addSlugVariantsToSet(slugs, stripSeasonModifiersFromSlug(segJoined));
+      }
+      const segParts = tokenizeSlugParts(segNorm);
+      const segSigOrder = extractSigOrder(segParts);
+      return {
+        slugs,
+        sigTokens: new Set<string>(segSigOrder),
+        sigOrder: segSigOrder
+      };
+    });
 
     return {
       exactSlugs,
@@ -552,7 +762,10 @@ export function pickBestSlugMatch(
       hasDistinctSubtitle,
       allTokens,
       sigTokens,
-      compounds
+      sigOrder,
+      compounds,
+      apostropheCompounds,
+      mainTitleProfiles
     };
   });
 
@@ -586,6 +799,7 @@ export function pickBestSlugMatch(
       let nonYearExtraTokens = 0;
       let matchedCount = 0;
       const sigMatched = new Set<string>();
+      const matchedSeqTokens: string[] = [];
 
       const strippedSlug = slug.replace(/-(?:tv|ova|ona|movie|pelicula|film|special)$/i, '');
       const isExact =
@@ -604,18 +818,40 @@ export function pickBestSlugMatch(
         if (pt.allTokens.has(st)) {
           score += pt.sigTokens.has(st) ? 14 : 6;
           matchedCount++;
-          if (pt.sigTokens.has(st)) sigMatched.add(st);
+          if (pt.sigTokens.has(st)) {
+            sigMatched.add(st);
+            matchedSeqTokens.push(st);
+          }
+        } else if (pt.apostropheCompounds.has(st)) {
+          const apParts = pt.apostropheCompounds.get(st)!;
+          score += apParts.length >= 2 ? 24 : 14;
+          matchedCount += Math.max(1, apParts.length);
+          for (const ap of apParts) {
+            if (pt.sigTokens.has(ap)) {
+              sigMatched.add(ap);
+              matchedSeqTokens.push(ap);
+            }
+          }
         } else if (joinedPair && pt.allTokens.has(joinedPair)) {
           score += pt.sigTokens.has(joinedPair) ? 22 : 12;
           matchedCount += 2;
-          if (pt.sigTokens.has(joinedPair)) sigMatched.add(joinedPair);
+          if (pt.sigTokens.has(joinedPair)) {
+            sigMatched.add(joinedPair);
+            matchedSeqTokens.push(joinedPair);
+          }
           i++; // consume nextSt as part of compound match
         } else if (pt.compounds.has(st)) {
           score += 24;
           matchedCount += 2;
           const pair = pt.compounds.get(st)!;
-          if (pt.sigTokens.has(pair[0])) sigMatched.add(pair[0]);
-          if (pt.sigTokens.has(pair[1])) sigMatched.add(pair[1]);
+          if (pt.sigTokens.has(pair[0])) {
+            sigMatched.add(pair[0]);
+            matchedSeqTokens.push(pair[0]);
+          }
+          if (pt.sigTokens.has(pair[1])) {
+            sigMatched.add(pair[1]);
+            matchedSeqTokens.push(pair[1]);
+          }
         } else if (SLUG_META_SUFFIXES.has(st)) {
           if (st === 'tv' && seasonNum === 1 && !wantsMovie) score += 6;
           else if (wantsMovie && ['ova', 'ona', 'movie', 'pelicula', 'film', 'special'].includes(st)) score += 10;
@@ -633,9 +869,65 @@ export function pickBestSlugMatch(
         continue;
       }
 
+      // Evaluate main-title (pre-subtitle) coverage & consecutive front-of-title alignment
+      let isExactMainTitle = false;
+      let matchesMainTitle = false;
+      let matchesFrontConsecutive = false;
+
+      for (const profile of pt.mainTitleProfiles) {
+        if (profile.slugs.has(slug) || (seasonNum === 1 && profile.slugs.has(strippedSlug))) {
+          isExactMainTitle = true;
+          matchesMainTitle = true;
+          matchesFrontConsecutive = true;
+          break;
+        }
+
+        let profileSigMatched = 0;
+        for (const tok of profile.sigTokens) {
+          if (sigMatched.has(tok)) profileSigMatched++;
+        }
+
+        let maxRun = 0;
+        let currentRun = 0;
+        let cursor = 0;
+        for (const tok of profile.sigOrder) {
+          if (sigMatched.has(tok)) {
+            const pos = matchedSeqTokens.indexOf(tok, cursor);
+            if (pos !== -1) {
+              currentRun++;
+              cursor = pos + 1;
+              if (currentRun > maxRun) maxRun = currentRun;
+            } else {
+              currentRun = 0;
+            }
+          } else {
+            currentRun = 0;
+          }
+        }
+
+        const meets75Pct =
+          profile.sigTokens.size >= 2 &&
+          profileSigMatched >= Math.ceil(profile.sigTokens.size * 0.75);
+        const meetsConsecutiveMin =
+          profile.sigOrder.length >= 3 &&
+          maxRun >= 3 &&
+          profileSigMatched >= Math.ceil(profile.sigTokens.size * 0.6);
+
+        if (meets75Pct || meetsConsecutiveMin) {
+          matchesMainTitle = true;
+          if (maxRun >= 2 && matchedSeqTokens[0] === profile.sigOrder[0]) {
+            matchesFrontConsecutive = true;
+          }
+        }
+      }
+
+      // A main-title match only bypasses the 65% full-title coverage guard when ZERO foreign (non-year) words are introduced
+      const canAcceptViaMainTitle = matchesMainTitle && nonYearExtraTokens === 0;
+
       const firstPair = slugTokens.length >= 2 ? `${slugTokens[0]}${slugTokens[1]}` : '';
       if (
         !pt.allTokens.has(firstTok) &&
+        !pt.apostropheCompounds.has(firstTok) &&
         !pt.compounds.has(firstTok) &&
         (!firstPair || !pt.allTokens.has(firstPair)) &&
         extraTokens >= 2
@@ -654,7 +946,7 @@ export function pickBestSlugMatch(
           // Allow 1-word title only if first token matches and the sole extra token is a 4-digit release year (e.g. hunter-x-hunter-2011, berserk-2016)
           const onlyYearExtra =
             extraTokens === 1 &&
-            pt.allTokens.has(firstTok) &&
+            (pt.allTokens.has(firstTok) || pt.apostropheCompounds.has(firstTok)) &&
             /^(19\d\d|20\d\d)$/.test(slugTokens[slugTokens.length - 1] || '');
           if (!onlyYearExtra) {
             continue;
@@ -663,17 +955,34 @@ export function pickBestSlugMatch(
         if (pt.sigTokens.size >= 2 && sigMatched.size < 2) {
           continue;
         }
-        if (pt.sigTokens.size >= 3 && sigMatched.size < Math.ceil(pt.sigTokens.size * 0.65)) {
+        if (pt.sigTokens.size >= 3 && sigMatched.size < Math.ceil(pt.sigTokens.size * 0.65) && !canAcceptViaMainTitle) {
           continue;
         }
       }
 
-      // Reject single-token partial match on a 3+ word title unless it is the exact pre-colon title
-      if (!isExact && pt.sigTokens.size >= 3 && sigMatched.size <= 1 && slug !== pt.beforeColonSlug) {
+      // Reject single-token partial match on a 3+ word title unless it is the exact pre-colon/main title
+      if (!isExact && !isExactMainTitle && pt.sigTokens.size >= 3 && sigMatched.size <= 1 && slug !== pt.beforeColonSlug) {
         continue;
       }
 
       score -= extraTokens * 16;
+
+      // Award a front/main-title match bonus for Season 1 (kept strictly below isExact's +60 so full exact matches still win)
+      if (seasonNum === 1 && nonYearExtraTokens === 0 && !hasAnyLaterSeasonMarker) {
+        if (isExactMainTitle) {
+          score += 22;
+        } else if (matchesMainTitle) {
+          score += matchesFrontConsecutive ? 16 : 12;
+        } else if (
+          !isExact &&
+          pt.sigOrder.length >= 2 &&
+          matchedSeqTokens.length >= 2 &&
+          matchedSeqTokens[0] === pt.sigOrder[0] &&
+          matchedSeqTokens[1] === pt.sigOrder[1]
+        ) {
+          score += 8;
+        }
+      }
 
       if (slugYear && meta?.seasonYear && Number.isFinite(meta.seasonYear)) {
         const diff = Math.abs(slugYear - Number(meta.seasonYear));
@@ -695,12 +1004,14 @@ export function pickBestSlugMatch(
         pt.hasDistinctSubtitle &&
         !pt.usesNumberedSeasonTitle &&
         (isExact || (pt.sigTokens.size >= 3 && sigMatched.size >= Math.ceil(pt.sigTokens.size * 0.75))) &&
-        slug !== pt.beforeColonSlug
+        slug !== pt.beforeColonSlug &&
+        !isExactMainTitle
       ) {
         // Subtitle-named sequel season (e.g. "Kimetsu no Yaiba: Yuukaku-hen", "Bleach: Sennen Kessen-hen", "Dr. STONE: New World")
         score += 18;
-      } else if (pt.usesNumberedSeasonTitle) {
-        score -= 70;
+      } else if (pt.usesNumberedSeasonTitle || isExactMainTitle || slug === pt.beforeColonSlug) {
+        // Strictly reject bare Season 1 slugs when requesting Season 2+ (even on long titles where token score > 70)
+        continue;
       } else {
         score -= 36;
       }

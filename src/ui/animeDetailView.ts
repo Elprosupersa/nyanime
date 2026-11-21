@@ -65,7 +65,108 @@ export function calcularEpisodiosReales(media: any): number {
   if (media.status === 'RELEASING' && media.nextAiringEpisode?.episode) {
     return Math.max(0, Number(media.nextAiringEpisode.episode) - 1);
   }
-  return Math.max(0, Number(media.episodes || 0));
+  return Math.max(0, Number(media.episodes ?? media.episodesCount ?? 0));
+}
+
+function buildFallbackSeasonEntry(mediaOrAnime: any, fallbackAnime?: any): any {
+  const ref = mediaOrAnime || fallbackAnime || {};
+  const epsReal = calcularEpisodiosReales(ref) || calcularEpisodiosReales(fallbackAnime);
+  const title =
+    ref.title?.english ||
+    ref.title?.romaji ||
+    (typeof ref.title === 'string' ? ref.title : '') ||
+    fallbackAnime?.title?.english ||
+    fallbackAnime?.title?.romaji ||
+    'Episodios';
+  const romaji =
+    ref.title?.romaji ||
+    (typeof ref.title === 'string' ? ref.title : '') ||
+    fallbackAnime?.title?.romaji ||
+    title;
+  const english =
+    ref.title?.english ||
+    (typeof ref.title === 'string' ? ref.title : '') ||
+    fallbackAnime?.title?.english ||
+    title;
+  const fmt = String(ref.format || fallbackAnime?.format || 'TV').toUpperCase();
+  const status = String(ref.status || fallbackAnime?.status || 'FINISHED');
+  const isUpcoming = status === 'NOT_YET_RELEASED';
+  const epLabel = isUpcoming
+    ? 'Próximamente'
+    : epsReal === 0
+      ? 'Pendiente'
+      : fmt === 'MOVIE' && epsReal === 1
+        ? 'Película'
+        : `${epsReal} ${epsReal === 1 ? 'Episodio' : 'Episodios'}`;
+  const slug = ref.hentailaSlug || fallbackAnime?.hentailaSlug || undefined;
+
+  return {
+    id: ref.id ?? fallbackAnime?.id ?? 0,
+    ...(ref.idMal || fallbackAnime?.idMal ? { idMal: ref.idMal || fallbackAnime?.idMal } : {}),
+    ...(ref.averageScore || fallbackAnime?.averageScore ? { averageScore: ref.averageScore || fallbackAnime?.averageScore } : {}),
+    ...(ref.seasonYear || ref.startDate?.year || fallbackAnime?.seasonYear
+      ? { seasonYear: Number(ref.seasonYear || ref.startDate?.year || fallbackAnime?.seasonYear) }
+      : {}),
+    ...(slug ? { hentailaSlug: slug } : {}),
+    seasonNumber: 1,
+    tier: fmt === 'OVA' || /HENTAI|CENSURA|UNCENSORED/i.test(fmt) ? 'OVA' : fmt === 'MOVIE' ? 'MOVIE' : 'MAIN_SEASON',
+    shortTag: fmt === 'OVA' || /HENTAI|CENSURA|UNCENSORED/i.test(fmt) ? 'OVA' : fmt === 'MOVIE' ? 'Película' : 'T1',
+    title,
+    romaji,
+    english,
+    displayLabel: `T1: ${title}`,
+    episodeLabel: epLabel,
+    format: fmt,
+    status,
+    totalEpisodes: epsReal,
+    isUpcoming,
+    nextAiringEpisode: ref.nextAiringEpisode || fallbackAnime?.nextAiringEpisode || null,
+    coverImage:
+      ref.coverImage?.extraLarge ||
+      ref.coverImage?.large ||
+      (typeof ref.coverImage === 'string' ? ref.coverImage : '') ||
+      fallbackAnime?.coverImage?.extraLarge ||
+      fallbackAnime?.coverImage?.large ||
+      '',
+    bannerImage:
+      ref.bannerImage ||
+      ref.coverImage?.extraLarge ||
+      fallbackAnime?.bannerImage ||
+      fallbackAnime?.coverImage?.extraLarge ||
+      '',
+    description: ref.description || fallbackAnime?.description || ''
+  };
+}
+
+function renderDetailEpisodesLoadingState(titleText: string): void {
+  const headerTitle = document.getElementById('det-header-title');
+  const countEl = document.getElementById('det-count');
+  const epContainer = document.getElementById('det-episodios');
+  const rangosContainer = document.getElementById('det-rangos');
+  const dlBtn = document.querySelector('#pantalla-detalle .btn-download-season') as HTMLElement | null;
+  const markModeBtn = document.getElementById('det-mark-mode-btn') as HTMLButtonElement | null;
+  const markHint = document.getElementById('det-mark-hint') as HTMLElement | null;
+  const btn = document.getElementById('det-btn-continue') as HTMLButtonElement | null;
+  const pill = document.getElementById('det-watch-progress');
+
+  if (headerTitle) headerTitle.textContent = titleText || 'Episodios';
+  if (countEl) countEl.textContent = 'Cargando...';
+  if (rangosContainer) {
+    rangosContainer.innerHTML = '';
+    rangosContainer.style.display = 'none';
+  }
+  if (dlBtn) dlBtn.style.display = 'none';
+  if (markModeBtn) markModeBtn.style.display = 'none';
+  if (markHint) markHint.classList.add('hide');
+  if (pill) pill.textContent = 'Cargando...';
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    btn.textContent = 'Cargando episodios...';
+  }
+  if (epContainer) {
+    epContainer.innerHTML = Array.from({ length: 6 }, () => '<div class="ep-btn skeleton-box" aria-hidden="true" style="min-height:44px;opacity:0.45;"></div>').join('');
+  }
 }
 
 export function aplicarMetadatosTemporadaUI(seasonOrMedia: any, fallbackAnime: any): void {
@@ -80,7 +181,7 @@ export function aplicarMetadatosTemporadaUI(seasonOrMedia: any, fallbackAnime: a
     'Anime';
 
   const titleEl = document.getElementById('det-titulo');
-  if (titleEl) titleEl.innerText = title;
+  if (titleEl) titleEl.textContent = title;
 
   const imgUrl =
     ref.bannerImage ||
@@ -91,7 +192,14 @@ export function aplicarMetadatosTemporadaUI(seasonOrMedia: any, fallbackAnime: a
     fallbackAnime?.coverImage?.extraLarge ||
     '';
   const imgEl = document.getElementById('det-img') as HTMLImageElement | null;
-  if (imgEl && imgUrl) imgEl.src = safeImg(imgUrl);
+  if (imgEl) {
+    if (imgUrl) {
+      imgEl.src = safeImg(imgUrl);
+    } else {
+      imgEl.removeAttribute('src');
+    }
+    imgEl.alt = title;
+  }
 
   const rawDesc = ref.description || fallbackAnime?.description || 'Sin descripción disponible.';
   const cleanDesc = String(rawDesc).replace(/<br\s*\/?>/gi, ' ').replace(/<\/?i>/gi, '');
@@ -129,20 +237,32 @@ export function actualizarBotonContinuarDetalleAnime(): void {
   const season = state.seasons[state.temporadaActualIdx] || state.seasons[0];
   const btn = document.getElementById('det-btn-continue') as HTMLButtonElement | null;
   const pill = document.getElementById('det-watch-progress');
-  if (!btn || !season) return;
+  if (!btn && !pill) return;
+
+  if (!season) {
+    if (pill) pill.textContent = '0 / 0 vistos';
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      btn.textContent = 'Sin episodios';
+    }
+    return;
+  }
 
   const total = Number(season.totalEpisodes || 0);
   const watchedSet = AnimeWatchedManager.getWatchedSet(season.id);
   const watchedCount = Array.from(watchedSet).filter((n) => n >= 1 && n <= total).length;
 
   if (pill) {
-    pill.textContent = total > 0 ? `${watchedCount} / ${total} vistos` : 'Próximamente';
+    pill.textContent = total > 0 ? `${watchedCount} / ${total} vistos` : (season.isUpcoming ? 'Próximamente' : '0 / 0 vistos');
   }
+
+  if (!btn) return;
 
   if (total === 0 || season.isUpcoming) {
     btn.disabled = true;
     btn.style.opacity = '0.5';
-    btn.textContent = 'Próximamente';
+    btn.textContent = season.isUpcoming ? 'Próximamente' : 'Sin episodios';
     return;
   }
 
@@ -180,6 +300,9 @@ export function iniciarOContinuarAnime(): void {
 }
 
 export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => void): Promise<void> {
+  aniZipRequestGuard.invalidate();
+  const detailToken = animeDetailGuard.next();
+
   const numericCandidate = typeof animeInput === 'string' ? Number(animeInput) : NaN;
   const normalizedId =
     typeof animeInput === 'number'
@@ -191,6 +314,7 @@ export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => voi
     typeof animeInput === 'number' || typeof animeInput === 'string'
       ? { id: normalizedId, title: { romaji: '', english: '' } }
       : animeInput || {};
+
   state.anime = anime;
   state.fullMedia = null;
   nWin.Store?.setActiveAnime?.(anime);
@@ -201,28 +325,8 @@ export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => voi
   episodeMarkMode = false;
   libraryMenuOpen = false;
 
-  const epsProvisional = calcularEpisodiosReales(anime);
-  const provTitle = anime?.title?.english || anime?.title?.romaji || 'Temporada 1';
-  state.seasons = [
-    {
-      id: anime?.id || 0,
-      seasonNumber: 1,
-      tier: 'MAIN_SEASON',
-      shortTag: 'T1',
-      title: provTitle,
-      romaji: anime?.title?.romaji || provTitle,
-      english: anime?.title?.english || provTitle,
-      displayLabel: `T1: ${provTitle}`,
-      episodeLabel: `${epsProvisional} Episodios`,
-      format: anime?.format || 'TV',
-      status: anime?.status || 'FINISHED',
-      totalEpisodes: epsProvisional,
-      isUpcoming: anime?.status === 'NOT_YET_RELEASED',
-      coverImage: anime?.coverImage?.extraLarge || anime?.coverImage?.large || '',
-      bannerImage: anime?.bannerImage || anime?.coverImage?.extraLarge || '',
-      description: anime?.description || ''
-    }
-  ];
+  const provisionalSeason = buildFallbackSeasonEntry(anime, anime);
+  state.seasons = [provisionalSeason];
 
   const pantallaDetalle = document.getElementById('pantalla-detalle');
   if (pantallaDetalle) {
@@ -230,10 +334,17 @@ export async function abrirDetalle(animeInput: any, onLoadedCallback?: () => voi
     pantallaDetalle.scrollTo(0, 0);
   }
 
+  // Atomic UI reset before any await so zero DOM state from the previous anime ever persists
   aplicarMetadatosTemporadaUI(anime, anime);
   updateFavoriteButton(anime.id);
+  renderTemporadasDropdown();
+  if (provisionalSeason.totalEpisodes > 0 || provisionalSeason.isUpcoming) {
+    renderDetalleEpisodios();
+    actualizarBotonContinuarDetalleAnime();
+  } else {
+    renderDetailEpisodesLoadingState(provisionalSeason.title);
+  }
 
-  const detailToken = animeDetailGuard.next();
   await resolverTemporadasAnime(anime, detailToken.seq);
   if (!animeDetailGuard.isCurrent(detailToken.seq)) return;
   if (onLoadedCallback) onLoadedCallback();
@@ -323,54 +434,87 @@ async function postAniListResilient(bodyObj: Record<string, any>): Promise<any> 
 
 export async function resolverTemporadasAnime(anime: any, expectedSeq?: number): Promise<void> {
   const guardSeq = typeof expectedSeq === 'number' ? expectedSeq : animeDetailGuard.next().seq;
-  const cacheKey = `anime_franchise_v4_${anime.id}`;
+  const cacheKey = `anime_franchise_v5_${anime.id}`;
   let cachedOrganized = CacheManager.get(cacheKey);
   const hasStaleReleasingZero =
     Array.isArray(cachedOrganized?.seasons) &&
     cachedOrganized.seasons.some((s: any) => s && s.status === 'RELEASING' && Number(s.totalEpisodes || 0) <= 0);
+  const inputKnownEps = calcularEpisodiosReales(anime);
+  const hasStaleZeroVsKnown =
+    inputKnownEps > 0 &&
+    Array.isArray(cachedOrganized?.seasons) &&
+    cachedOrganized.seasons.some((s: any) => s && String(s.id) === String(anime.id) && Number(s.totalEpisodes || 0) <= 0);
 
   if (
     !cachedOrganized ||
     !Array.isArray(cachedOrganized.seasons) ||
     cachedOrganized.seasons.length === 0 ||
-    hasStaleReleasingZero
+    hasStaleReleasingZero ||
+    hasStaleZeroVsKnown
   ) {
     let primaryMedia = anime;
     const collectedRoots: any[] = [];
+
+    const enrichFromHentaiLa = async (baseMedia: any, slug: string): Promise<any> => {
+      if (!slug || !nWin.NyAnimeVideoSources?.parseHentaiLaMediaDetail) return baseMedia;
+      try {
+        const hlaMediaUrl = `https://hentaila.com/media/${encodeURIComponent(String(slug))}/__data.json`;
+        const hlaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(hlaMediaUrl)}&probe=1`, {}, 3500);
+        if (!animeDetailGuard.isCurrent(guardSeq)) return baseMedia;
+        if (hlaRes.ok) {
+          const hlaJson = await hlaRes.json().catch(() => null);
+          if (!animeDetailGuard.isCurrent(guardSeq)) return baseMedia;
+          const detail = nWin.NyAnimeVideoSources.parseHentaiLaMediaDetail(hlaJson);
+          if (detail) {
+            return {
+              ...baseMedia,
+              episodes: detail.episodesCount || baseMedia.episodes || anime.episodes || 2,
+              description: detail.synopsis || baseMedia.description || anime.description,
+              genres: detail.genres?.length ? detail.genres : (baseMedia.genres || anime.genres),
+              idMal: baseMedia.idMal || detail.malId || anime.idMal,
+              status: baseMedia.status || detail.status || anime.status || 'FINISHED',
+              format: baseMedia.format || detail.category || anime.format || 'OVA',
+              coverImage: baseMedia.coverImage?.extraLarge || baseMedia.coverImage?.large
+                ? baseMedia.coverImage
+                : { extraLarge: detail.cover, large: detail.cover },
+              bannerImage: baseMedia.bannerImage || detail.backdrop || detail.cover
+            };
+          }
+        }
+      } catch {
+        // ignore HentaiLA enrichment failure
+      }
+      return baseMedia;
+    };
 
     try {
       const numericId = Number(anime?.id);
       if (Number.isFinite(numericId) && numericId > 0) {
         const data = await postAniListResilient({ query: ANILIST_FRANCHISE_QUERY, variables: { id: numericId } });
         if (!animeDetailGuard.isCurrent(guardSeq)) return;
-        primaryMedia = data?.data?.Media || anime;
-      } else if (anime?.hentailaSlug && nWin.NyAnimeVideoSources?.parseHentaiLaMediaDetail) {
-        try {
-          const hlaMediaUrl = `https://hentaila.com/media/${encodeURIComponent(String(anime.hentailaSlug))}/__data.json`;
-          const hlaRes = await fetchWithTimeout(`/api/proxy?url=${encodeURIComponent(hlaMediaUrl)}&probe=1`, {}, 3500);
-          if (!animeDetailGuard.isCurrent(guardSeq)) return;
-          if (hlaRes.ok) {
-            const hlaJson = await hlaRes.json().catch(() => null);
+        const fetchedMedia = data?.data?.Media;
+        if (fetchedMedia) {
+          primaryMedia = {
+            ...fetchedMedia,
+            ...(anime?.hentailaSlug ? { hentailaSlug: anime.hentailaSlug } : {}),
+            episodes: fetchedMedia.episodes ?? anime?.episodes ?? anime?.episodesCount ?? null,
+            description:
+              anime?.hentailaSlug && anime?.description
+                ? anime.description
+                : (fetchedMedia.description || anime?.description)
+          };
+          if (anime?.hentailaSlug && calcularEpisodiosReales(primaryMedia) <= 0) {
+            primaryMedia = await enrichFromHentaiLa(primaryMedia, String(anime.hentailaSlug));
             if (!animeDetailGuard.isCurrent(guardSeq)) return;
-            const detail = nWin.NyAnimeVideoSources.parseHentaiLaMediaDetail(hlaJson);
-            if (detail) {
-              primaryMedia = {
-                ...anime,
-                episodes: detail.episodesCount || anime.episodes || 2,
-                description: detail.synopsis || anime.description,
-                genres: detail.genres?.length ? detail.genres : anime.genres,
-                idMal: detail.malId || anime.idMal,
-                status: detail.status || anime.status || 'FINISHED',
-                format: detail.category || anime.format || 'OVA',
-                coverImage: { extraLarge: detail.cover, large: detail.cover },
-                bannerImage: detail.backdrop || detail.cover
-              };
-            }
           }
-        } catch {
-          // ignore
+        } else {
+          primaryMedia = anime;
         }
+      } else if (anime?.hentailaSlug) {
+        primaryMedia = await enrichFromHentaiLa(anime, String(anime.hentailaSlug));
+        if (!animeDetailGuard.isCurrent(guardSeq)) return;
       }
+
       if (!animeDetailGuard.isCurrent(guardSeq)) return;
       if (primaryMedia) {
         if (anime?.hentailaSlug && !primaryMedia.hentailaSlug) {
@@ -406,7 +550,7 @@ export async function resolverTemporadasAnime(anime: any, expectedSeq?: number):
       const validExpandFmts = new Set(['TV', 'TV_SHORT', 'ONA', 'OVA', 'MOVIE', 'SPECIAL']);
 
       const collectFrontierIds = () => {
-        const nextIds = new Set<number | string>();
+        const nextIds = new Set<number>();
         const walk = (node: any) => {
           const edges = node?.relations?.edges || [];
           for (const edge of edges) {
@@ -414,13 +558,15 @@ export async function resolverTemporadasAnime(anime: any, expectedSeq?: number):
             const t = edge?.node;
             if (!t || !t.id || !allowedExpandRels.has(rel)) continue;
             if (!validExpandFmts.has(String(t.format || '').toUpperCase())) continue;
+            const tNum = Number(t.id);
+            if (!Number.isFinite(tNum) || tNum <= 0) continue;
             const needsReleasingRefresh =
-              t.status === 'RELEASING' && !t.nextAiringEpisode?.episode && !expandedIds.has(t.id);
+              t.status === 'RELEASING' && !t.nextAiringEpisode?.episode && !expandedIds.has(tNum);
             if (t.relations?.edges && !needsReleasingRefresh) {
-              expandedIds.add(t.id);
+              expandedIds.add(tNum);
               walk(t);
-            } else if (!expandedIds.has(t.id)) {
-              nextIds.add(t.id);
+            } else if (!expandedIds.has(tNum)) {
+              nextIds.add(tNum);
             }
           }
         };
@@ -451,30 +597,21 @@ export async function resolverTemporadasAnime(anime: any, expectedSeq?: number):
 
     if (nWin.NyAnimeSeasons?.organizeAnimeFranchise) {
       cachedOrganized = nWin.NyAnimeSeasons.organizeAnimeFranchise(collectedRoots, anime.id);
-    } else {
-      const epsReal = calcularEpisodiosReales(primaryMedia);
+    }
+
+    // Guarantee at least one valid season entry even if organizer rejects an external/edge-case node
+    if (!cachedOrganized || !Array.isArray(cachedOrganized.seasons) || cachedOrganized.seasons.length === 0) {
+      const fallbackSeason = buildFallbackSeasonEntry(primaryMedia, anime);
       cachedOrganized = {
-        seasons: [
-          {
-            id: primaryMedia.id,
-            seasonNumber: 1,
-            tier: 'MAIN_SEASON',
-            shortTag: 'T1',
-            title: primaryMedia.title?.english || primaryMedia.title?.romaji || 'Temporada 1',
-            displayLabel: `T1: ${primaryMedia.title?.english || primaryMedia.title?.romaji || 'Temporada 1'}`,
-            episodeLabel: `${epsReal} Episodios`,
-            format: primaryMedia.format || 'TV',
-            status: primaryMedia.status || 'FINISHED',
-            totalEpisodes: epsReal,
-            isUpcoming: primaryMedia.status === 'NOT_YET_RELEASED',
-            coverImage: primaryMedia.coverImage?.extraLarge || primaryMedia.coverImage?.large || '',
-            bannerImage: primaryMedia.bannerImage || primaryMedia.coverImage?.extraLarge || '',
-            description: primaryMedia.description || ''
-          }
-        ],
+        seasons: [fallbackSeason],
         initialIndex: 0,
-        franchiseTitle: primaryMedia.title?.english || primaryMedia.title?.romaji || ''
+        franchiseTitle: fallbackSeason.title
       };
+    } else if (primaryMedia?.hentailaSlug || anime?.hentailaSlug) {
+      const slug = primaryMedia?.hentailaSlug || anime?.hentailaSlug;
+      cachedOrganized.seasons = cachedOrganized.seasons.map((s: any) =>
+        String(s.id) === String(anime.id) && !s.hentailaSlug ? { ...s, hentailaSlug: slug } : s
+      );
     }
 
     if (cachedOrganized.seasons.length > 0) {
@@ -483,8 +620,12 @@ export async function resolverTemporadasAnime(anime: any, expectedSeq?: number):
   }
 
   if (!animeDetailGuard.isCurrent(guardSeq)) return;
-  state.seasons = cachedOrganized.seasons || [];
-  state.temporadaActualIdx = Math.min(cachedOrganized.initialIndex || 0, Math.max(0, state.seasons.length - 1));
+  const resolvedSeasons =
+    Array.isArray(cachedOrganized?.seasons) && cachedOrganized.seasons.length > 0
+      ? cachedOrganized.seasons
+      : [buildFallbackSeasonEntry(state.fullMedia || anime, anime)];
+  state.seasons = resolvedSeasons;
+  state.temporadaActualIdx = Math.min(cachedOrganized?.initialIndex || 0, Math.max(0, state.seasons.length - 1));
   const activeSeason = state.seasons[state.temporadaActualIdx];
   if (activeSeason) {
     aplicarMetadatosTemporadaUI(activeSeason, state.anime);
@@ -501,13 +642,18 @@ export async function resolverTemporadasAnime(anime: any, expectedSeq?: number):
 
 export async function cargarAniZipMappingAsync(seasonAnimeId: number | string): Promise<any> {
   if (!seasonAnimeId) return null;
+  const numericId = Number(seasonAnimeId);
+  if (!Number.isFinite(numericId) || numericId <= 0) {
+    // External catalog IDs (e.g. hla_627) have no AniList mapping on api.ani.zip — skip silently without network errors
+    return null;
+  }
   const { seq, signal } = aniZipRequestGuard.next();
-  const cacheKey = `anizip_mapping_${seasonAnimeId}`;
+  const cacheKey = `anizip_mapping_${numericId}`;
   let mapping = CacheManager.get(cacheKey);
   if (!mapping) {
     try {
       const res = await fetchWithTimeout(
-        `https://api.ani.zip/mappings?anilist_id=${seasonAnimeId}`,
+        `https://api.ani.zip/mappings?anilist_id=${numericId}`,
         { headers: { Accept: 'application/json' }, signal },
         2500
       );
@@ -523,12 +669,15 @@ export async function cargarAniZipMappingAsync(seasonAnimeId: number | string): 
     }
   }
   if (!aniZipRequestGuard.isCurrent(seq)) return null;
+  const currentSeason = state.seasons?.[state.temporadaActualIdx];
+  if (!currentSeason || String(currentSeason.id) !== String(seasonAnimeId)) {
+    return mapping;
+  }
   if (mapping && nWin.NyAnimeVideoSources?.extractEpisodeDetailsMap) {
     const metaMap = nWin.NyAnimeVideoSources.extractEpisodeDetailsMap(mapping);
     state.episodeMetaMap = metaMap;
 
-    const currentSeason = state.seasons?.[state.temporadaActualIdx];
-    if (currentSeason?.id === seasonAnimeId && state.epActual) {
+    if (state.epActual) {
       const epMeta = metaMap[state.epActual];
       const subEl = document.getElementById('rep-ep-subtitle');
       if (subEl && epMeta?.title) subEl.textContent = `Ep ${state.epActual} · ${epMeta.title}`;
@@ -536,7 +685,7 @@ export async function cargarAniZipMappingAsync(seasonAnimeId: number | string): 
 
     document.querySelectorAll('#det-episodios .ep-btn').forEach((btnEl) => {
       const btn = btnEl as HTMLElement;
-      const epNum = parseInt(btn.textContent || '', 10);
+      const epNum = Number(btn.dataset.ep || parseInt(btn.textContent || '', 10));
       if (metaMap[epNum]?.title) btn.title = `Episodio ${epNum}: ${metaMap[epNum].title}`;
     });
   }
@@ -1016,28 +1165,49 @@ export function renderDetalleEpisodios(): void {
   if (!epContainer || !rangosContainer) return;
   epContainer.innerHTML = '';
   rangosContainer.innerHTML = '';
-  if (!season) return;
-
-  if (countEl) countEl.innerText = season.episodeLabel || `${season.totalEpisodes} Episodios`;
-  if (headerTitle) headerTitle.innerText = season.title || 'Episodios';
-  if (dlBtn) dlBtn.style.display = season.totalEpisodes > 0 ? 'flex' : 'none';
-  if (markModeBtn) {
-    markModeBtn.style.display = season.totalEpisodes > 0 ? 'inline-flex' : 'none';
-    markModeBtn.classList.toggle('active', episodeMarkMode);
-    markModeBtn.textContent = episodeMarkMode ? '✓ Listo' : '✓ Marcar vistos';
-  }
-  if (markHint) {
-    markHint.classList.toggle('hide', !episodeMarkMode || season.totalEpisodes <= 0);
-  }
-
-  if (season.isUpcoming || season.totalEpisodes === 0) {
-    epContainer.innerHTML = season.isUpcoming
-      ? '<div style="grid-column: 1/-1; text-align:center; color:#cbd5e1; padding:18px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px;">Estreno programado · Próximamente disponible para ver.</div>'
-      : '<div style="grid-column: 1/-1; text-align:center; color:var(--text-muted); padding:15px;">Aún no se han emitido episodios para este título.</div>';
+  if (!season) {
+    const fallbackTitle =
+      state.anime?.title?.english ||
+      state.anime?.title?.romaji ||
+      (typeof state.anime?.title === 'string' ? state.anime.title : '') ||
+      'Episodios';
+    if (headerTitle) headerTitle.textContent = fallbackTitle;
+    if (countEl) countEl.textContent = '0 Episodios';
+    rangosContainer.style.display = 'none';
+    if (dlBtn) dlBtn.style.display = 'none';
+    if (markModeBtn) markModeBtn.style.display = 'none';
+    if (markHint) markHint.classList.add('hide');
+    epContainer.innerHTML =
+      '<div style="grid-column: 1/-1; text-align:center; color:var(--text-muted); padding:15px;">Aún no se han emitido episodios para este título.</div>';
+    actualizarBotonContinuarDetalleAnime();
     return;
   }
 
   const total = Number(season.totalEpisodes || 0);
+  if (countEl) {
+    countEl.textContent =
+      season.episodeLabel || `${total} ${total === 1 ? 'Episodio' : 'Episodios'}`;
+  }
+  if (headerTitle) headerTitle.textContent = season.title || 'Episodios';
+  if (dlBtn) dlBtn.style.display = total > 0 ? 'flex' : 'none';
+  if (markModeBtn) {
+    markModeBtn.style.display = total > 0 ? 'inline-flex' : 'none';
+    markModeBtn.classList.toggle('active', episodeMarkMode);
+    markModeBtn.textContent = episodeMarkMode ? '✓ Listo' : '✓ Marcar vistos';
+  }
+  if (markHint) {
+    markHint.classList.toggle('hide', !episodeMarkMode || total <= 0);
+  }
+
+  if (season.isUpcoming || total === 0) {
+    rangosContainer.style.display = 'none';
+    epContainer.innerHTML = season.isUpcoming
+      ? '<div style="grid-column: 1/-1; text-align:center; color:#cbd5e1; padding:18px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px;">Estreno programado · Próximamente disponible para ver.</div>'
+      : '<div style="grid-column: 1/-1; text-align:center; color:var(--text-muted); padding:15px;">Aún no se han emitido episodios para este título.</div>';
+    actualizarBotonContinuarDetalleAnime();
+    return;
+  }
+
   if (total > 60) {
     rangosContainer.style.display = 'flex';
     const numRangos = Math.ceil(total / 50);
@@ -1067,7 +1237,7 @@ export function renderDetalleEpisodios(): void {
     btn.type = 'button';
     btn.className = `ep-btn ${isWatched ? 'watched' : ''} ${episodeMarkMode ? 'mark-mode' : ''}`;
     btn.dataset.ep = String(i);
-    btn.innerText = String(i);
+    btn.textContent = String(i);
     if (state.episodeMetaMap?.[i]?.title) {
       btn.title = `Episodio ${i}: ${state.episodeMetaMap[i].title}`;
     }
@@ -1089,6 +1259,8 @@ export function renderDetalleEpisodios(): void {
     const targetSeasonId = season.id;
     const targetSeasonNum = Number(season.seasonNumber || 1);
     void nWin.NyAnimeOffline.getOfflineEpisodesForAnime(targetSeasonId, targetSeasonNum).then((offlineEps: Set<number>) => {
+      const activeNow = state.seasons?.[state.temporadaActualIdx] || state.seasons?.[0];
+      if (!activeNow || String(activeNow.id) !== String(targetSeasonId)) return;
       if (!offlineEps || offlineEps.size === 0) return;
       document.querySelectorAll('#det-episodios .ep-btn').forEach((btnEl) => {
         const epNum = Number((btnEl as HTMLElement).dataset.ep || '0');
